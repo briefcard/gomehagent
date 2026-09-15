@@ -21,6 +21,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'ro.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(_HERE))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in maker
+from _maker_stub import install as _install_maker  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("tce", os.path.join(_HERE, "test_campaign_email.py"))
 tce = importlib.util.module_from_spec(_spec)
@@ -46,6 +48,7 @@ def _artifact_system(run_id: str) -> str:
 
 
 def main() -> int:
+    _install_maker()      # the maker is a model call; this suite has no model
     db.init_db()
     tenants.seed()
     tce._seed_live("baci")

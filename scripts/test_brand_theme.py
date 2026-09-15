@@ -23,7 +23,7 @@ os.environ["SHOPIFY_STORES_JSON"] = json.dumps(
     {"baci": {"domain": "baci.example.myshopify.com", "token": "shpat_test"}})
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import brand_theme, db, email_render, kb, tenants  # noqa: E402
+from app import brand_theme, db, kb, tenants  # noqa: E402
 
 _fail: list[str] = []
 
@@ -184,9 +184,8 @@ def main() -> int:  # noqa: PLR0915
     fb = skill_pack._theme_for("baci")
     ck("campaign emails still render on the fallback (no address)",
        fb["footer"].get("address", "") == "" and fb["name"] == "Baci Milano USA")
-    html_before = email_render.render(fb, brand_theme.PREVIEW_BLOCKS)
-    ck("…and the rendered email carries the loud NOT-SENDABLE placeholder",
-       "NO MAILING ADDRESS ON FILE" in html_before)
+    ck("…and missing_to_send names the address gap",
+       any("footer.address" in g for g in brand_theme.missing_to_send(fb)))
 
     print("\n— approval promotes, and the owner's edits win —")
     ok = brand_theme.approve("baci", {"footer.address":
@@ -206,11 +205,7 @@ def main() -> int:  # noqa: PLR0915
     ck("campaign emails now render the approved theme",
        themed["colors"]["accent"] == "#7A1E3A"
        and themed["footer"]["address"].startswith("999 Owner St"))
-    html_after = email_render.render(themed, brand_theme.PREVIEW_BLOCKS)
-    ck("…sendable: real address in the footer, no placeholder",
-       "999 Owner St" in html_after
-       and "NO MAILING ADDRESS ON FILE" not in html_after)
-    ck("missing_to_send agrees", email_render.missing_to_send(themed) == [])
+    ck("missing_to_send agrees", brand_theme.missing_to_send(themed) == [])
 
     print("\n— re-derive must not touch what the owner approved —")
     kit2 = json.loads(json.dumps(_KIT))
@@ -270,12 +265,8 @@ def main() -> int:  # noqa: PLR0915
        brand_theme.live_theme("eien") == {} and brand_theme.proposed("eien") == {})
     got4 = brand_theme.derive("eien")
     ck("derive succeeds with every source down", got4.get("ok") is True)
-    # Four since 2026-09-11: the brand's own product photographs propose
-    # palette roles (INITIATIVE-email-design.md, Phase 2) and are named with
-    # their fix like the other three when there are none on file.
-    ck("all four sources named with why",
-       set(got4["unavailable"]) == {"canva", "shopify", "site", "pictures"}
-       and "catalogue sync" in got4["unavailable"]["pictures"]
+    ck("all three sources named with why",
+       set(got4["unavailable"]) == {"canva", "shopify", "site"}
        and "no Shopify store connected" in got4["unavailable"]["shopify"]
        and "no domain" in got4["unavailable"]["site"])
     ck("the theme is identity-only — nothing invented, no palette either",
@@ -318,7 +309,7 @@ def main() -> int:  # noqa: PLR0915
        == "Abril Fatface")
     ck("a font already in the default stack is not doubled",
        brand_theme._stack("Georgia", "heading")
-       == email_render._DEFAULT["font"]["heading"])
+       == brand_theme.DEFAULT["font"]["heading"])
     from app import data_tools
     _orig = data_tools._shopify
 

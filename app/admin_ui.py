@@ -4038,77 +4038,6 @@ def _preview_html(body: str) -> str:
     return _BASE_TAG + html_
 
 
-def _theme_preview(theme: dict) -> str:
-    """The sample email through one theme, sandboxed. A swatch table asks the
-    owner to imagine the email; this shows it."""
-    from . import brand_theme, email_render
-    doc = email_render.render(theme, brand_theme.PREVIEW_BLOCKS,
-                              preheader="Theme preview")
-    return (f'<iframe sandbox="{PREVIEW_SANDBOX}" '
-            f'srcdoc="{_esc(_preview_html(doc))}" class="bt-frame"></iframe>')
-
-
-def _palette_rows(proposed: dict, live: dict, sources: dict, findings: list,
-                  live_findings: list, tenant: str) -> str:
-    """The PALETTE OF ROLES on the Brand tab — every role a design may
-    resolve through, as a swatch with where it came from (a source's own
-    name, or `computed: <rule>`), beside the live one and an input to set
-    it. Contrast findings under it, named with their ratio. Then the faces
-    on file and how many of the brand's own pictures fit each kind of slot
-    — the three things a design needs from a brand (INITIATIVE-email-design
-    .md, Phase 2). Inside the approve form: act where you report."""
-    from . import email_design as _ed, email_render as _er
-    pp = dict(proposed.get("palette") or {})
-    lp = dict(live.get("palette") or {})
-    rows = ""
-    for role in _ed.ROLES:
-        pv, lv = pp.get(role, ""), lp.get(role, "")
-        came = sources.get(f"palette.{role}", "")
-        rows += (f"<tr><td><code>{_esc(role)}</code></td>"
-                 f"<td>{'<span class=sw style=background:' + _esc(pv) + '></span>' + _esc(pv) if pv else '<span class=mut>—</span>'}</td>"
-                 f"<td class='mut'>{_esc(came) if pv else ''}</td>"
-                 f"<td>{'<span class=sw style=background:' + _esc(lv) + '></span>' + _esc(lv) if lv else '<span class=mut>—</span>'}</td>"
-                 f"<td><input type='text' class='role' name='palette.{role}' "
-                 f"placeholder='{_esc(pv or lv or '#hex')}'></td></tr>")
-    f1 = "".join(f"<li>{_esc(x)}</li>" for x in findings)
-    f2 = "".join(f"<li>{_esc(x)}</li>" for x in live_findings)
-    found = ""
-    if f1:
-        found += f"<p><b>Contrast, proposed</b> — each pair below the bar:</p><ul>{f1}</ul>"
-    if f2:
-        found += f"<p><b>Contrast, live</b>:</p><ul>{f2}</ul>"
-    if pp and not f1:
-        found += "<p class='mut'>Every ground/ink pair in the proposal reads.</p>"
-    # The faces: the brand's own when a source supplied one; else said, and
-    # the design's classification chooses at render (owner's decision 1).
-    th = proposed or live or {}
-    faces = []
-    for role in ("heading", "body"):
-        stack = str((th.get("font") or {}).get(role) or "")
-        fam = stack.split(",")[0].strip().strip("'\"") if stack else ""
-        dflt = _er._DEFAULT["font"][role].split(",")[0].strip().strip("'\"")
-        faces.append(f"{role}: <b>{_esc(fam)}</b>" if fam and fam != dflt
-                     else f"{role}: <span class='mut'>none on file — the design's classification chooses</span>")
-    keyed = (proposed or live or {}).get("keyed_grounds", True)
-    switch = (f'<p><label><input type="checkbox" name="keyed_grounds" value="on"'
-              f'{" checked" if keyed else ""}> <b>Key each email\'s grounds to its pictures</b>'
-              f'<input type="hidden" name="keyed_grounds_present" value="1"></label><br>'
-              f'<span class="mut">The page, tint, dark and secondary follow the photographs chosen '
-              f'for the email, so the picture and its grounds read as one composition; the accent, '
-              f'the ink and the faces never move. Off: every email sits on the palette above as '
-              f'it is.</span></p>')
-    return f"""<h4 style="margin:14px 0 4px">Palette of roles</h4>
-<p class="mut">A design names a role, never a colour; the brand's colour under
-that name is what ships. Every kit colour is placed by one stated rule; a role
-no source gave is computed by one and says so. Type a #hex to set a role by
-hand — it survives re-derives like every hand-set field.</p>
-<div class="tblwrap"><table class="bt-table"><tr><th>role</th><th>proposed</th>
-<th>came from</th><th>live</th><th>set</th></tr>{rows}</table></div>
-{found}
-{switch}
-<p><b>Faces on file</b> — {' · '.join(faces)}</p>"""
-
-
 def _pictures_card(key: str, tenant: str) -> str:
     """THE BRAND'S OWN PICTURES, in one place — what is on file by the kind
     of slot it fits, every picture with its reading and a select to correct
@@ -4117,19 +4046,18 @@ def _pictures_card(key: str, tenant: str) -> str:
     2026-09-12: the Brand page was "such a mess — hard to understand what's
     what"; pictures were reported under the palette and filled from under a
     heading about words."""
-    from . import email_design as _ed, kb as _kb
+    from . import kb as _kb
     from .web import bg_status as _bg_status
     if not tenant:
         return ""
-    by_kind = _ed.assets_by_kind(tenant)
-    pics = " · ".join(f"{_esc(k)} <b>{n}</b>" for k, n in by_kind.items())
-    none = [k for k, n in by_kind.items() if not n]
-    # Counted as rows, not summed by kind — an unread picture fits three
-    # kinds and would count three times.
-    total = sum(1 for a in _kb.assets(tenant) if (a.kind or "image") == "image")
-    none_line = (('<br><span class="mut">none for ' + _esc(', '.join(none)) + ' — '
-                  + _esc(_ed.assets_for(tenant, none[0])['why'].split(' — ', 1)[-1]) + '</span>')
-                 if none else '')
+    rows = [a for a in _kb.assets(tenant) if (a.kind or "image") == "image"]
+    total = len(rows)
+    kinds: dict = {}
+    for a in rows:
+        k = (a.reading or {}).get("kind") or "unread"
+        kinds[k] = kinds.get(k, 0) + 1
+    pics = " · ".join(f"{_esc(k)} <b>{n}</b>" for k, n in sorted(kinds.items()))
+    none_line = ""
     sync_state = _bg_status("sync", tenant)
     harvest_state = _bg_status("harvest", tenant)
 
@@ -4155,9 +4083,9 @@ def _pictures_card(key: str, tenant: str) -> str:
   <div class="head"><h2>Pictures — what they have</h2>
     <span class="mut">{total} on file</span></div>
   <p class="mut">The brand's own photographs and packshots — the only pictures
-  an email, an ad or an article may carry. A recreation casts from these by
-  looking at them; the palette of an email follows the ones it casts.</p>
-  <p><b>Pictures by the kind of slot they fit</b> — {pics or '<span class="mut">none on file</span>'}{none_line}</p>
+  an email, an ad or an article may carry. The maker casts from these by
+  looking at them, cuts them to fit, and leads with their tones.</p>
+  <p><b>By kind</b> — {pics or '<span class="mut">none on file</span>'}{none_line}</p>
   {_pictures_read(tenant)}
   <h4 style="margin:14px 0 4px">Where they come from</h4>
   {fill}
@@ -4172,7 +4100,7 @@ def _pictures_read(tenant: str, limit: int = 24) -> str:
     the kind, which outranks every reading; and a control to read the
     unread. Outside the approve form: these are facts about pictures, not
     theme fields, and they post to their own routes."""
-    from . import email_design as _ed, kb as _kb
+    from . import kb as _kb, pictures as _ed
     rows = [a for a in _kb.assets(tenant) if (a.kind or "image") == "image"]
     if not rows:
         return ""
@@ -4634,7 +4562,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
         edited = ", ".join(meta.get("edited") or []) or "none"
         live_body = (f'<p class="mut">Approved {_esc(meta.get("approved_at") or "?")}'
                      f' · {state} · hand-set fields (these survive re-derives): '
-                     f'{_esc(edited)}</p>' + _theme_preview(live))
+                     f'{_esc(edited)}</p>')
     else:
         live_body = ('<div class="note">No approved theme — campaign emails '
                      'render on the default look with no mailing address, and '
@@ -4673,8 +4601,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
               f"</tr>{src_rows}</table></div>"
             + (f'<p><b>Sources not consulted</b> — each names its fix:</p>'
                f"<ul>{unavailable}</ul>" if unavailable else "")
-            + (f"<ul>{partial}</ul>" if partial else "")
-            + _theme_preview(prop["theme"]))
+            + (f"<ul>{partial}</ul>" if partial else ""))
     else:
         prop_body = ('<p class="mut">Nothing derived yet — the button below '
                      'reads the Canva brand kit, then Shopify (brand settings, '
@@ -4692,10 +4619,6 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
                    f"<small class='mut'>{_esc(hint)}</small></td>"
                    f"<td><input type='text' name='{path}' "
                    f"value='{_esc(node)}'></td></tr>")
-    palette_html = _palette_rows(prop.get("theme") or {}, live or {},
-                                 prop.get("sources") or (live.get("_meta") or {}).get("sources") or {},
-                                 st.get("findings") or [], st.get("live_findings") or [],
-                                 tenant)
     keyfield = f'<input type="hidden" name="key" value="{_esc(key)}">'
     # A control that can only fail teaches distrust of every control (the
     # Sources block's own rule about a store-sync button with no store). With
@@ -4713,7 +4636,6 @@ and hand-set fields survive future re-derives.</p>
 <form method="post" action="/admin/brand_theme/approve" class="bt-form">
   {keyfield}<input type="hidden" name="tenant" value="{_esc(tenant)}">
   <div class="tblwrap"><table class="bt-table">{inputs}</table></div>
-  {palette_html}
   <p><button>Approve — this look ships</button></p>
 </form>"""
 
@@ -6777,56 +6699,6 @@ def _image_model_card(key: str, tenant: str) -> str:
     email or article to approved photographs.</span>
   </form>
 </div>"""
-
-
-def _design_preview(tenant: str, design: dict, shot: dict | None, entity_key: str = "") -> str:
-    """THE REFERENCE BESIDE THE RECREATION: the design executed with this
-    brand's palette, faces and its own pictures and products, in a sandboxed
-    frame next to the screenshot it was read from — so "would this recreate
-    it?" is answered before the structure is approved. A brand with no theme
-    is told what to do first, on the card."""
-    from . import email_design as _ed
-    if not design or not design.get("sections"):
-        return ""
-    html, note = _ed.preview_html(tenant, design, entity_key=entity_key)
-    if not html:
-        return f'<br><span class="when">no preview — {_esc(note)}</span>'
-    last = getattr(_ed.preview_html, "last", {}) or {}
-    # Not "picker": the console-frame suite forbids that name in this file,
-    # where the old per-tab client pickers lived; this is the entity the
-    # preview is about, one form on one card.
-    about = (f'<form method="get" action="/admin/ui" style="margin:4px 0;font-size:.85rem">'
-              f'<input type="hidden" name="tab" value="brand"><input type="hidden" name="tenant" value="{_esc(tenant)}">'
-              f'preview as an email about {entity_select(tenant, entity_key, name="preview_entity")} '
-              f'<button class="sec">Preview</button> <span class="mut">the same chooser and palette a run uses</span></form>')
-    pics = "".join(
-        f'<a href="{_esc(p["url"])}" title="{_esc(p["title"])}"><img src="{_esc(p["url"])}" '
-        f'alt="{_esc(p["title"])}" style="height:44px;width:44px;object-fit:cover;border-radius:4px;'
-        f'border:1px solid var(--rule)"></a>' for p in last.get("pictures") or [])
-    why = "; ".join(f"{p['kind']}: {p['title'] or 'untitled'} — {p['why']}" for p in last.get("pictures") or [])
-    how = last.get("keyed") or {}
-    pal = last.get("palette") or {}
-    keyed = "; ".join(f"{r} <span class=sw style=background:{_esc(pal.get(r, ''))}></span>{_esc(pal.get(r, ''))} — {_esc(v)}"
-                      for r, v in how.items() if r in ("page", "surface", "tint", "dark", "secondary", "ink", "accent"))
-    kept = how.get("_", "")
-    missed = "; ".join(last.get("missed") or [])
-    steps = "".join(f"<li>{_esc(w)}</li>" for w in last.get("why") or [])
-    chosen = (about
-              + f'<div class="mut" style="margin:6px 0;font-size:.85rem"><b>The pictures it chose</b> — {pics}'
-              + (f'<ol style="margin:4px 0 4px 18px">{steps}</ol>' if steps else " none")
-              + (f'<b>The palette they lead, the brand supporting</b> — {keyed}' if keyed else "")
-              + (f'<br>{_esc(kept)}' if kept else "")
-              + (f'<br>not filled: {_esc(missed)}' if missed else "") + "</div>")
-    return (f'<details open><summary class="mut">preview — this design with {_esc(tenant)}&#39;s '
-            f'palette, faces and pictures, as a run would build it'
-            + (f' ({_esc(note)})' if note else "") + '</summary>'
-            + chosen
-            + f'<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin:6px 0">'
-            + (f'<a href="{_esc(shot["image"])}"><img src="{_esc(shot["image"])}" alt="the reference" '
-               f'style="width:200px;border:1px solid var(--rule)"></a>' if shot and shot.get("image") else "")
-            + f'<iframe sandbox="{PREVIEW_SANDBOX}" srcdoc="{_esc(_preview_html(html))}" '
-              f'style="width:100%;max-width:420px;height:640px;border:1px solid var(--rule);'
-              f'border-radius:6px;background:#fff"></iframe></div></details>')
 
 
 def _es_standing(tenant: str) -> str:

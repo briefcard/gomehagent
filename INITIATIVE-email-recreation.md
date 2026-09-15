@@ -11,8 +11,9 @@
 > §2 is a list of facts with `file:line`, each checkable in a minute. If they
 > still hold, the plan holds.
 >
-> **Phases 1 and 3 are built, Phase 2 in part (2026-09-12, same day; hashes
-> in the memory note) — the chain in `app/recreate.py`, the door in
+> **2026-09-14/15: the token chain is DELETED and the maker is one mind (see
+> WALKTHROUGH §5, last entry). Phases 1, 3 and 5 are done, Phase 2 in part
+> (2026-09-12; hashes — the chain in `app/recreate.py`, the door in
 > `app/shots.py`, the campaign seam in `skill_pack._build`, the whole flow in
 > one room (Systems → Campaign email → Designs: add a link → look → choose).
 > Not proven live: the model calls are stubbed on this machine. Phase 2's

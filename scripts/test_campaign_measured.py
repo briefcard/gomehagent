@@ -19,6 +19,8 @@ import tempfile
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'cm.db')}"
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in maker
+from _maker_stub import install as _install_maker  # noqa: E402
 
 from app import (brand_theme, db, esp, kb, skill,  # noqa: E402
                  skill_pack, systems, tenants)
@@ -82,6 +84,7 @@ def _diff(run_id):
 
 
 def main() -> int:
+    _install_maker()      # the maker is a model call; this suite has no model
     t = _seed()
 
     print("— the declared measure is one that can actually be taken —")

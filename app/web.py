@@ -1094,16 +1094,6 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     edits = {path: str(form.get(path, ""))
              for path, _label, _hint in ui._THEME_EDIT_FIELDS
              if str(form.get(path, "")).strip()}
-    # The palette of roles, one input per role on the same form — the roles
-    # come from the vocabulary, never a list kept here.
-    from .email_design import ROLES as _roles
-    edits.update({f"palette.{r}": str(form.get(f"palette.{r}", ""))
-                  for r in _roles if str(form.get(f"palette.{r}", "")).strip()})
-    # The keying switch: a checkbox posts "on" when ticked and nothing when
-    # not, so its hidden twin says which it was — a form that names the
-    # switch at all sets it either way.
-    if form.get("keyed_grounds_present"):
-        edits["keyed_grounds"] = "on" if form.get("keyed_grounds") else "off"
     got = brand_theme.approve(tenant, edits)
     arg = (("ok", "approved" + (" — " + got["note"] if got.get("note") else ""))
            if got.get("ok") else ("err", got.get("error", "approve failed")))
@@ -1123,12 +1113,12 @@ async def pictures_read(request: Request, key: str = Depends(admin_key)):
 
     from fastapi.responses import RedirectResponse
 
-    from . import email_design
+    from . import pictures
     if key != config.APPROVAL_SECRET:
         return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
-    got = email_design.read_pictures(tenant)
+    got = pictures.read_pictures(tenant)
     back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&ok={quote(got.get('said', 'read'))}"
     if form.get("key"):
         back += f"&key={quote(str(form['key']))}"
@@ -1142,12 +1132,12 @@ async def picture_kind(request: Request, key: str = Depends(admin_key)):
 
     from fastapi.responses import RedirectResponse
 
-    from . import email_design
+    from . import pictures
     if key != config.APPROVAL_SECRET:
         return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
-    said = email_design.set_picture_kind(str(form.get("asset_id", "")), str(form.get("kind", "")))
+    said = pictures.set_picture_kind(str(form.get("asset_id", "")), str(form.get("kind", "")))
     arg = ("ok" if "set by hand" in said else "err", said)
     back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&{arg[0]}={quote(arg[1])}"
     if form.get("key"):
@@ -1444,41 +1434,6 @@ def admin_answer_engines(key: str = Depends(admin_key), tenant: str = "",
     return _plan_back(tenant, key, sub="progress", msg=(
         "checking whether the answer engines can read the site — it asks the "
         "site once per crawler, so give it a moment and refresh"))
-
-
-@app.get("/admin/email_swipe")
-def admin_email_swipe(key: str = Depends(admin_key), tenant: str = "",
-                      url: str = "", asset: str = "", ui: int = 1):
-    """Swipe one gallery email onto the board and read its structure.
-
-    Two steps in one press: the screenshot is filed as REFERENCE (never a
-    picture for anything), then read once, in words, into a PROPOSED structure
-    that waits on the Brand tab for approval. With `asset` instead of `url`
-    an already-swiped screenshot is read AGAIN — the way a structure filed
-    before the renderer learned to arrange gets its look without a second
-    copy of the picture.
-    """
-    from urllib.parse import quote
-
-    from fastapi.responses import RedirectResponse
-    if key != config.APPROVAL_SECRET:
-        return {"error": "unauthorized"}
-    from . import email_structures as _es
-    got = {"ok": True, "asset_id": asset} if asset else _es.add_swipe(url)
-    if got.get("ok"):
-        read = _es.read_swipe(got["asset_id"])
-        msg = (f"swiped and read — {read.get('name', '')} is waiting for your "
-               f"approval" if read.get("ok") else
-               f"swiped, but the reading did not land — {read.get('why', '')}")
-        err = "" if read.get("ok") else msg
-        msg = msg if read.get("ok") else ""
-    else:
-        msg, err = "", got.get("why", "")
-    if not ui:
-        return {"swipe": got, "ok": bool(msg), "why": err}
-    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&key={quote(key)}"
-    back += f"&ok={quote(msg)}" if msg else f"&err={quote(err)}"
-    return RedirectResponse(back, 303)
 
 
 @app.get("/admin/email_structure")

@@ -22,6 +22,8 @@ import tempfile
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'bc.db')}"
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in maker
+from _maker_stub import install as _install_maker  # noqa: E402
 
 from app import bundle as pkg, db, kb, resolve, tenants  # noqa: E402
 
@@ -43,6 +45,7 @@ def ck(label, cond, detail=""):
 
 
 def main() -> int:
+    _install_maker()      # the maker is a model call; this suite has no model
     db.init_db()
     tenants.seed()
     t = "baci"

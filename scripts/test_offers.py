@@ -19,6 +19,8 @@ import tempfile
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'of.db')}"
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in maker
+from _maker_stub import install as _install_maker  # noqa: E402
 
 from app import (brand_theme, db, esp, kb, ledger, offers,  # noqa: E402
                  skill, skill_pack, systems, tenants)
@@ -39,6 +41,7 @@ tenants.capabilities = lambda k: dict(_ALL) if tenants.get(k) else \
 
 
 def main() -> int:
+    _install_maker()      # the maker is a model call; this suite has no model
     db.init_db()
     tenants.seed()
     t = "baci"

@@ -124,3 +124,41 @@ def _shoot(html: str, which: str, *, width: int, scale: int, full: bool, t0: flo
             browser.close()
     return {"ok": bool(png), "png": png, "door": which,
             "ms": int((time.monotonic() - t0) * 1000), "why": "" if png else "an empty picture"}
+
+
+def shoot_fragment(head: str, fragment: str, *, width: int = 600, scale: int = SCALE) -> dict:
+    """One baked block — a complete <table> — photographed alone, with the
+    email's own <head> (its fonts), at 2×. `{ok, png, door, why}`."""
+    which, why = door()
+    if not which:
+        return {"ok": False, "png": b"", "door": "", "why": why}
+    doc = (f"<!DOCTYPE html><html><head><meta charset='utf-8'>{head}</head>"
+           f"<body style='margin:0;padding:0;width:{width}px'>{fragment}</body></html>")
+    t0 = time.monotonic()
+    got = _SEM.acquire(timeout=TIMEOUT_MS / 1000)
+    if not got:
+        return {"ok": False, "png": b"", "door": which, "why": "every browser slot is busy — try again"}
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = (p.chromium.connect_over_cdp(config.SHOTS_WS, timeout=TIMEOUT_MS)
+                       if which == "browserless" else p.chromium.launch())
+            try:
+                page = browser.new_page(viewport={"width": width, "height": 400}, device_scale_factor=scale)
+                page.set_default_timeout(TIMEOUT_MS)
+                page.set_content(doc, wait_until="networkidle")
+                try:
+                    page.evaluate("document.fonts && document.fonts.ready")
+                except Exception:                                # noqa: BLE001
+                    pass
+                el = page.locator("body > table").first
+                png = el.screenshot(type="png") if el.count() else page.screenshot(full_page=True, type="png")
+            finally:
+                browser.close()
+        return {"ok": bool(png), "png": png, "door": which, "why": "" if png else "an empty picture",
+                "ms": int((time.monotonic() - t0) * 1000)}
+    except Exception as e:                                        # noqa: BLE001
+        return {"ok": False, "png": b"", "door": which,
+                "why": f"the browser did not answer: {type(e).__name__}: {str(e)[:160]}"}
+    finally:
+        _SEM.release()

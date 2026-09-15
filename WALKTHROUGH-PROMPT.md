@@ -1798,6 +1798,71 @@ for baci** on the Ayoh structure and put the card beside
 `docs/recreations/ayoh-baci-portofino.html`. Phases 2–6 of the plan are
 not started; the old preview stays on the card until Phase 5.
 
+### The token chain is deleted; the maker is one mind — 2026-09-14/15 (hash in the memory note)
+
+**The owner's words.** On the Ironside campaign that came out in the old
+renderer: *"we've spent all this time and money and effort to create a
+garbage feature that doesn't make better emails than I could make in 2
+hours … You keep looking for some shortcut loop … you don't think about
+the limitations of the cloud environment and instead deploy patch fixes."*
+Then: *"You spend all your time making guards and error catchers which
+only make the app bulkier … we are doing a worse job than isolated Claude
+sessions."* Then: *"I want it ALL cleaned up, I want email outputs to be as
+effective and powerful as the samples … leveraging images from the brand
+that are adjusted to fit the email as needed and generated the way you
+would if I were to do it inside of this chat."*
+
+**What was true.** 101,708 lines of app, 58,836 of tests, 1,002 guards;
+fourteen ships in three days for one feature — none of them run against a
+real key. The token chain (`email_design`, `render_design`, `LOOK`, the
+house design) still existed as a FALLBACK, and a campaign fell into it four
+silent ways. The caster's contact sheet was 1,570 px wide — 2 px over the
+1,568 edge the API refuses at — so every live cast would have failed.
+
+**The cut.** DELETED: `app/email_design.py` (1,700 lines), `app/email_render.py`
+(1,557), `scripts/gen_email_design_doc.py`, `INITIATIVE-email-design.md`,
+nine suites (the seven token suites, `test_email_render`, and the old
+library suite `test_a_structure_is_how_not_what`), 91 guards, the twelve-role
+palette and its provenance in `brand_theme`, the Brand tab's theme preview
+and palette rows, the design preview, the swipe route, `file_from_output`
+(approved sends no longer file "shapes"), `backfill_designs`,
+`file_structure`/`find_by_sequence`, `llm.image_fits/image_seen_as`. KEPT and
+moved: the picture readings, fetches, strips and contact sheets →
+`app/pictures.py`; the theme's shape → `brand_theme.DEFAULT/filled/
+missing_to_send`; colour maths → `palette.py` (luminance, contrast, a
+picture's `signature`).
+
+**The maker, as the hand-made one was made.** `recreate.compose` is ONE
+call: subject, preheader and the HTML written together from the brief, the
+brand, the cast pictures **cut to 1:1 / 4:5 / 3:2 / 16:9** (`fit`: Shopify by
+URL, any other host by Pillow, hosted by `media`) with their measured tones,
+the send's message, and the hand-made Ayoh → Baci email as the standard of
+craft. Display type and devices go in `<!--bake-->…<!--/bake-->` blocks that
+are photographed (`shots.shoot_fragment`) and replaced by pictures whose alt
+carries the words — how the samples survive Gmail. With no reference in the
+rotation the maker designs the email itself and is judged alone
+(`_JUDGE_ALONE`); a social-proof block with nothing on file becomes a useful
+tip (in the prompt, not a function). `check` reads baked words off the alt;
+a reworded approved claim blocks.
+
+**The seam is one path.** `skill_pack._build`: `recreate.run(message=…)` is
+the only way an email is made; a maker that fails FAILS THE RUN with its
+reason (`RuntimeError` → the run's `failed` status). No house, no "built the
+old way". The drafter still writes the MESSAGE (subject, angle, blocks,
+claims) — that is what the shared context is for — and the composer carries
+it. `scripts/recreate_once.py --tenant --store --url` = the whole chain
+against a public store with a real key, writing `email.html/png`,
+`brief.json`, `findings.json` — the looking loop.
+
+**Rules it adds, the owner's.** *No degraded path exists to fall into.*
+*Guards on invariants only; guard count is not progress.* *One mind writes
+the artifact; the code inspects; someone looks before it ships.* The other
+creative systems (ads, blog, GBP) inherit this next.
+
+**NOT PROVEN LIVE.** No `ANTHROPIC_API_KEY` in `.env` on this machine yet;
+the owner's move is to add it and run `recreate_once.py` for Baci on the
+Ayoh link — or press *Add this reference* under Designs on the deploy.
+
 ---
 
 ## 6. Next thread — paste this (UX polish, then whatever the owner brings)

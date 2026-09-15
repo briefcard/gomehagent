@@ -2657,7 +2657,7 @@ def _theme_for(tenant: str) -> dict:
     deriver's unreviewed proposal — so a customer sees no look nobody signed
     off. Until a theme is approved this falls back to the old minimal shape:
     branded by name on the default palette, with no address. That absent
-    address is not hidden: `email_render` shows a loud placeholder and
+    address is not hidden: the maker is told the address verbatim and
     `missing_to_send` names it, so the email reads as not-yet-sendable rather
     than quietly shipping without a CAN-SPAM footer.
     """
@@ -2992,12 +2992,6 @@ def _assemble_blocks(copy: dict, ents: list, hero: dict | None,
             out.append({"type": "signature", "text": b.get("text", ""),
                         "name": who,
                         "role": str((signatory or {}).get("role") or "")})
-        elif kind == "image":
-            # A PICTURE SLOT, placement only — like the hero, the model may
-            # say WHERE a picture goes and never WHICH: any address it wrote
-            # is discarded here and the filler places the brand's own
-            # picture (or drops the placeholder and says so).
-            out.append({"type": "image", "alt": str(b.get("alt") or "")[:160]})
         elif kind in ("heading", "text", "list", "banner", "divider", "ps"):
             out.append(b)
         else:
@@ -3077,7 +3071,7 @@ WITHHOLD_FROM_ESP = frozenset({
 
 
 def _run_campaign_email(ctx: Context) -> dict:
-    from . import (creative, email_craft, email_render, esp, fitness,
+    from . import (brand_theme, creative, email_craft, esp, fitness,
                    ledger, links, offers)
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
@@ -3589,7 +3583,7 @@ def _run_campaign_email(ctx: Context) -> dict:
 
     theme = _theme_for(ctx.tenant)
     webview = bool(esp.caps(ctx.tenant).get("webview", True))
-    missing = email_render.missing_to_send(theme)
+    missing = brand_theme.missing_to_send(theme)
     if missing:
         ctx.note("not yet sendable: " + "; ".join(missing)
                  + " (comes from the brand theme, which needs deriving/review)")
@@ -3641,132 +3635,62 @@ def _run_campaign_email(ctx: Context) -> dict:
         _undouble_blocks(blocks)
         c["preheader"] = _undouble(c.get("preheader", ""))
         c["subject"] = _undouble(c.get("subject", ""))
-        # THE DESIGN OF THE STRUCTURE THIS SEND IS BUILT ON — the one seam
-        # (INITIATIVE-email-design.md, Phase 6). A structure carried block
-        # order and six toggles, and the renderer painted one email around
-        # them: "the same email with slight layout differences" (owner,
-        # 2026-09-11). The structure's whole DESIGN rides here now — frame,
-        # type, grounds as roles, each section's layout and slots, the ask,
-        # the footer — executed with THIS brand's palette, faces and pictures.
-        # A send with no structure is built on the house design, which is
-        # today's email exactly. The colours are the brand's roles, never the
-        # reference's; the pictures the brand's own, filled by slot; the words
-        # the drafter's, gated as before.
-        from . import email_design as _ed
+        # THE MODEL MAKES THE EMAIL — the only path (owner, 2026-09-14: no
+        # degraded path exists to fall into). The design this send drew —
+        # from the rotation, designated, or none at all — is recreated with
+        # the drafter's MESSAGE: the HTML written whole with its copy, the
+        # brand's pictures cast and cut to fit, checked, photographed, judged.
+        # The words that ship are the words checked below. A maker that
+        # fails FAILS THE SEND with its reason; nothing else is built.
+        from . import recreate as _rc
         _structure = craft.get("structure") or {}
-        _design = _structure.get("design") or _ed.house()
-        # THE MODEL MAKES THE EMAIL (INITIATIVE-email-recreation.md, Phase 3;
-        # owner, 2026-09-12: the design chosen at random or designated is
-        # what "the email campaigns I generate" are built in). A design that
-        # was read into a BRIEF is recreated for this send: the drafter's
-        # message — subject, angle, offer, the blocks it wrote, the claims it
-        # cited — poured into the design's copy jobs, the brand's pictures
-        # cast by looking, the HTML written whole, checked, photographed and
-        # judged beside the reference. The words that ship are the words
-        # checked below. A design with no brief (the house, a hand-filed
-        # order) is built the old way, and a recreation that fails falls
-        # back to it AND SAYS SO.
-        if _structure.get("brief") or _structure.get("source_asset_id"):
-            # a reference approved before its brief was read is read now,
-            # inside the run — an approved reference is approved (owner,
-            # 2026-09-12), with no other step between it and the campaign
-            _key = (str(_structure.get("id")), _hash_message(c))
-            _rec = state.setdefault("recreations", {}).get(_key)
-            if _rec is None:
-                from . import recreate as _rc
-                _rec = _rc.run(
-                    str(_structure.get("id")), ctx.tenant, _subject, via="campaign",
-                    recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
-                    seed=str(ctx.run_id or ctx.tenant),
-                    message={"subject": c.get("subject", ""), "preheader": c.get("preheader", ""),
-                             "angle": chosen_angle or goal, "offer": str(ctx.bundle.get("offer") or ""),
-                             "text": _blocks_text(blocks),
-                             "claims": [offered[cid]["claim"] for cid in (c.get("claim_ids") or []) if cid in offered]})
-                state["recreations"][_key] = _rec
-            if _rec.get("ok") and _rec.get("html"):
-                ctx.note(f"built in the design {_structure.get('name', '')!r}: {_rec.get('status')} — "
-                         + str(_rec.get("note", ""))[:700])
-                for _f in (_rec.get("findings") or []):
-                    if _f.get("severity") == "blocks":
-                        ctx.note(f"design finding (blocks): {_f.get('where', '')} — {_f.get('what', '')}")
-                state["media"] = list(_rec.get("media_ids") or [])
-                state["recreation"] = {"id": _rec.get("id"), "status": _rec.get("status"),
-                                       "blocking": int(_rec.get("blocking") or 0),
-                                       "findings": list(_rec.get("findings") or [])[:12]}
-                state.update(design=_design, structure_id=str(_structure.get("id") or ""))
-                native = esp.personalize(ctx.tenant, _rec["html"])
-                state.update(
-                    copy=c, blocks=blocks,
-                    cited=list(dict.fromkeys(
-                        [cid for cid in (c.get("claim_ids") or []) if cid in offered]
-                        + extra_cited)),
-                    html=native["html"] if native.get("ok") else _rec["html"],
-                    native_ok=bool(native.get("ok")),
-                    native_why=str(native.get("error") or native.get("why") or ""))
-                return (f"{c.get('subject', '')}\n{c.get('preheader', '')}\n" + str(_rec.get("text") or ""))
-            ctx.note("the design could not be recreated for this send — "
-                     + str(_rec.get("note") or _rec.get("why") or "no reason given")[:300]
-                     + " — built the old way instead")
-        # THE PICTURES CHOSEN FOR THIS SEND, THEN THE PALETTE FROM THEM
-        # (owner, 2026-09-12): the campaign's entities scope the choice, the
-        # design's kinds filter it, what this list saw lately ranks below
-        # what it has not, the run's id breaks ties — so the same base
-        # layout on the same entity leads with a different photograph next
-        # time and its palette follows. The same two functions the card's
-        # preview calls, so the preview is the email.
-        blocks, _filled = _ed.fill(
-            ctx.tenant, _design, blocks, note=ctx.note,
-            entities=[k for k in ([commitment.get("key")] + list(commitment.get("also") or [])
-                                  + [e.get("key", "") for e in ents]) if k],
-            recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
-            seed=str(ctx.run_id or ctx.tenant), hero_basis=str(hero_got.get("basis") or ""))
-        _keyed_theme, _how = _ed.palette_for(theme, _design, _filled)
-        state["media"] = [p_["id"] for p_ in (_filled.get("pictures") or []) if p_.get("id")]
-        html = email_render.render_design(_design, _keyed_theme, blocks,
-                                          preheader=c.get("preheader", ""),
-                                          # Omnisend has no view-in-browser variable —
-                                          # its caps say so, and a header link no
-                                          # variable can fill ships as literal text.
-                                          webview=webview)
-        for _w in _filled.get("why") or []:
-            ctx.note("pictures — " + _w)
-        for _n in _filled.get("notes") or []:
-            if "gave way" in _n or "mark" in _n:
-                ctx.note("pictures — " + _n)
-        if _how and "_" not in _how:
-            _kp = email_render._theme(_keyed_theme)["palette"]
-            ctx.note("palette led by the pictures, the brand supporting: " + "; ".join(
-                f"{r} {_kp.get(r, '')} — {v}" for r, v in _how.items()
-                if r in ("page", "surface", "tint", "dark", "secondary", "ink", "accent")))
-        elif _how.get("_"):
-            ctx.note("palette: " + _how["_"])
-        if _structure:
-            _pal = email_render._theme(_keyed_theme)["palette"]
-            _faces = email_render._faces(email_render._theme(theme), _design.get("type") or {})[0]
-            _own = {r for r in ("heading", "body")
-                    if str(theme.get("font", {}).get(r) or "") and
-                    str(theme["font"][r]) != email_render._DEFAULT["font"][r]}
-            ctx.note("recreated from " + str(_structure.get("name", "")) + ": "
-                     + _ed.summary(_design)
-                     + "; grounds → " + ", ".join(f"{r} {_pal[r]}" for r in ("page", "surface", "dark", "tint", "accent"))
-                     + "; faces: " + ", ".join(f"{r} {'the brand\'s own' if r in _own else 'chosen by the design\'s class'}"
-                                               for r in ("heading", "body"))
-                     + f"; pictures filled {_filled['filled']}"
-                     + (f", not filled {len(_filled['missed'])}" if _filled["missed"] else ""))
-        state.update(design=_design, structure_id=str(_structure.get("id") or ""))
-        native = esp.personalize(ctx.tenant, html)
+        _key = (str(_structure.get("id") or ""), _hash_message(c))
+        _rec = state.setdefault("recreations", {}).get(_key)
+        if _rec is None:
+            _rec = _rc.run(
+                str(_structure.get("id") or ""), ctx.tenant, _subject, via="campaign",
+                recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
+                seed=str(ctx.run_id or ctx.tenant),
+                # a picture DRAWN for this send (every system draws) is offered
+                # to the cast beside the brand's own; approved with the email
+                extra_pictures=([{"id": hero_got.get("asset_id"), "url": (hero or {}).get("url", ""),
+                                  "title": "drawn for this send", "kind": "lifestyle"}]
+                                if hero_got.get("basis") == "generated" and hero_got.get("asset_id") and (hero or {}).get("url") else []),
+                message={"subject": c.get("subject", ""), "preheader": c.get("preheader", ""),
+                         "angle": chosen_angle or goal, "offer": str(ctx.bundle.get("offer") or ""),
+                         "text": _blocks_text(blocks),
+                         "products": [{"name": e.get("name"), "price": e.get("price", ""), "url": e.get("url", "")}
+                                      for e in ents[:8] if e.get("name")],
+                         "claims": [offered[cid]["claim"] for cid in (c.get("claim_ids") or []) if cid in offered]})
+            state["recreations"][_key] = _rec
+        if not (_rec.get("ok") and _rec.get("html")):
+            raise RuntimeError("the email could not be made — "
+                               + str(_rec.get("note") or _rec.get("why") or "no reason given")[:500])
+        ctx.note(("built in the design " + repr(_structure.get("name", "")) if _structure else
+                  "designed by the maker (no reference in the rotation)")
+                 + f": {_rec.get('status')} — " + str(_rec.get("note", ""))[:700])
+        for _f in (_rec.get("findings") or []):
+            if _f.get("severity") == "blocks":
+                ctx.note(f"finding (blocks): {_f.get('where', '')} — {_f.get('what', '')}")
+        state["media"] = list(_rec.get("media_ids") or [])
+        state["recreation"] = {"id": _rec.get("id"), "status": _rec.get("status"),
+                               "blocking": int(_rec.get("blocking") or 0),
+                               "findings": list(_rec.get("findings") or [])[:12]}
+        state.update(structure_id=str(_structure.get("id") or ""))
+        if _rec.get("preheader") and not c.get("preheader"):
+            c["preheader"] = _rec["preheader"]
+        native = esp.personalize(ctx.tenant, _rec["html"])
         state.update(
             copy=c, blocks=blocks,
             cited=list(dict.fromkeys(
                 [cid for cid in (c.get("claim_ids") or []) if cid in offered]
                 + extra_cited)),
-            html=native["html"] if native.get("ok") else html,
+            html=native["html"] if native.get("ok") else _rec["html"],
             native_ok=bool(native.get("ok")),
             native_why=str(native.get("error") or native.get("why") or ""))
         # Subject and preheader are read by a human in the inbox before
         # anything else, so they are checked with the body, always.
-        return (f"{c.get('subject', '')}\n{c.get('preheader', '')}\n"
-                f"{c.get('headline', '')}\n" + _blocks_text(blocks))
+        return (f"{c.get('subject', '')}\n{c.get('preheader', '')}\n" + str(_rec.get("text") or ""))
 
     to_check = _build(copy)
 
@@ -3812,37 +3736,6 @@ def _run_campaign_email(ctx: Context) -> dict:
     ctx.note("layout: " + ", ".join(b.get("type", "?")
                                     for b in state["blocks"]))
 
-    # AN EMAIL WITH NO PICTURE IN IT SAYS SO. One shipped carrying nothing but
-    # the logo (owner, 2026-08-22) and the run did not remark on it, because
-    # each individual decision — this format has no hero, this product has no
-    # photo — was reported separately and nobody adds them up. The reader sees
-    # the total, so the run reports the total, and names which of the two
-    # reasons it was.
-    if not any(b.get("type") == "hero" or
-               (b.get("type") == "products"
-                and any(i.get("image") for i in (b.get("items") or [])))
-               for b in state["blocks"]):
-        if hero and hero.get("url"):
-            ctx.note("this email carries NO image — an approved photograph "
-                     "was available and the layout did not place it")
-        else:
-            # COUNT IT, do not advise. "Run the catalogue sync" was the note
-            # for three imageless sends running and did not settle whether the
-            # sync was the problem. The number does: 0 of 14 is a sync that
-            # has not run, 11 of 14 is a layout that did not place what it had.
-            _all = _kb.entities(ctx.tenant, available_only=False)
-            _with = sum(1 for e in _all
-                        if (e.attributes or {}).get("image"))
-            ctx.note(
-                f"this email carries NO image at all, only the logo — "
-                f"{_with} of {len(_all)} product(s) have a photograph on file"
-                + (" — photos exist, so this is the layout, not the data"
-                   if _with else
-                   " — no product photos are on file; the store sync runs "
-                   "before every send and found none, so they need adding "
-                   "to the store itself (or the photo library)")
-                + (" (and no approved library photograph either)"
-                   if not hero_got.get("image") else ""))
     if not state["native_ok"]:
         # The failure is REPORTED, not assumed. This said "ESP not connected"
         # for every cause, including `personalize`'s unknown-token refusal —

@@ -61,7 +61,9 @@ def main() -> int:
     # would only prove the sites are consistent with each other.
     frames = [f.replace("{PREVIEW_SANDBOX}", ui.PREVIEW_SANDBOX)
               for f in re.findall(r'<iframe sandbox="([^"]*)"', src)]
-    ck("there are preview iframes to check", len(frames) >= 4, str(len(frames)))
+    # Three since 2026-09-14: the Brand tab's theme previews went with the
+    # token renderer; the email workroom's and the recreation's remain.
+    ck("there are preview iframes to check", len(frames) >= 3, str(len(frames)))
     ck("…and every one of them uses the shared constant",
        all(f == ui.PREVIEW_SANDBOX for f in frames), str(set(frames)),)
     ck("none is left unable to open a window",

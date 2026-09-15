@@ -52,8 +52,7 @@ UI = ("app/admin_ui.py", "app/portal_ui.py", "app/web.py")
 #: email_harvest). Hand-verified is not suite-verified: that is exactly why
 #: they are listed here rather than quietly passing.
 UNPRESSED = {
-    "/admin/asset_add",
-    "/admin/assets_decide",
+
     "/admin/brand_theme/approve",
     "/admin/brand_theme/derive",
     "/admin/campaign_meta_save",
@@ -62,7 +61,7 @@ UNPRESSED = {
     "/admin/esp_push",
     "/admin/merge_situation",
     "/admin/person_access",
-    "/admin/plan_cadence",
+
     "/admin/segments_build",
     "/admin/system_note",
 }

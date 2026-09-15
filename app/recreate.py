@@ -83,6 +83,17 @@ def _grams(text: str, n: int = 5) -> set:
 
 BRIEF_KEYS = ("concept", "sections", "visual_system", "devices", "reference_text", "reference_hexes")
 
+#: With no reference in the rotation the maker designs the email itself; the
+#: caster still needs slots to cast for — a hero and a second picture.
+DESIGNLESS = {
+    "concept": "", "designless": True,
+    "sections": [{"n": 1, "what": "the opening picture", "does": "shows the subject at its best",
+                  "asset": {"kind": "photograph", "shows": "the subject of this email at its best — in use, in a scene, or the thing itself"}, "copy": []},
+                 {"n": 2, "what": "a second picture", "does": "shows another side of it",
+                  "asset": {"kind": "photograph", "shows": "another angle — in use, at the table, in a room, a detail"}, "copy": []}],
+    "visual_system": {}, "devices": [], "reference_text": [], "reference_hexes": [],
+}
+
 _BRIEF_PROMPT = """You are a senior email designer briefing a colleague who will RECREATE this
 email's design for a different brand, with that brand's own photographs, products and words.
 You have the whole email as one small picture first, then in legible strips top to bottom.
@@ -120,7 +131,7 @@ Return the JSON only."""
 def brief(asset_id: str, *, tenant: str = "") -> dict:
     """The swipe picture at `asset_id` read into a brief and stored on the
     structure it was read into. `{ok, brief, structure_id, why, calls}`."""
-    from . import email_design as ed
+    from . import pictures as ed
     with db.SessionLocal() as s:
         a = s.get(db.KbAsset, asset_id)
         url = str(getattr(a, "url", "") or "") if a else ""
@@ -172,16 +183,6 @@ def brief_problem(got) -> str:
     return ""
 
 
-def copy_jobs(brief_: dict) -> list[dict]:
-    """Every copy job in the brief, flat, in order, each with its section."""
-    out = []
-    for sec in brief_.get("sections") or []:
-        for job in sec.get("copy") or []:
-            if isinstance(job, dict) and job.get("id"):
-                out.append({**job, "section": sec.get("n")})
-    return out
-
-
 # ---------------------------------------------------------------------------
 # 2. THE KIT — the brand's material, gathered once
 # ---------------------------------------------------------------------------
@@ -189,9 +190,9 @@ def copy_jobs(brief_: dict) -> list[dict]:
 def kit(tenant: str) -> dict:
     """Everything the brand has that an email may be made of. Every item is
     already on file and already approved — this gathers, it invents nothing."""
-    from . import brand_theme, email_design as ed, email_render as er, esp, kb
+    from . import brand_theme, esp, kb, pictures as ed
     b = kb.brand(tenant)
-    theme = er._theme(brand_theme.live_theme(tenant) or {})
+    theme = brand_theme.filled(brand_theme.live_theme(tenant) or {})
     voice = (getattr(b, "voice", None) or {}) if b else {}
     ents = []
     for e in kb.entities(tenant)[:60]:
@@ -251,7 +252,7 @@ def _sheet(cells: list[bytes]) -> bytes:
     reviewer's tier so nothing is downscaled."""
     import io
     from PIL import Image, ImageDraw, ImageFont
-    cols, cell, pad = 6, 250, 10
+    cols, cell, pad = 6, 246, 10          # 6 × 256 + 10 = 1546 px, under the 1568 edge
     rows = max(1, (len(cells) + cols - 1) // cols)
     W, H = cols * (cell + pad) + pad, rows * (cell + pad) + pad
     sheet = Image.new("RGB", (W, H), "#ffffff")
@@ -296,7 +297,7 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
     """`{ok, picks: {section: {asset_id, url, why, ...}}, none: [...], said, calls}`.
     A mark slot takes the brand's logo without a look. A slot nothing fits
     is cut and said with what it needs."""
-    from . import email_design as ed
+    from . import pictures as ed
     slots = [sec for sec in brief_.get("sections") or []
              if str(((sec.get("asset") or {}).get("kind") or "none")).lower() in ("photograph", "illustration")]
     marks = [sec.get("n") for sec in brief_.get("sections") or []
@@ -360,272 +361,293 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
 
 
 # ---------------------------------------------------------------------------
-# 3b. THE REWORK — a section the brand has no material for takes another job
-# ---------------------------------------------------------------------------
-
-_PROOF = re.compile(r"\b(quote|quotes|testimonial|testimonials|review|reviews|social proof|customer says|what people say|rating|ratings|stars)\b", re.I)
-
-
-def rework(brief_: dict, kit_: dict) -> tuple[dict, list[str]]:
-    """The brief with its SOCIAL-PROOF sections reworked when the brand has
-    no proof on file — the same block, the same place, a different job.
-    Owner, 2026-09-12: *"The social proof quote can be reworked into a
-    different kind of content when social proof is missing — potentially
-    educational content in the same block that doesn't pretend to be a
-    review anymore."* A proof section with claims on file is left alone;
-    the copy carries the claims verbatim. Returns the reworked brief and a
-    sentence per section reworked."""
-    has_proof = bool(kit_.get("claims"))
-    if has_proof:
-        return brief_, []
-    out = json.loads(json.dumps(brief_))
-    said: list[str] = []
-    for sec in out.get("sections") or []:
-        text = " ".join([str(sec.get("what") or ""), str(sec.get("does") or "")]
-                        + [str(j.get("job") or "") for j in (sec.get("copy") or []) if isinstance(j, dict)])
-        if not _PROOF.search(text):
-            continue
-        n = sec.get("n")
-        sec["reworked_from"] = str(sec.get("what") or "")
-        sec["what"] = ("the same block, set the same way, carrying a short piece of USEFUL content "
-                       "instead of quotes: a tip, a how-to, or a fact the brand can stand behind — "
-                       "no attribution, no quotation marks, nothing presented as what a customer said")
-        sec["does"] = "gives the reader something worth knowing, where the reference gave proof"
-        for j in sec.get("copy") or []:
-            if isinstance(j, dict):
-                j["job"] = ("a short useful note for this block — a tip or a fact from the brand's own "
-                            "material; NOT a quote, not attributed to anyone, no quotation marks"
-                            + (f" (was: {j.get('job')})" if j.get("job") else ""))
-        said.append(f"section {n} reworked: the reference's social proof becomes useful content — "
-                    "no claim or review is on file to quote")
-    return out, said
-
-
-# ---------------------------------------------------------------------------
-# 4. THE COPY — written to the brief's jobs, in the brand's own terms
-# ---------------------------------------------------------------------------
-
-_COPY_PROMPT = """You write email copy for %(name)s. %(positioning)s
-
-The email recreates a reference design. Its concept: %(concept)s
-The subject of this email: %(subject)s
-%(message)s
-Write the copy for each job below. Every job's words must fit its job exactly — a hook that
-turns on how the product is used, steps that name the real pieces, a closer that lands —
-and every product, collection, place or fact named must be one of the brand's own listed
-here. Nothing invented: no prices, figures, quotes or claims that are not listed.
-%(rules)s
-The brand's material:
-%(material)s
-
-The pictures the email will carry (write to what is in them):
-%(pictures)s
-
-Jobs:
-%(jobs)s
-
-Return JSON only: an object keyed by job id. A job whose limit says lines or steps is an
-array of strings; every other job is one string. No markdown, no quotation marks around
-the whole, no emoji."""
-
-
-def copy(tenant: str, brief_: dict, kit_: dict, cast_: dict, *, entity_key: str = "",
-         message: dict | None = None) -> dict:
-    """`{ok, copy: {id: str|list}, findings: [...], calls}` — the words per
-    job, gated by the brand's ban list (`validator._banned`).
-
-    With a campaign `message` — the drafter's subject, angle, offer, the
-    blocks it wrote and the claims it cited — every job is written to CARRY
-    that message: the design is the reference's, the message is this send's
-    (the campaign seam, INITIATIVE-email-recreation.md Phase 3)."""
-    from . import validator
-    jobs = copy_jobs(brief_)
-    if not jobs:
-        return {"ok": True, "copy": {}, "findings": [], "calls": 0}
-    ents = kit_.get("entities") or []
-    subj = next((e for e in ents if e["key"] == entity_key), None) or (ents[0] if ents else None)
-    material = "\n".join(f'- {e["name"]}' + (f' ({e["type"]})' if e.get("type") else "")
-                         + (f' — {e["description"][:160]}' if e.get("description") else "")
-                         + (f' — {e["url"]}' if e.get("url") else "") for e in ents[:30])
-    if kit_.get("claims"):
-        material += "\nApproved claims:\n" + "\n".join(f'- {c["claim"]}' for c in kit_["claims"][:12])
-    pictures = "\n".join(f'section {n}: {p.get("title")}' + (f' (about {p["entity_key"]})' if p.get("entity_key") else "")
-                         for n, p in (cast_.get("picks") or {}).items()) or "none"
-    rules = ""
-    never = (kit_.get("voice") or {}).get("never_say") or []
-    if never:
-        rules += "Never say: " + ", ".join(map(str, never[:20])) + ".\n"
-    if (kit_.get("rules") or {}).get("channel"):
-        rules += "The brand's email instructions: " + kit_["rules"]["channel"][:800] + "\n"
-    job_text = "\n".join(f'- id "{j["id"]}" (section {j.get("section")}): {j.get("job")}'
-                         + (f' — limit: {j["limit"]}' if j.get("limit") else "") for j in jobs)
-    msg = ""
-    if message:
-        lines = [f"- {k}: {v}" for k, v in (("subject line", message.get("subject")),
-                                              ("preheader", message.get("preheader")),
-                                              ("angle", message.get("angle")),
-                                              ("offer", message.get("offer"))) if v]
-        if message.get("text"):
-            lines.append("- what the drafter wrote, to carry (its facts and its ask, not its shape):\n"
-                         + str(message["text"])[:2200])
-        if message.get("claims"):
-            lines.append("- claims it cites — use them VERBATIM or not at all:\n"
-                         + "\n".join(f"  · {c}" for c in message["claims"][:8]))
-        msg = ("THE MESSAGE THIS EMAIL CARRIES — every job below must carry it; add no fact, "
-               "product or claim that is not in it or in the brand's material:\n" + "\n".join(lines) + "\n")
-    prompt = _COPY_PROMPT % {
-        "name": kit_.get("name"), "positioning": kit_.get("positioning") or "", "concept": brief_.get("concept"),
-        "subject": (f'{subj["name"]} — {subj.get("description", "")[:300]}' if subj else "the brand"),
-        "message": msg,
-        "rules": rules, "material": material or "(nothing on file)", "pictures": pictures, "jobs": job_text}
-    reply = _ask("email_copy", prompt, tenant=tenant, max_tokens=2500)
-    got = _json(reply.text) if getattr(reply, "ok", False) else None
-    if not isinstance(got, dict):
-        return {"ok": False, "copy": {}, "findings": [], "calls": 1,
-                "why": "the drafter did not answer — " + str(getattr(reply, "error", "") or "no JSON")}
-    out = {}
-    for j in jobs:
-        v = got.get(j["id"])
-        if isinstance(v, list):
-            v = [str(x).strip() for x in v if str(x).strip()]
-        elif v is not None:
-            v = str(v).strip()
-        if v:
-            out[j["id"]] = v
-    findings = []
-    flat = " ".join(" ".join(v) if isinstance(v, list) else v for v in out.values())
-    for hit in validator._banned(tenant, flat) or []:
-        findings.append({"code": "banned", "severity": "blocks", "where": "copy",
-                         "what": f"the brand's ban list: {hit.get('phrase') or hit}"})
-    missing = [j["id"] for j in jobs if j["id"] not in out]
-    if missing:
-        findings.append({"code": "copy_missing", "severity": "blocks", "where": "copy",
-                         "what": "no words for " + ", ".join(missing)})
-    return {"ok": True, "copy": out, "findings": findings, "calls": 1}
-
-
-# ---------------------------------------------------------------------------
 # 5. THE COMPOSITION — the model writes the email
 # ---------------------------------------------------------------------------
 
-_COMPOSE_RULES = """HTML rules (an email, not a web page):
-- Table layout, every style inline, one centred column %(column)d px wide (a `width="%(column)d"`
-  table with `max-width:%(column)dpx`), a full-width outer table painting the page ground.
-- Only these image URLs may appear, verbatim: %(images)s. Every <img> has alt text and an
-  explicit width. No <svg>, <script>, <form>, <video>, <iframe>, no background-image.
-- Web fonts: a <link> to Google Fonts is allowed; every font-family names a fallback stack
-  (Impact/'Arial Black' for a heavy display face, 'Brush Script MT'/cursive for a script,
-  Helvetica/Arial for the rest). The brand's own body face: %(body_face)s.
-- Every text colour must read on its ground at 4.5:1 or better. Use only hex colours.
-- The footer carries, verbatim: "%(address)s", the token {{UNSUBSCRIBE}}%(webview)s.
-  Use no other {{token}}.
-- The copy below is used VERBATIM — every job's words, unchanged, no words added of your
-  own except the brand's name, product names as listed, and the footer's fixed lines.
-- Under %(size)d KB in total. Return the complete HTML document only, no commentary."""
+ASPECTS = {"1x1": 1.0, "4x5": 1.25, "3x2": 2 / 3, "16x9": 9 / 16}
+FIT_WIDTH = 1200   # 2× the column: sharp on a phone, small enough to load
 
-_COMPOSE_PROMPT = """You are recreating a reference email's DESIGN for the brand %(name)s, with the brand's own
-material. You never saw the reference's pixels; you have the designer's brief of it. Recreate
-the design faithfully — its concept, every section in order, its devices, its type roles,
-its colour logic and rhythm — and fill it with THIS brand: the pictures cast below, the
-copy written below, the brand's mark and faces. A device the brief describes (a social post
-shown as a post, a script closer, a bordered button) is drawn in HTML/CSS as described —
-avatar, handle row, icon row and dots included, using simple shapes and characters, never
-an image you were not given.
 
-THE BRIEF
+def fit(tenant: str, url: str, aspect: str, width: int = FIT_WIDTH) -> str:
+    """The picture at `url` cut to `aspect` (centre crop) and `width` — a
+    Shopify CDN picture by its URL, any other by Pillow, hosted by `media`.
+    The original when it cannot be cut. ADJUSTED TO FIT THE EMAIL (owner,
+    2026-09-14): a designer crops; the model is handed the crops."""
+    ratio = ASPECTS.get(aspect)
+    if not ratio:
+        return url
+    h = int(round(width * ratio))
+    u = str(url or "")
+    if "cdn.shopify.com" in u or "/cdn/shop/" in u:
+        base, sep, query = u.partition("?")
+        stem, dot, ext = base.rpartition(".")
+        if dot and len(ext) <= 5 and "/" not in ext and not re.search(r"_\d+x\d*(_crop_\w+)?$", stem):
+            return f"{stem}_{width}x{h}_crop_center{dot}{ext}{sep}{query}"
+        return u
+    try:
+        import io
+        from PIL import Image
+        from . import media, pictures as ed
+        blob = ed._fetch_bounded(u)
+        if not blob:
+            return u
+        im = Image.open(io.BytesIO(blob)).convert("RGB")
+        W, H = im.size
+        if W / H > width / h:                       # too wide: trim the sides
+            nw = int(H * width / h); x0 = (W - nw) // 2; im = im.crop((x0, 0, x0 + nw, H))
+        else:                                        # too tall: trim top and bottom
+            nh = int(W * h / width); y0 = (H - nh) // 2; im = im.crop((0, y0, W, y0 + nh))
+        im = im.resize((min(width, im.width), min(h, im.height)), Image.LANCZOS)
+        buf = io.BytesIO(); im.save(buf, format="JPEG", quality=85, optimize=True)
+        put = media.put(tenant, buf.getvalue(), mime="image/jpeg", origin="derived")
+        return put["url"] if put.get("ok") else u
+    except Exception:                                            # noqa: BLE001
+        return u
+
+
+def fits(tenant: str, cast_: dict) -> dict:
+    """Every cast picture in every aspect: `{section: {"original": url, "1x1": url, …}}`."""
+    out = {}
+    for n, p in (cast_.get("picks") or {}).items():
+        out[n] = {"original": p["url"], **{a: fit(tenant, p["url"], a) for a in ASPECTS}}
+    return out
+
+
+_EXEMPLAR = "docs/recreations/ayoh-baci-portofino.html"
+
+
+def exemplar() -> str:
+    """THE STANDARD — the email made by hand on 2026-09-12 (Ayoh → Baci), shown
+    to the composer as an example of the craft expected: the scale of the
+    type, a device drawn faithfully, the page in a photograph's own tone,
+    real products and links. Never a design to copy — the design is the
+    brief's."""
+    import os
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        with open(os.path.join(here, _EXEMPLAR), encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+_COMPOSE_PROMPT = """You are the designer AND the writer. Make the finished email: the subject line, the
+preheader, and the complete HTML — recreating the reference's DESIGN (the brief below) for
+%(name)s with %(name)s's own pictures, products and words, carrying the message below.
+Work the way a designer at a good studio works: the design comes from the brief, the craft
+comes from you, the material comes only from the brand.
+
+THE BRIEF — the reference, read by a designer. Recreate its concept, every section in order,
+its devices, its type roles, its colour logic and its rhythm. A device it describes (a social
+post shown as a post with avatar, handle, icon row and dots; a script closer; a bordered
+button; a numbered recipe) is DRAWN — in HTML/CSS, or inside a baked block (below) — never
+approximated by a plain paragraph.
 %(brief)s
 
 THE BRAND
-name: %(name)s
-mark: %(logo)s (use it where the brief has the brand's mark)
-handle: %(handle)s
-palette measured from the cast photographs (use these as the page/card grounds and inks the
-way the brief's colour logic says — the page may be a photograph's bold tone if the reference's is):
-%(palette)s
-brand accent: %(accent)s
+name: %(name)s — %(positioning)s
+voice: %(voice)s
+mark: %(logo)s
+instagram handle: %(handle)s
+postal address (footer, verbatim): %(address)s
+body face on file: %(body_face)s
+%(rules_brand)s
 
-THE CAST (section → picture)
-%(cast)s
-Slots the brief has that were CUT (no picture fits — leave the section out and keep the flow):
+THE PICTURES — the brand's own, cast for this design by looking at them. Each is offered in
+the original and cut to 1:1, 4:5, 3:2 and 16:9 (centre crops, 1200 px wide): use the cut
+that fits the slot, never stretch. The tones measured from each are the palette this email
+leads with: the page ground may be a photograph's bold tone if the reference's is, the card
+its light tone; the brand's accent supports; every text colour must read on its ground.
+%(pictures)s
 %(cut)s
 
-THE COPY (by job id — verbatim)
-%(copy)s
+THE MESSAGE this email carries%(message)s
 
-%(rules)s"""
+THE STANDARD — an email made by hand from another reference for another brand. Copy its
+CRAFT (a headline that fills the column; the page in the photograph's own tone; a device
+drawn faithfully; real product names and links; tight copy that turns), NOT its design and
+not one of its words:
+%(exemplar)s
+
+RULES
+- Table layout, every style inline, one centred column %(column)d px wide (a width="%(column)d"
+  table, max-width:%(column)dpx), a full-width outer table painting the page ground.
+- Pictures: ONLY the URLs listed above, verbatim. Every <img> has alt text and an explicit
+  width. No background-image. No <script>, <form>, <video>, <iframe>.
+- Type: outside baked blocks use email-safe stacks only (Georgia; Helvetica/Arial; Impact,
+  'Arial Black' for a heavy display line; 'Brush Script MT', cursive for a script).
+- BAKED BLOCKS: a display headline, a script line, a device with icons — anything that needs
+  a web font or inline SVG — goes inside <!--bake-->…<!--/bake-->: exactly one complete
+  <table width="…"> that paints its own ground, no links inside. Each is photographed at 2×
+  and replaced by one <img>; a Google Fonts <link> in <head> is allowed for them. Body copy,
+  buttons and product names are never baked.
+- Social proof (quotes, testimonials, reviews) exists only when a claim or review is listed
+  under the message; with none on file, that block carries a short useful tip or fact from
+  the brand's material instead — no quotation marks, no attribution, nothing presented as
+  what a customer said. Never a verified tick, a like count, a rating, a figure not listed.
+- The brand's ban list is absolute. Every link is a real URL from the material or
+  {{UNSUBSCRIBE}}%(webview)s; no other {{token}}, no "#".
+- The footer carries the postal address verbatim and an Unsubscribe link on {{UNSUBSCRIBE}}.
+- Under %(size)d KB.
+
+OUTPUT, exactly:
+Subject: <the subject line>
+Preheader: <the preheader>
+<!DOCTYPE html>… the complete HTML document. Nothing after it."""
 
 _REVISE_PROMPT = """Below is the email you wrote and the judge's findings after comparing it to the reference.
 EDIT the HTML to close each finding. Change only what a finding requires; every other line
-stays exactly as it is. The copy stays verbatim. The same HTML rules apply. Return the
-complete HTML document only.
+stays exactly as it is. The same rules apply (email-safe outside baked blocks; only the
+listed pictures; the address and {{UNSUBSCRIBE}}; nothing invented).
 
 FINDINGS
 %(findings)s
+
+OUTPUT, exactly:
+Subject: <the subject line, unchanged unless a finding names it>
+Preheader: <the preheader>
+<!DOCTYPE html>… the complete HTML document. Nothing after it.
 
 THE HTML
 %(html)s"""
 
 
-def _palette_lines(cast_: dict, theme: dict) -> str:
+def _message_text(message: dict | None) -> str:
+    if not message:
+        return ": the brand itself — write the subject line and the preheader yourself."
     lines = []
-    for n, p in (cast_.get("picks") or {}).items():
-        c = p.get("colours") or {}
-        if c:
-            lines.append(f'section {n} ({p.get("title")}): ' + ", ".join(
-                f"{k} {v}" for k, v in c.items() if isinstance(v, str)))
-    pal = theme.get("palette") or {}
-    if pal:
-        lines.append("brand roles: " + ", ".join(f"{k} {v}" for k, v in pal.items() if isinstance(v, str))[:400])
-    return "\n".join(lines) or "(no colours measured)"
+    for k, v in (("subject line (use verbatim)", message.get("subject")), ("preheader", message.get("preheader")),
+                 ("angle", message.get("angle")), ("offer", message.get("offer"))):
+        if v:
+            lines.append(f"- {k}: {v}")
+    if message.get("products"):
+        lines.append("- products (name · price · url):\n" + "\n".join(
+            f"  · {p.get('name')} · {p.get('price', '')} · {p.get('url', '')}" for p in message["products"][:8]))
+    if message.get("claims"):
+        lines.append("- approved claims — use VERBATIM or not at all:\n" + "\n".join(f"  · {c}" for c in message["claims"][:8]))
+    if message.get("text"):
+        lines.append("- what the drafter wrote, to carry (its facts and its ask, not its shape):\n" + str(message["text"])[:2200])
+    return ":\n" + "\n".join(lines)
 
 
-def compose(brief_: dict, kit_: dict, cast_: dict, copy_: dict, *, tenant: str = "",
-            html: str = "", findings=()) -> dict:
-    """`{ok, html, why, edited}` — the model writes the email; with `html`
-    and `findings` it EDITS that email to close the findings."""
+def _parse_email(text: str) -> tuple[str, str, str]:
+    t = str(text or "")
+    m = re.search(r"```(?:html)?\s*(.*?)```", t, re.S)
+    if m:
+        t = m.group(1)
+    subject = (re.search(r"^\s*Subject:\s*(.+)$", t, re.M) or [None, ""])[1].strip() if re.search(r"^\s*Subject:", t, re.M) else ""
+    pre = (re.search(r"^\s*Preheader:\s*(.+)$", t, re.M) or [None, ""])[1].strip() if re.search(r"^\s*Preheader:", t, re.M) else ""
+    k = t.lower().find("<!doctype")
+    if k < 0:
+        k = t.lower().find("<html")
+    html = t[k:].strip() if k >= 0 else ""
+    return subject, pre, html
+
+
+def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, *, tenant: str = "",
+            fitted: dict | None = None, html: str = "", findings=()) -> dict:
+    """`{ok, subject, preheader, html, why, edited}` — ONE MIND writes the
+    copy and the HTML together; with `html` and `findings` it EDITS."""
     theme = kit_.get("theme") or {}
-    images = [theme.get("logo_url")] if theme.get("logo_url") else []
-    images += [p["url"] for p in (cast_.get("picks") or {}).values()]
-    rules = _COMPOSE_RULES % {
-        "column": COLUMN, "images": ", ".join(images) or "(none)",
-        "body_face": (theme.get("font") or {}).get("body") or "Helvetica, Arial, sans-serif",
-        "address": (theme.get("footer") or {}).get("address") or "", "size": HTML_MAX // 1000,
-        "webview": " and the token {{VIEW_IN_BROWSER}} as the view-in-browser link"
-                   if (kit_.get("esp") or {}).get("webview", True) else
-                   " — and NO view-in-browser link: this brand's platform has no variable for one"}
     if html and findings:
         prompt = _REVISE_PROMPT % {
             "findings": "\n".join(f'- [{f.get("severity", "")}] {f.get("where", "")}: {f.get("what", "")}'
                                   + (f' → {f["do"]}' if f.get("do") else "") for f in findings),
-            "html": html} + "\n\n" + rules
+            "html": html}
     else:
-        brief_text = json.dumps({k: brief_.get(k) for k in ("concept", "sections", "visual_system", "devices")},
-                                ensure_ascii=False, indent=1)
-        cast_text = "\n".join(f'section {n}: {p["url"]} — {p.get("title")}' + (f' ({p["why"]})' if p.get("why") else "")
-                              for n, p in (cast_.get("picks") or {}).items()) or "(none)"
+        fitted = fitted if fitted is not None else fits(tenant, cast_)
+        pics = []
+        for n, p in (cast_.get("picks") or {}).items():
+            c = p.get("colours") or {}
+            urls = fitted.get(n) or {"original": p["url"]}
+            pics.append(f'section {n} — {p.get("title")}' + (f' ({p["why"]})' if p.get("why") else "") + "\n"
+                        + "\n".join(f"   {a}: {u}" for a, u in urls.items())
+                        + ("\n   tones: " + ", ".join(f"{k} {v}" for k, v in c.items() if isinstance(v, str)) if c else ""))
         for n in cast_.get("marks") or []:
-            cast_text += f"\nsection {n}: the brand's mark"
-        cut = "\n".join(f'section {x["section"]}: needs {x["needs"]}' for x in cast_.get("none") or []) or "(none)"
+            pics.append(f"section {n} — the brand's mark: {theme.get('logo_url') or '(none on file: set the name in type)'}")
+        cut = ("Slots with no picture that fits — leave the section out, keep the flow:\n"
+               + "\n".join(f'section {x["section"]}: needs {x["needs"]}' for x in cast_.get("none") or [])
+               if cast_.get("none") else "")
+        voice = kit_.get("voice") or {}
+        never = voice.get("never_say") or []
+        rules_brand = ""
+        if never:
+            rules_brand += "never say: " + ", ".join(map(str, never[:20])) + "\n"
+        if (kit_.get("rules") or {}).get("channel"):
+            rules_brand += "the brand's email instructions: " + kit_["rules"]["channel"][:800] + "\n"
+        if kit_.get("compliance"):
+            rules_brand += "lines that must appear verbatim: " + " | ".join(kit_["compliance"][:4]) + "\n"
         prompt = _COMPOSE_PROMPT % {
-            "name": kit_.get("name"), "brief": brief_text, "logo": theme.get("logo_url") or "(no mark on file — set the name in type)",
+            "name": kit_.get("name"), "positioning": kit_.get("positioning") or "",
+            "voice": ", ".join(map(str, voice.get("tone") or [])) or "as the material reads",
+            "logo": theme.get("logo_url") or "(no mark on file — set the name in type)",
             "handle": (kit_.get("handles") or {}).get("instagram") or "(none on file)",
-            "palette": _palette_lines(cast_, theme), "accent": (theme.get("colors") or {}).get("accent") or "",
-            "cast": cast_text, "cut": cut,
-            "copy": json.dumps(copy_, ensure_ascii=False, indent=1), "rules": rules}
-    reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=12000)
+            "address": (theme.get("footer") or {}).get("address") or "",
+            "body_face": (theme.get("font") or {}).get("body") or "Helvetica, Arial, sans-serif",
+            "rules_brand": rules_brand,
+            "brief": (json.dumps({k: brief_.get(k) for k in ("concept", "sections", "visual_system", "devices")},
+                                 ensure_ascii=False, indent=1) if brief_.get("concept") else
+                      "(no reference this time — DESIGN IT YOURSELF: a strong designed email in the standard "
+                      "below, with one idea, one big picture, type at scale, the page in the picture's own tone, "
+                      "a real device or two, one ask)"),
+            "pictures": "\n".join(pics) or "(none)", "cut": cut,
+            "message": _message_text(message), "exemplar": exemplar()[:14000],
+            "column": COLUMN, "size": HTML_MAX // 1000,
+            "webview": " or {{VIEW_IN_BROWSER}}" if (kit_.get("esp") or {}).get("webview", True) else
+                       " (this platform has no view-in-browser variable — offer none)"}
+    reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=16000)
     if not getattr(reply, "ok", False):
-        return {"ok": False, "html": "", "why": "the composer did not answer — " + str(getattr(reply, "error", "")), "edited": 0}
-    text = str(reply.text or "")
-    m = re.search(r"```(?:html)?\s*(.*?)```", text, re.S)
-    out = (m.group(1) if m else text).strip()
-    if "<html" not in out.lower() and "<table" not in out.lower():
-        return {"ok": False, "html": "", "why": "the composer did not return HTML", "edited": 0}
+        return {"ok": False, "html": "", "subject": "", "preheader": "", "edited": 0,
+                "why": "the composer did not answer — " + str(getattr(reply, "error", ""))}
+    subject, pre, out = _parse_email(reply.text)
+    if "<table" not in out.lower():
+        return {"ok": False, "html": "", "subject": "", "preheader": "", "edited": 0,
+                "why": "the composer did not return an email"}
     edited = 0
     if html:
         import difflib
         edited = sum(1 for d in difflib.unified_diff(html.splitlines(), out.splitlines(), lineterm="", n=0)
                      if d.startswith(("+", "-")) and not d.startswith(("+++", "---")))
-    return {"ok": True, "html": out, "why": "", "edited": edited}
+    return {"ok": True, "html": out, "subject": subject, "preheader": pre, "why": "", "edited": edited}
+
+
+_BAKE = re.compile(r"<!--\s*bake\s*-->(.*?)<!--\s*/bake\s*-->", re.S | re.I)
+
+
+def bake(html: str, tenant: str) -> tuple[str, list[str]]:
+    """Every <!--bake-->…<!--/bake--> block photographed and replaced by one
+    <img> — the reference's own trick (its display type and its post card
+    are pictures), and the only way a web font or an SVG icon survives
+    Gmail. Alt text = the block's words, so the checks still read them.
+    Without a door the blocks stay as HTML (their fallback stacks show)."""
+    from . import media, shots
+    frags = _BAKE.findall(html)
+    if not frags:
+        return html, []
+    head = ""
+    m = re.search(r"<head>(.*?)</head>", html, re.S | re.I)
+    if m:
+        head = re.sub(r"<title>.*?</title>", "", m.group(1), flags=re.S | re.I)
+    notes = []
+    out = html
+    for frag in frags:
+        shot = shots.shoot_fragment(head, frag)
+        words = _norm(re.sub(r"<[^>]+>", " ", frag))[:200]
+        if not shot.get("ok"):
+            notes.append(f"a block could not be baked ({shot.get('why')}) — left as HTML")
+            continue
+        put = media.put(tenant, shot["png"], mime="image/png", origin="derived")
+        if not put.get("ok"):
+            notes.append("a baked block could not be hosted — left as HTML")
+            continue
+        w = re.search(r'<table[^>]*\bwidth="?(\d+)', frag)
+        width = int(w.group(1)) if w else COLUMN
+        img = (f'<img src="{put["url"]}" width="{width}" alt="{words.replace(chr(34), "&quot;")}" '
+               f'style="display:block;width:100%;max-width:{width}px;height:auto;border:0">')
+        out = out.replace(f"<!--bake-->{frag}<!--/bake-->", img, 1) if f"<!--bake-->{frag}<!--/bake-->" in out \
+            else _BAKE.sub(lambda mm, _f=frag, _i=img: _i if mm.group(1) == _f else mm.group(0), out, count=0)
+        notes.append(f"baked: {words[:60]}")
+    return out, notes
 
 
 # ---------------------------------------------------------------------------
@@ -711,6 +733,10 @@ class _Walk(HTMLParser):
         if color:
             self.pairs.append((t[:40], color, bg))
 
+    def words(self) -> str:
+        """Everything a reader sees, baked words included (they ride as alt)."""
+        return " ".join(self.text + [im.get("alt") or "" for im in self.imgs if im.get("alt")])
+
 
 def _expand(h: str) -> str:
     h = h.lower()
@@ -734,7 +760,7 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
     except Exception as e:                                        # noqa: BLE001
         add("parse", "blocks", "email", f"the HTML did not parse: {e}")
         return out
-    text = " ".join(w.text)
+    text = w.words()
     theme = kit_.get("theme") or {}
     # 4. email-safe
     size = len(html.encode("utf-8"))
@@ -776,13 +802,12 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
         add("leak_hex", "blocks", "colour", "the reference's own colour: " + ", ".join(sorted(ref_hex & ours_hex)[:3]))
     if reference_host and any(urlparse(im.get("src", "")).netloc == reference_host for im in w.imgs):
         add("leak_image", "blocks", "image", "a picture from the reference's host")
-    # 3. copy verbatim
+    # 3. what must appear verbatim — the claims the message names (a claim
+    #    reworded is a claim nobody approved)
     norm_text = _norm(text)
-    for jid, v in (copy_ or {}).items():
-        parts = v if isinstance(v, list) else [v]
-        for part in parts:
-            if _norm(part) and _norm(part) not in norm_text:
-                add("copy", "blocks", jid, f"the drafter's words changed or missing: {_norm(part)[:60]!r}")
+    for c in (copy_ or {}).get("claims") or []:
+        if _norm(c) and _norm(c) not in norm_text and any(g in _grams(text, 3) for g in _grams(c, 3)):
+            add("claim", "blocks", "copy", f"an approved claim reworded: {_norm(c)[:60]!r}")
     # 5. contrast
     seen = set()
     for t, fg, bg in w.pairs:
@@ -867,21 +892,33 @@ small or too light, a ground that should turn, spacing off by half. Do not ask f
 reference's colours, words or pictures: the brand's own are correct by design."""
 
 
+_JUDGE_ALONE = """One email, ours (whole, then its top), made for a brand with no reference to follow.
+Judge it as an art director would — against the standard of the best designed brand emails:
+one idea, type at scale, the page in a photograph's own tone, a device or two drawn well,
+one ask, nothing generic. Answer JSON only:
+{"same_concept": true, "devices_in_order": true, "brand_material": true,
+ "weight_rhythm": one line on scale, spacing and visual weight,
+ "findings": [{"where": "...", "what": what falls short in a way that matters, "do": the concrete edit,
+               "severity": "blocks" if it must change before sending, else "cosmetic"}]}"""
+
+
 def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "") -> dict:
-    """`{ok, findings, verdict, why, calls}`."""
-    from . import email_design as ed
-    if not reference_png or not ours_png:
+    """`{ok, findings, verdict, why, calls}` — ours beside the reference, or
+    ours alone when there is no reference."""
+    from . import pictures as ed
+    if not ours_png:
         return {"ok": False, "findings": [], "verdict": {}, "why": "no picture to judge", "calls": 0}
     _, edge = ed._tier_edge()
     blocks = []
     try:
-        for png in (reference_png, ours_png):
+        for png in ((reference_png, ours_png) if reference_png else (ours_png,)):
             blocks.append(ed._image_block(ed.contact_sheet(png, edge)))
             blocks.append(ed._image_block(ed.strips(png, edge)[0]["png"]))
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
-    blocks.append({"type": "text", "text": _JUDGE_PROMPT % {
-        "concept": brief_.get("concept"), "devices": "; ".join(map(str, brief_.get("devices") or []))[:1500]}})
+    blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {
+        "concept": brief_.get("concept"), "devices": "; ".join(map(str, brief_.get("devices") or []))[:1500]})
+        if reference_png else _JUDGE_ALONE})
     reply = _ask("email_judge", blocks, tenant=tenant, max_tokens=2000)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
     if not isinstance(got, dict):
@@ -905,7 +942,9 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
 # ---------------------------------------------------------------------------
 
 def _reference_png(structure_id: str) -> tuple[bytes, str]:
-    from . import email_design as ed
+    from . import pictures as ed
+    if not structure_id:
+        return b"", ""
     with db.SessionLocal() as s:
         st = s.get(db.EmailStructure, structure_id)
         aid = st.source_asset_id if st else ""
@@ -915,7 +954,8 @@ def _reference_png(structure_id: str) -> tuple[bytes, str]:
 
 
 def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=(),
-        seed: str = "", progress=None, message: dict | None = None, via: str = "press") -> dict:
+        seed: str = "", progress=None, message: dict | None = None, via: str = "press",
+        extra_pictures: list | None = None) -> dict:
     """One recreation of `structure_id` for `tenant`, stored as a `Recreation`
     row and returned as `{ok, id, status, note, findings, rounds, html, text,
     media_ids, blocking}`. With a campaign `message` the copy carries it and
@@ -924,13 +964,13 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     say = progress or (lambda *_: None)
     story: list[str] = []
     with db.SessionLocal() as s:
-        st = s.get(db.EmailStructure, structure_id)
-        if not st:
-            return {"ok": False, "why": "no structure at that id", "status": FAILED}
-        brief_ = dict(st.brief or {})
-        aid = st.source_asset_id or ""
-        name = st.name or structure_id
-        row = db.Recreation(tenant=tenant, structure_id=structure_id, entity_key=entity_key, status=RUNNING,
+        st = s.get(db.EmailStructure, structure_id) if structure_id else None
+        if structure_id and not st:
+            return {"ok": False, "why": "no design at that id", "status": FAILED}
+        brief_ = dict(st.brief or {}) if st else {}
+        aid = (st.source_asset_id or "") if st else ""
+        name = (st.name or structure_id) if st else "no reference"
+        row = db.Recreation(tenant=tenant, structure_id=structure_id or "", entity_key=entity_key, status=RUNNING,
                             models={"via": via})
         s.add(row)
         s.commit()
@@ -947,77 +987,98 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
             r.models = {**(r.models or {}), **(fields.get("models") or {}), "via": via}
             s.commit()
         cp = fields.get("copy") or {}
-        text = "\n".join(" ".join(v) if isinstance(v, list) else str(v) for v in cp.values())
+        html_ = fields.get("html", "")
+        w_ = _Walk()
+        try:
+            w_.feed(html_)
+        except Exception:                                        # noqa: BLE001
+            pass
         return {"ok": status not in (FAILED,), "id": rid, "status": status, "note": " ".join(story),
                 "findings": fields.get("findings", []), "rounds": fields.get("rounds", []), "calls": calls,
-                "html": fields.get("html", ""), "text": text,
+                "html": html_, "text": w_.words(), "subject": cp.get("subject", ""),
+                "preheader": cp.get("preheader", ""),
                 "media_ids": [p.get("asset_id") for p in ((fields.get("cast") or {}).get("picks") or {}).values()
                               if p.get("asset_id")],
                 "blocking": len(blocking(fields.get("findings", [])))}
 
-    # the brief
-    if not brief_:
+    # the brief — or none: with no reference the maker designs the email
+    # itself, and the caster is asked for a hero and a second picture
+    if not brief_ and aid:
         say("reading the reference into a brief")
-        got = brief(aid, tenant=tenant) if aid else {"ok": False, "why": "the structure has no reference picture"}
+        got = brief(aid, tenant=tenant)
         calls += got.get("calls", 0)
         if not got.get("ok"):
             story.append(f"The reference could not be read: {got.get('why')}.")
             return _finish(FAILED)
         brief_ = got["brief"]
         story.append(f"Read {name} into a brief: {brief_.get('concept')}")
-    else:
+    elif brief_:
         story.append(f"Brief on file: {brief_.get('concept')}")
+    else:
+        brief_ = dict(DESIGNLESS)
+        story.append("No reference — the maker designs this one itself.")
     # the kit and the cast
     say("gathering the brand's material and casting its pictures")
     kit_ = kit(tenant)
-    brief_, reworked = rework(brief_, kit_)
-    story.extend(reworked)
+    for x in (extra_pictures or []):
+        if x.get("id") and x.get("url"):
+            kit_["pictures"].insert(0, {"id": x["id"], "url": x["url"], "small": x["url"], "title": x.get("title") or "drawn",
+                                        "entity_key": entity_key, "subject": "photo", "kind": x.get("kind") or "",
+                                        "colours": {}, "size": [], "aspect": "", "alone": None, "person": None, "tags": []})
+            kit_["hosts"].add(urlparse(x["url"]).netloc)
     cast_ = cast(tenant, brief_, kit_, entity_key=entity_key, recent_media=recent_media, seed=seed)
     calls += cast_.get("calls", 0)
     story.extend(cast_.get("said") or [])
     photo_slots = [sec for sec in brief_.get("sections") or []
                    if str(((sec.get("asset") or {}).get("kind") or "")).lower() in ("photograph", "illustration")]
-    if photo_slots and not cast_.get("picks"):
+    if brief_.get("designless") and not cast_.get("picks"):
+        # NO REFERENCE AND NO PICTURE: a type-led email, said — a brand with
+        # nothing on file still gets its send; a reference that needs
+        # photographs the brand lacks does not.
+        story.append("No picture on file — a type-led email.")
+        cast_ = {**cast_, "none": []}
+    elif photo_slots and not cast_.get("picks"):
         story.append("Every photograph slot is cut, so the email cannot be made for this brand yet — "
                      + "; ".join(f"section {x['section']} needs {x['needs']}" for x in cast_.get("none") or []))
         return _finish(CANNOT, brief=brief_, cast=cast_,
                        findings=[{"code": "needs", "severity": "blocks", "where": f"section {x['section']}",
                                   "what": f"needs {x['needs']}"} for x in cast_.get("none") or []])
     # the copy
-    say("writing the copy to the brief's jobs")
-    cp = copy(tenant, brief_, kit_, cast_, entity_key=entity_key, message=message)
-    calls += cp.get("calls", 0)
-    if not cp.get("ok"):
-        story.append(cp.get("why", "the copy did not land") + ".")
-        return _finish(FAILED, brief=brief_, cast=cast_)
-    copy_ = cp["copy"]
-    copy_findings = cp.get("findings") or []
+    fitted = fits(tenant, cast_)
+    copy_ = {"claims": list((message or {}).get("claims") or [])}
     # the rounds
     ref_png, ref_host = _reference_png(structure_id)
-    if not ref_png:
-        story.append("The reference picture could not be fetched, so the judge is skipped.")
+    if aid and not ref_png:
+        story.append("The reference picture could not be fetched — ours is judged on its own.")
     rounds: list[dict] = []
-    html, findings_prev = "", []
+    html, raw, findings_prev = "", "", []
     best_i, best_n = -1, 10 ** 6
     for n in range(ROUNDS + 1):
         say(f"round {n}: " + ("writing the email" if n == 0 else "editing to the findings"))
-        made = compose(brief_, kit_, cast_, copy_, tenant=tenant, html=html, findings=findings_prev)
+        made = compose(brief_, kit_, cast_, message, tenant=tenant, fitted=fitted, html=raw, findings=findings_prev)
         calls += 1
         if not made.get("ok"):
             story.append(f"Round {n}: {made.get('why')}.")
             break
-        html = made["html"]
-        checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host) + copy_findings
+        raw = made["html"]                                   # the model's HTML, edited next round
+        html, baked = bake(raw, tenant)                      # what is checked, shot, judged and sent
+        for b_ in baked:
+            if not b_.startswith("baked:"):
+                story.append(b_ + ".")
+        copy_.update(subject=made.get("subject") or copy_.get("subject", ""),
+                     preheader=made.get("preheader") or copy_.get("preheader", ""))
+        checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         shot = shots.shoot(html)
         png_id = ""
         if shot.get("ok"):
             put = media.put(tenant, shot["png"], mime="image/png", origin="generated")
             png_id = put.get("id", "") if put.get("ok") else ""
-        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant) if shot.get("ok") and ref_png
-                  else {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no reference", "calls": 0})
+        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant) if shot.get("ok")
+                  else {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0})
         calls += judged.get("calls", 0)
         open_ = blocking(checks) + blocking(judged.get("findings"))
-        rounds.append({"n": n, "png_id": png_id, "check": checks, "judge": judged.get("findings", []),
+        rounds.append({"n": n, "png_id": png_id, "baked": sum(1 for b_ in baked if b_.startswith("baked:")),
+                       "check": checks, "judge": judged.get("findings", []),
                        "verdict": judged.get("verdict", {}), "judged": judged.get("ok", False),
                        "why_not_judged": judged.get("why", "") if not judged.get("ok") else "",
                        "blocking": len(open_), "edited": made.get("edited", 0), "html": html,

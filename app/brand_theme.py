@@ -1,7 +1,7 @@
 """Derive each client's visual identity into an owner-reviewed email THEME.
 
-`email_render` made "looks like the brand" a per-client ``theme`` dict; this
-module is where that dict comes from. The owner's design (2026-08-21): pull the
+A per-client ``theme`` dict — the brand as an email is told it (`DEFAULT`) —
+and where it comes from. The owner's design (2026-08-21): pull the
 identity from what already exists — the **Canva brand kit** first (a designer
 already maintains it), then the **Shopify store** (its brand settings, its
 theme's social links, and the business address Shopify already holds — the
@@ -42,7 +42,47 @@ import json
 import re
 from urllib.parse import urljoin, urlparse
 
-from . import db, email_render, kb, tenants
+from . import db, kb, tenants
+
+#: THE THEME'S SHAPE — what an email is told about the brand: its name and
+#: mark, an accent, its faces, who signs, the footer the law wants. The
+#: twelve-role palette and the renderer's colours went with the token chain
+#: (2026-09-14); the maker leads with the tones of the pictures it casts.
+DEFAULT = {
+    "name": "",
+    "logo_url": "", "logo_alt": "",
+    "colors": {"accent": "#1f2937", "accent_text": "#ffffff"},
+    "font": {"heading": "Georgia, 'Times New Roman', serif",
+             "body": "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"},
+    "width": 600,
+    "nav": [],
+    # WHO SIGNS a letter. Brand data, owner-entered; a drafter once invented
+    # a person and signed a live email as her (2026-08-22). Empty = unsigned.
+    "sender": {"name": "", "role": ""},
+    "footer": {"brand": "", "address": "", "tagline": "",
+               "socials": [], "disclaimer": ""},
+}
+
+
+def filled(theme: dict) -> dict:
+    """A theme with every field filled from the default, deep enough for the
+    nested dicts a reader expects."""
+    t = {**DEFAULT, **(theme or {})}
+    for k in ("colors", "font", "footer", "sender"):
+        t[k] = {**DEFAULT[k], **((theme or {}).get(k) or {})}
+    return t
+
+
+def missing_to_send(theme: dict) -> list[str]:
+    """What a theme still lacks to produce a SENDABLE email — not a prettier
+    one: a mailing address (CAN-SPAM) and a brand name."""
+    t = filled(theme)
+    gaps = []
+    if not t["footer"]["address"]:
+        gaps.append("footer.address — CAN-SPAM requires a physical mailing address")
+    if not (t["footer"]["brand"] or t["name"]):
+        gaps.append("brand name")
+    return gaps
 
 # ---------------------------------------------------------------------------
 # Small mechanics: dotted paths, contrast, font stacks
@@ -81,7 +121,7 @@ def _stack(family: str, kind: str) -> str:
     default stack as the fallback — most email clients will not load a custom
     face, and a stack with no fallback renders Times."""
     fam = str(family or "").strip().strip("'\"")
-    default = email_render._DEFAULT["font"].get(kind, "")
+    default = DEFAULT["font"].get(kind, "")
     if not fam:
         return ""
     if fam.lower() in default.lower():
@@ -150,18 +190,6 @@ def _from_canva(tenant: str) -> dict:
     if cols:
         f["colors.accent"] = (cols[0], "canva brand kit (first brand colour)")
         f["colors.accent_text"] = (_on(cols[0]), "computed for contrast on the accent")
-        # EVERY colour in the kit, under a role, by one stated rule each —
-        # `cols[0]` alone was kept for three weeks and the rest of the kit
-        # discarded (INITIATIVE-email-design.md §2.3). What no role takes is
-        # named in `partial` so it is seen, not lost.
-        from . import palette as _pal
-        placed = _pal.rank_kit(cols)
-        for role, (hexv, rule) in placed.items():
-            f[f"palette.{role}"] = (hexv, f"canva brand kit ({rule})")
-        taken = {v[0] for v in placed.values()}
-        left = [c for c in (_pal.norm(x) for x in cols) if c and c not in taken]
-        if left:
-            f["_unplaced"] = (left, "canva brand kit (colours no role took)")
     fonts = kit.get("fonts") or {}
     if fonts.get("heading"):
         f["font.heading"] = (_stack(fonts["heading"], "heading"), "canva brand kit")
@@ -281,15 +309,6 @@ def _from_shopify(tenant: str) -> dict:
             f.setdefault("colors.accent_text",
                          (fg, "shopify brand settings") if fg
                          else (_on(bg), "computed for contrast on the accent"))
-            f.setdefault("palette.accent", (bg, "shopify brand settings (primary)"))
-            if fg:
-                f.setdefault("palette.accent_ink", (fg, "shopify brand settings (primary foreground)"))
-        sec = (brand.get("colors") or {}).get("secondary")
-        if isinstance(sec, list):
-            sec = sec[0] if sec else {}
-        sbg = str((sec or {}).get("background") or "")
-        if sbg:
-            f.setdefault("palette.secondary", (sbg, "shopify brand settings (secondary)"))
         logo = (((brand.get("logo") or {}).get("image") or {}).get("url", "")
                 or ((brand.get("squareLogo") or {}).get("image") or {}).get("url", ""))
         if logo:
@@ -442,7 +461,6 @@ def _from_site(tenant: str) -> dict:
     if tc.startswith("#"):
         f["colors.accent"] = (tc, "site (theme-color)")
         f["colors.accent_text"] = (_on(tc), "computed for contrast on the accent")
-        f["palette.accent"] = (tc, "site (theme-color)")
 
     if not f:
         return {"ok": False, "why": (f"the site at {url} was read but held "
@@ -452,85 +470,8 @@ def _from_site(tenant: str) -> dict:
     return {"ok": True, "fields": f}
 
 
-def _packshot_blobs(tenant: str, limit: int = 6) -> list[bytes]:
-    """The brand's own packshots, as bytes — the featured store image per
-    product, publishable only. Fetched here rather than filed anywhere: the
-    palette read is a proposal, made from what the catalogue sync already
-    holds."""
-    import httpx
-    rows = [a for a in kb.assets(tenant)
-            if "packshot" in [str(t) for t in (a.tags or [])]][:limit]
-    out = []
-    for a in rows:
-        try:
-            r = httpx.get(a.url, timeout=8, follow_redirects=True)
-            if r.status_code == 200 and r.content:
-                out.append(r.content)
-        except Exception:                                        # noqa: BLE001
-            continue
-    return out
-
-
-packshot_blobs = _packshot_blobs     # seam the suite replaces
-
-
-def _from_pictures(tenant: str) -> dict:
-    """What the brand's own product photographs are made of — proposals for
-    the roles a photograph can honestly fill (`palette.from_pictures`:
-    secondary, tint). Lowest precedence of the sources: a kit or a store
-    setting that names a colour outranks a colour read off a picture.
-    Owner's decision 2 (INITIATIVE-email-design.md §5), default yes."""
-    from . import palette as _pal
-    blobs = packshot_blobs(tenant)
-    if not blobs:
-        return {"ok": False, "why": (f"{tenant} has no product photographs on file to "
-                                     f"read colours from — run the catalogue sync, "
-                                     f"or file a packshot")}
-    got = _pal.from_pictures(blobs)
-    if not got:
-        return {"ok": False, "why": (f"{len(blobs)} product photograph(s) read; none held "
-                                     f"a colour that is not white, black or grey")}
-    return {"ok": True, "fields": {f"palette.{role}": (hexv, rule)
-                                   for role, (hexv, rule) in got.items()}}
-
-
-# ---------------------------------------------------------------------------
-# Derive → propose. Review → approve. Read → live.
-# ---------------------------------------------------------------------------
-
 _SOURCES = (("canva", _from_canva), ("shopify", _from_shopify),
-            ("site", _from_site), ("pictures", _from_pictures))
-
-
-def _fill_palette(theme: dict, provenance: dict) -> list[str]:
-    """Every role filled from what the sources gave and the older theme
-    colours, the rest computed by one rule each and labelled so; returns the
-    contrast findings. Writes `theme["palette"]` and the provenance of every
-    role — a source's own name where a source gave it, `computed: <rule>`
-    where none did — so the card can show where each colour came from."""
-    from . import palette as _pal
-    given = dict(theme.get("palette") or {})
-    if not given and not (theme.get("colors") or {}):
-        # NOTHING DERIVED, NOTHING WRITTEN. With every source down the
-        # renderer falls back to its own default palette at render, exactly
-        # as it does for the older colours — writing that default into the
-        # proposal would be twelve rows of "the renderer's default" on the
-        # card, and absence is the honest state (rule 1: absence survives).
-        theme.pop("palette", None)
-        return []
-    colors = {**email_render._DEFAULT["colors"], **(theme.get("colors") or {})}
-    pal, how = _pal.fill(given, colors)
-    theme["palette"] = pal
-    for role, origin in how.items():
-        path = f"palette.{role}"
-        if origin == "given":
-            provenance.setdefault(path, "hand-set")
-        elif origin.startswith("from colors."):
-            field = origin[len("from "):]
-            provenance[path] = (provenance.get(field) or "the renderer's default") + f" — as {role}"
-        else:
-            provenance[path] = origin
-    return _pal.findings(pal)
+            ("site", _from_site))
 
 
 def derive(tenant: str) -> dict:
@@ -561,20 +502,13 @@ def derive(tenant: str) -> dict:
         if got.get("partial"):
             partial[src] = got["partial"]
         for path, (value, sub) in got["fields"].items():
-            if path == "_unplaced":
-                # Kit colours no role took — shown, never written to the theme.
-                partial.setdefault(src, []).append(
-                    f"{sub}: {', '.join(value)}")
-                continue
             if _get(theme, path) in ("", None, [], {}):
                 _set(theme, path, value)
                 provenance[path] = sub
 
-    findings = _fill_palette(theme, provenance)
     proposed = {"theme": theme, "sources": provenance,
                 "unavailable": unavailable, "partial": partial,
-                "findings": findings,
-                "gaps": email_render.missing_to_send(theme),
+                "gaps": missing_to_send(theme),
                 "derived_at": dt.datetime.now(dt.timezone.utc)
                 .isoformat(timespec="seconds")}
     kb.set_brand(tenant, theme_proposed=proposed)
@@ -606,7 +540,7 @@ def _allowed_edits() -> dict[str, type]:
     shape rather than typed out here — rule 4; a hand-kept list is how the
     form and the renderer drift."""
     out: dict[str, type] = {}
-    for k, v in email_render._DEFAULT.items():
+    for k, v in DEFAULT.items():
         if isinstance(v, dict):
             for k2, v2 in v.items():
                 out[f"{k}.{k2}"] = type(v2)
@@ -644,7 +578,7 @@ def approve(tenant: str, edits: dict | None = None) -> dict:
         if path not in allowed:
             return {"ok": False, "error": (
                 f"unknown theme field {path!r} — the theme's shape is "
-                f"email_render's; editable fields are "
+                f"DEFAULT's; editable fields are "
                 + ", ".join(sorted(allowed)))}
         if isinstance(value, str) and not value.strip():
             continue                       # a blank form input is not an edit
@@ -664,12 +598,6 @@ def approve(tenant: str, edits: dict | None = None) -> dict:
             if v not in ("on", "off", "true", "false", "1", "0", "yes", "no"):
                 return {"ok": False, "error": f"{path} takes on or off"}
             value = v in ("on", "true", "1", "yes")
-        if path.startswith("palette."):
-            from . import palette as _pal
-            if not _pal.norm(value):
-                return {"ok": False, "error": (f"{path} takes a colour as #hex — "
-                                               f"{value!r} is not one")}
-            value = _pal.norm(value)
         _set(theme, path, value)
         applied.append(path)
 
@@ -687,19 +615,6 @@ def approve(tenant: str, edits: dict | None = None) -> dict:
                 _set(theme, path, prev_val)
                 carried.append(path)
 
-    # A role the owner set or a source gave stands; every role that was only
-    # computed is computed AGAIN from the palette as it now is — an edited
-    # dark ground takes a fresh readable ink rather than the old one's.
-    srcs = dict(prop.get("sources") or (already.get("_meta") or {}).get("sources") or {})
-    keep = {}
-    for role, hexv in (theme.get("palette") or {}).items():
-        path = f"palette.{role}"
-        if path in applied or path in carried or not str(srcs.get(path, "")).startswith("computed:"):
-            keep[role] = hexv
-    theme["palette"] = keep
-    findings = _fill_palette(theme, srcs)
-    prop["sources"] = srcs
-
     # Identity comes from the brand KB whatever the form said nothing about.
     if not theme.get("name"):
         _set(theme, "name", (row.display_name if row else "") or tenant)
@@ -714,13 +629,11 @@ def approve(tenant: str, edits: dict | None = None) -> dict:
                       # carry-forward above reads on the NEXT approval.
                       "edited": sorted(set(applied) | set(carried))}
     kb.set_brand(tenant, theme=theme, theme_proposed={})
-    gaps = email_render.missing_to_send(theme)
+    gaps = missing_to_send(theme)
     return {"ok": True, "tenant": tenant, "theme": theme, "gaps": gaps,
-            "edited": applied, "carried": carried, "findings": findings,
+            "edited": applied, "carried": carried,
             "note": ("" if not gaps else
-                     "approved, and still not sendable: " + "; ".join(gaps))
-                    + ("" if not findings else
-                       ("; " if gaps else "") + "contrast: " + "; ".join(findings))}
+                     "approved, and still not sendable: " + "; ".join(gaps))}
 
 
 def status(tenant: str) -> dict:
@@ -729,18 +642,15 @@ def status(tenant: str) -> dict:
     t = tenants.get(tenant)
     if not t:
         return {"ok": False, "error": f"unknown tenant {tenant!r}"}
-    from . import palette as _pal
     live = live_theme(tenant)
     prop = proposed(tenant)
     return {"ok": True, "tenant": tenant,
             "live": bool(live),
-            "live_gaps": email_render.missing_to_send(live) if live else [],
+            "live_gaps": missing_to_send(live) if live else [],
             "approved_at": (live.get("_meta") or {}).get("approved_at", ""),
             "proposed": bool(prop.get("theme")),
             "derived_at": prop.get("derived_at", ""),
             "proposed_gaps": prop.get("gaps", []),
-            "findings": prop.get("findings", []),
-            "live_findings": _pal.findings(live.get("palette") or {}) if live else [],
             "sources": prop.get("sources", {}),
             "unavailable": prop.get("unavailable", {}),
             "partial": prop.get("partial", {}),
@@ -748,17 +658,3 @@ def status(tenant: str) -> dict:
                      "no approved theme yet — campaign emails render on the "
                      "default look with no mailing address and stay marked "
                      "not-yet-sendable")}
-
-
-#: What the review page renders through each theme so the owner judges a real
-#: email rather than a swatch table. Neutral tokens stay visible — the preview
-#: is upstream of `esp.personalize` by design.
-PREVIEW_BLOCKS = [
-    {"type": "hero", "headline": "A sample campaign",
-     "sub": "This is how this brand's emails will look — logo, colours, type "
-            "and the legal footer all come from the theme under review."},
-    {"type": "text", "html": "<p>Hi {{FIRST_NAME}},</p><p>Body copy renders in "
-                             "the brand's body face at a comfortable measure. "
-                             "The button below carries the accent colour.</p>"},
-    {"type": "cta", "label": "Visit the store", "url": "#"},
-]

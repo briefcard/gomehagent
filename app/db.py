@@ -1099,12 +1099,8 @@ class EmailStructure(Base):
     fits_formats = Column(JSON, default=list)
     #: What a brand must HAVE to use it: products, proof, hero.
     requires = Column(JSON, default=list)
-    #: THE DESIGN — how the email is built, whole, in the vocabulary of
-    #: `email_design.SCHEMA`: frame, header, type system, colour ROLES, each
-    #: section's layout and slots, the ask, the footer. Words the renderer
-    #: draws, never a colour, a face or a copy line (INITIATIVE-email-design.md).
-    #: Rows filed before it existed carry `email_design.house(look)` — today's
-    #: renderer as a design, with the old six-axis look folded in.
+    #: RETIRED with the token email chain (2026-09-14): the old closed-vocabulary
+    #: design. Kept as a column so old rows read; nothing writes it.
     design = Column(JSON, default=dict)
     #: THE BRIEF — the reference read in WORDS, the way a designer briefs it
     #: (INITIATIVE-email-recreation.md §1 row 1): the concept in a sentence,
@@ -1794,7 +1790,7 @@ class KbBrand(Base):
     # path has nothing to be wrong against.
     visual = Column(JSON, default=dict)
     # How the brand looks in an EMAIL, concretely: the render theme
-    # `email_render` consumes — logo URL, palette, font stacks, nav, and the
+    # `brand_theme.DEFAULT` names — logo URL, accent, font stacks, nav, and the
     # CAN-SPAM footer (mailing address, socials, disclaimer).
     #
     # `theme` is the LIVE one: derived by `brand_theme.derive` (Canva brand kit
@@ -2398,7 +2394,7 @@ class KbAsset(_Provenance, Base):
     #: warmth — arithmetic), its size and aspect, the KIND of picture it is
     #: (packshot-on-plain … texture, or a brand mark — one vision call, ever,
     #: or the owner's hand), whether the product is alone in it. Read by
-    #: `email_design.read_picture`; the chooser and the palette read this,
+    #: `pictures.read_picture`; the maker's cast reads this,
     #: never the bytes again.
     reading = Column(JSON, default=dict)
     entity_key = Column(String, default="")    # what it depicts, if anything
@@ -2779,12 +2775,3 @@ def init_db() -> None:
     except Exception:  # noqa: BLE001 — a failed backfill must not block boot
         import logging
         logging.getLogger("db").exception("provenance backfill failed")
-    try:
-        # A structure filed before designs existed takes the house design,
-        # with its look folded in — so nothing reads a structure and finds no
-        # design. Idempotent: only an empty design is written.
-        from . import email_structures
-        email_structures.backfill_designs()
-    except Exception:  # noqa: BLE001
-        import logging
-        logging.getLogger("db").exception("design backfill failed")

@@ -123,9 +123,9 @@ def _theme(tenant: str) -> dict:
     """The brand's theme with every field filled — the SAME record the
     emails and the site read their colours and faces from, so a layer set in
     Canva and a button in a campaign agree."""
-    from . import email_render
+    from . import brand_theme
     b = kb.brand(tenant)
-    return email_render._theme(dict(getattr(b, "theme", None) or {}))
+    return brand_theme.filled(dict(getattr(b, "theme", None) or {}))
 
 
 def _logo(theme: dict) -> bytes:

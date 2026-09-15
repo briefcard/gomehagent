@@ -237,11 +237,11 @@ def ask(purpose: str, prompt, *, tenant: str = "", system: str = "",
 #   than 20 image blocks in one request drops the per-image limit to 2000 px
 #   on each side; JPEG, PNG, GIF (first frame) and WebP only.
 #
-# Why this exists: the swipe reader (`email_structures.read_swipe`) sends a
+# Why this exists: the reference reader (`recreate.brief`) sends a
 # gallery screenshot whole. Those are 680 wide and 2800–4600 tall (measured
 # 2026-09-11), so on the standard tier the model sees a 680×4543 email at
 # 235×1568 — body type under five pixels — and reports it cannot see the
-# typography it was asked about. `image_seen_as` makes that a number a test
+# typography it was asked about. `resized_size` makes that a number a test
 # can assert, and the reader that replaces it (INITIATIVE-email-design.md,
 # Phase 3) cuts strips that fit the tier of the model it is about to call.
 # ---------------------------------------------------------------------------
@@ -325,15 +325,3 @@ def resized_size(width: int, height: int, max_edge: int = 1568,
     return (lo, max(round(lo / aspect_ratio), 1))
 
 
-def image_seen_as(model: str, width: int, height: int) -> tuple[int, int]:
-    """The size THIS model actually looks at a `width`×`height` picture — the
-    picture itself when it fits the model's tier, the downscaled one when it
-    does not. The number the swipe-reader check asserts on."""
-    tier, _ = image_tier(model)
-    lim = IMAGE_TIERS[tier]
-    return resized_size(width, height, lim["max_edge"], lim["max_tokens"])
-
-
-def image_fits(model: str, width: int, height: int) -> bool:
-    """True when the model sees the picture at the size it was sent."""
-    return image_seen_as(model, width, height) == (width, height)

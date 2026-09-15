@@ -49,9 +49,15 @@ from . import config, db
 
 #: The vocabulary a structure may use — the renderer's own, READ from it so a
 #: structure can never name a block that cannot be built.
+#: The blocks a drafter may write its MESSAGE in. The email itself is no
+#: longer painted from them — the maker writes it whole — but the message,
+#: the claim gates and the rough order of a structure still speak this list.
+BLOCKS = ("hero", "text", "cta", "button", "image", "heading", "products", "divider",
+          "quote", "list", "stat", "banner", "signature", "ps")
+
+
 def block_types() -> tuple:
-    from . import email_render
-    return tuple(email_render._BLOCKS)
+    return BLOCKS
 
 
 #: What a block asks the brand to have. A sequence that includes one of these
@@ -108,25 +114,6 @@ def profile_of(blocks: list) -> dict:
     }
 
 
-def look_of(raw: dict | None) -> dict:
-    """The arrangement a swipe was read to have, kept to the renderer's own
-    vocabulary (`email_render.LOOK`): a key the renderer does not draw is
-    dropped, a value it does not know is dropped, and what is left is what
-    the structure will actually reproduce. Colours and typefaces are not in
-    the vocabulary, so a reading cannot carry them even if the model
-    volunteered them — the brand's theme is the only source of those."""
-    from . import email_render
-    out = {}
-    for k, vals in email_render.LOOK.items():
-        v = (raw or {}).get(k)
-        if k == "bands":
-            if isinstance(v, bool):
-                out[k] = v
-        elif isinstance(v, str) and v.strip().lower() in vals:
-            out[k] = v.strip().lower()
-    return out
-
-
 def requires_of(sequence) -> list:
     """What a brand needs to have before this structure can be used."""
     out = []
@@ -140,156 +127,6 @@ def requires_of(sequence) -> list:
 # ---------------------------------------------------------------------------
 # The library
 # ---------------------------------------------------------------------------
-def find_by_sequence(sequence) -> db.EmailStructure | None:
-    sig = signature(sequence)
-    if not sig:
-        return None
-    with db.SessionLocal() as s:
-        for row in s.query(db.EmailStructure).all():
-            if signature(row.sequence) == sig:
-                s.expunge(row)
-                return row
-    return None
-
-
-def file_structure(*, name: str, sequence: list, source: str, review: str,
-                   profile: dict | None = None, fits_intents=(), fits_formats=(),
-                   source_url: str = "", source_asset_id: str = "",
-                   notes: str = "", by: str = "", look: dict | None = None,
-                   design: dict | None = None, read_info: dict | None = None) -> dict:
-    """Put one structure in the library, once per distinct sequence.
-
-    `design` is the whole of how the email is built, in `email_design.SCHEMA`'s
-    vocabulary; it goes through `email_design.normalize`, which keeps what the
-    renderer draws and RETURNS what it did not (`dropped`, on the result) —
-    a reading that volunteered a hex or a face is told so, never trimmed in
-    silence. Without one the structure carries `email_design.house(look)`:
-    today's renderer as a design, the look folded in.
-
-    `look` is the old six-axis arrangement — kept, in `profile["look"]`, until
-    Phase 4 of INITIATIVE-email-design.md retires the renderer's `LOOK`; the
-    design already carries everything it says.
-
-    `notes` are checked with `craft.leaks` BEFORE filing: a structure that
-    names a brand, a URL or a person is one that would carry another account's
-    fact into every email built on it, and the library is shared.
-    """
-    from . import craft, email_design
-    seq = [str(t).strip().lower() for t in (sequence or []) if str(t).strip()]
-    unknown = [t for t in seq if t not in block_types()]
-    dropped: list[str] = []
-    if design is not None:
-        dsg, dropped = email_design.normalize(design)
-    else:
-        dsg = email_design.house(look)
-    if unknown:
-        return {"ok": False, "why": f"unknown block type(s) {unknown} — a "
-                                    f"structure may only use blocks the "
-                                    f"renderer can build"}
-    if len(seq) < 2:
-        return {"ok": False, "why": "a structure is at least two blocks"}
-    if notes and (found := craft.leaks(notes)):
-        return {"ok": False, "why": ("these notes identify an account ("
-                                     + ", ".join(found) + ") — a shared "
-                                     "structure carries technique, never a "
-                                     "fact about anyone")}
-    have = find_by_sequence(seq)
-    if have is not None:
-        # A structure filed before the look was read (or read again after
-        # the renderer learned a new axis) takes the arrangement now; its
-        # sequence, name and review are untouched, so a re-read never undoes
-        # an approval.
-        lk = look_of(look)
-        if lk or design is not None:
-            with db.SessionLocal() as s:
-                row = s.get(db.EmailStructure, have.id)
-                prof = dict(row.profile or {})
-                if lk and prof.get("look") != lk:
-                    prof["look"] = lk
-                    row.profile = prof
-                # A re-read carries its design forward the same way; a design
-                # read where none was is the house with the look folded in.
-                if design is not None or not (row.design or {}):
-                    row.design = dsg if design is not None else email_design.house(
-                        prof.get("look"))
-                if read_info is not None:
-                    prof["read"] = dict(read_info)
-                    # A re-read's notes replace the old — they were checked
-                    # for leaks above like the first ones; blank ones (the
-                    # quoted-copy gate emptied them) leave the old standing.
-                    if notes:
-                        prof["notes"] = notes[:600]
-                    row.profile = prof
-                s.commit()
-        return {"ok": True, "id": have.id, "existing": True,
-                "name": have.name, "review": have.review, "dropped": dropped}
-    prof = dict(profile or profile_of([{"type": t} for t in seq]))
-    if notes:
-        prof["notes"] = notes[:600]
-    if read_info is not None:
-        prof["read"] = dict(read_info)
-    if lk := look_of(look):
-        prof["look"] = lk
-    with db.SessionLocal() as s:
-        row = db.EmailStructure(
-            name=(name or signature(seq))[:120], source=source,
-            source_url=source_url[:500], source_asset_id=source_asset_id,
-            sequence=seq, profile=prof, design=dsg,
-            fits_intents=[i for i in fits_intents if i in INTENTS],
-            fits_formats=[f for f in fits_formats if f in FORMATS] or ["designed"],
-            requires=requires_of(seq), review=review,
-            reviewed_by=by if review == "approved" else "",
-            reviewed_at=db.utcnow() if review == "approved" else None)
-        s.add(row)
-        s.commit()
-        return {"ok": True, "id": row.id, "existing": False, "name": row.name,
-                "review": row.review, "dropped": dropped}
-
-
-def file_from_output(output_id: str, *, by: str = "owner") -> dict:
-    """An email of ours that was APPROVED joins the library as a structure.
-
-    The owner's rule. Filed from `Output.shape`, which is the block sequence
-    the email was built from, and only once per distinct sequence — the
-    library grows by shapes, not by sends. Approved on arrival, because the
-    approval was the decision.
-    """
-    from . import email_design
-    with db.SessionLocal() as s:
-        out = s.get(db.Output, output_id)
-        if out is None:
-            return {"ok": False, "why": "no such output"}
-        seq = list(out.shape or [])
-        angle = str(out.angle or "")
-        theme = str(out.theme or "")
-        tenant = str(out.tenant or "")
-        # THE DESIGN THE SEND WAS BUILT ON rides the artifact's meta (Phase
-        # 5 — `Context.emit` writes the same meta onto `ArtifactBody`); an
-        # approved send files it with its shape, so the library keeps how
-        # approved emails looked, not only their order.
-        art = (s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == output_id)
-               .order_by(db.ArtifactBody.created_at.desc()).first())
-        design = dict(((getattr(art, "meta", None) or {}).get("design") or {}))
-    if len(seq) < 2:
-        return {"ok": False, "why": "this output recorded no block sequence"}
-    # NAMED BY WHAT IT DOES, never by whose it was. The library is shared, so
-    # "Baci's September offer" would carry an account into every account.
-    prof = profile_of([{"type": t} for t in seq])
-    label = (f"{'hero-led ' if prof['hero_first'] else ''}"
-             f"{prof['density']} {angle or 'email'}, "
-             f"{prof['asks']} ask{'s' if prof['asks'] != 1 else ''}"
-             + (f", {prof['products']} product block"
-                f"{'s' if prof['products'] != 1 else ''}" if prof["products"] else "")
-             + (", with proof" if prof["proof"] else ""))
-    got = file_structure(name=label, sequence=seq, source="run",
-                         review="approved", fits_intents=[angle] if angle in INTENTS else [],
-                         fits_formats=[theme] if theme in FORMATS else [], by=by,
-                         design=design if design else None)
-    got["from_tenant_note"] = ("filed from an approved send; the account is "
-                               "not recorded on the structure") if tenant else ""
-    return got
-
-
 def approve(structure_id: str, *, by: str = "owner") -> str:
     return _review(structure_id, "approved", by)
 
@@ -352,7 +189,6 @@ def file_reference(asset_id: str, *, brief: dict, source_url: str = "") -> dict:
         row = (s.query(db.EmailStructure).filter(db.EmailStructure.source_asset_id == asset_id)
                .order_by(db.EmailStructure.created_at.desc()).first())
         if row is None:
-            from . import email_design
             seq = sequence_from_brief(brief)
             row = db.EmailStructure(
                 name=name, source="swipe", source_url=(source_url or (a.source if a else "") or "")[:500],
@@ -362,7 +198,7 @@ def file_reference(asset_id: str, *, brief: dict, source_url: str = "") -> dict:
                 # randomly be chosen for the email campaigns I generate"),
                 # and "Not this one" takes it out.
                 fits_intents=[], fits_formats=[], requires=requires_of(seq),
-                design=email_design.house(), review="approved")
+                review="approved")
             s.add(row)
         row.brief = dict(brief)
         if not row.name or (a is not None and row.name == (a.title or "")):
@@ -418,27 +254,10 @@ def library(*, review: str = "") -> list[dict]:
         return [_row(r) for r in rows]
 
 
-def backfill_designs() -> int:
-    """Every structure filed before designs existed takes `house(look)`. Run
-    at boot; writes only where the design is empty, so a read design is
-    never overwritten and a second boot changes nothing. Returns how many."""
-    from . import email_design
-    n = 0
-    with db.SessionLocal() as s:
-        for row in s.query(db.EmailStructure).all():
-            if row.design:
-                continue
-            row.design = email_design.house((row.profile or {}).get("look"))
-            n += 1
-        if n:
-            s.commit()
-    return n
-
-
 def _row(r) -> dict:
     return {"id": r.id, "name": r.name, "source": r.source,
             "source_url": r.source_url, "sequence": list(r.sequence or []),
-            "profile": dict(r.profile or {}), "design": dict(r.design or {}),
+            "profile": dict(r.profile or {}),
             "fits_intents": list(r.fits_intents or []),
             "fits_formats": list(r.fits_formats or []),
             "requires": list(r.requires or []), "review": r.review,
@@ -639,7 +458,7 @@ def pick(tenant: str, *, intent: str = "", fmt: str = "",
                         f"none of the {len(any_usable)} in the rotation declares this send's intent "
                         f"or form — used anyway: {st['name']}")}
     return {"structure": None, "designated": False,
-            "why": "nothing in the rotation this brand may use — designed fresh, the house way"}
+            "why": "nothing in the rotation this brand may use — the maker designs this one itself"}
 
 
 def mark_used(structure_id: str) -> None:
@@ -654,9 +473,8 @@ def mark_used(structure_id: str) -> None:
 def brief(structure: dict) -> str:
     """The words the drafter gets. The ORDER, and why — never any copy. A
     structure carrying a design with a concrete order is briefed by that
-    (`email_design.brief`: its sections, their slots, the limits the type
+    (its concept and copy jobs; the maker writes the email — the limits the type
     scale imposes); the shape facts and the notes ride beneath either way."""
-    from . import email_design
     prof = structure.get("profile") or {}
     seq = structure.get("sequence") or []
     bf = structure.get("brief") or {}
@@ -674,12 +492,6 @@ def brief(structure: dict) -> str:
                   "carries, the ask — in blocks as usual. The email itself is then written "
                   "in this design with your message poured into its copy jobs, which are:\n"
                 + "\n".join(jobs[:14]) + "\n  Keep the message tight enough to fit them.")
-    dsg = email_design.brief(structure.get("design") or {})
-    if dsg:
-        lines = [dsg]
-        if prof.get("notes"):
-            lines.append("  What it does well: " + str(prof["notes"])[:400])
-        return "\n".join(lines)
     lines = [f"\n## THE STRUCTURE THIS SEND IS BUILT ON: {structure.get('name', '')}",
              "Compose the blocks in THIS order, each filled with this brand's own "
              "words, claims and pictures — the structure is borrowed, nothing "
@@ -698,12 +510,6 @@ def brief(structure: dict) -> str:
         lines.append("  Shape: " + "; ".join(facts) + ".")
     if prof.get("notes"):
         lines.append("  What it does well: " + str(prof["notes"])[:400])
-    if lk := prof.get("look"):
-        said = ", ".join(f"{k} {str(v).lower()}" for k, v in lk.items())
-        lines.append("  The renderer will arrange it as: " + said + ". Write for "
-                     "that shape — a display headline is short; a grid of "
-                     "products needs each name to stand on its own; a text-link "
-                     "ask is one plain sentence.")
     return "\n".join(lines)
 
 
@@ -797,10 +603,3 @@ def swipes(tenant: str = SWIPE_TENANT) -> list[dict]:
         return out
 
 
-def read_swipe(asset_id: str) -> dict:
-    """Look at one swipe and propose the structure it uses — its whole DESIGN
-    (`email_design.read`: strips cut to the reviewer's tier, three passes,
-    the vocabulary from the schema). PROPOSED, not approved: a reading is a
-    generator's opinion and generators propose."""
-    from . import email_design
-    return email_design.read(asset_id)
