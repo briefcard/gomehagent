@@ -40,9 +40,19 @@ def main() -> int:
     os.environ["DATABASE_URL"] = f"sqlite:///{dbfile}"
     os.environ.setdefault("APPROVAL_SECRET", "once")
     os.environ.setdefault("PUBLIC_BASE_URL", "http://localhost:8000")
+    # THE KEY LIVES IN `.env.keys`, NOT `.env`: `config.load_dotenv()` reads
+    # `.env` into every process, suites included — and the suites are written
+    # to run keyless. This script alone reads the keys file, never printing it.
+    keys = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env.keys")
+    if os.path.exists(keys):
+        for ln in open(keys):
+            if "=" in ln and not ln.startswith("#"):
+                k, v = ln.strip().split("=", 1)
+                if v and not os.environ.get(k):
+                    os.environ[k] = v
     from app import brand_theme, config, db, email_structures as es, kb, recreate, tenants
-    if not getattr(config, "ANTHROPIC_API_KEY", "") and not os.environ.get("ANTHROPIC_API_KEY"):
-        print("no ANTHROPIC_API_KEY — put one in .env; it is read, never printed", file=sys.stderr)
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("no ANTHROPIC_API_KEY — put one in .env.keys (ANTHROPIC_API_KEY=…); it is read, never printed", file=sys.stderr)
         return 2
     db.init_db()
     tenants.seed()

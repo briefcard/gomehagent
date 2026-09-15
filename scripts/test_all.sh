@@ -10,6 +10,13 @@
 #
 #   scripts/test_all.sh              all of them
 #   scripts/test_all.sh campaign     only suites whose name matches
+
+# NEVER THE OWNER'S KEYS. `.env` now carries a real ANTHROPIC_API_KEY for the
+# looking loop (scripts/recreate_once.py); `config.load_dotenv()` would hand
+# it to every suite, and suites written to run keyless then make live calls,
+# take forty minutes, and fail on real answers (2026-09-15: five suites,
+# 2,484 s). An empty variable already in the environment is not overridden.
+export ANTHROPIC_API_KEY= OPENAI_API_KEY= GEMINI_API_KEY=
 #
 # Prints nothing per passing suite. A silent run is a green run.
 set -u

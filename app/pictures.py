@@ -63,6 +63,27 @@ def _json_of(text: str) -> dict:
     return got if isinstance(got, dict) else {}
 
 
+def _aspect_of(w: int, h: int) -> str:
+    if not w or not h:
+        return ""
+    r = w / h
+    return "square" if 0.9 <= r <= 1.1 else "portrait" if r < 0.9 else "wide" if r >= 1.9 else "landscape"
+
+
+def _kind_filed(asset) -> str:
+    """The kind the filing already says, when it says one: the sync's
+    packshot tag, a surface, a logo. '' when only a look could tell."""
+    tags = [str(t) for t in (getattr(asset, "tags", None) or [])]
+    subj = str(getattr(asset, "subject", "") or "")
+    if subj == "logo":
+        return "mark"
+    if "packshot" in tags:
+        return "packshot-on-plain"
+    if subj == "surface":
+        return "texture"
+    return ""
+
+
 def _fetch(url: str) -> bytes:
     """A swipe's screenshot, whole: one file, on the owner's press, capped."""
     import httpx
