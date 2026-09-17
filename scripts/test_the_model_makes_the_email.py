@@ -277,6 +277,15 @@ def main() -> int:
     ck("a cut of a filed picture is allowed", not any(f["code"] in ("asset", "asset_invented") for f in rc.check(email_html(photo_b=CDN + "table_1200x1500_crop_center.jpg"), kit, BRIEF, copy_)))
     httpx.head = lambda url, *a, **k: types.SimpleNamespace(status_code=404 if "gone" in url else 200)
     ck("a picture that answers 404 blocks", blocks(email_html(photo_b=PHOTO_B.replace("table", "gone_table")), "picture_missing", links=True))
+    httpx.head = lambda url, *a, **k: types.SimpleNamespace(status_code=429)
+    httpx.get = lambda url, *a, **k: types.SimpleNamespace(status_code=429)
+    import time as _time
+    _sleep = _time.sleep
+    _time.sleep = lambda *_: None
+    busy = rc.check(email_html(), kit, BRIEF, copy_, links=True)
+    _time.sleep = _sleep
+    ck("a 429 from the store is a note, never a dead link", any(f["code"] == "link_busy" for f in busy)
+       and not any(f["code"] in ("link", "picture_missing") for f in busy), str([f["code"] for f in busy]))
     httpx.head = lambda *a, **k: types.SimpleNamespace(status_code=200)
     ck("words baked into a picture still count — the alt is read", blocks(email_html(bake=True, headline="Sauce the bread, sauce the meat, sauce it") and rc.bake(email_html(bake=True, headline="Don't just sauce the bread. Sauce the meat!"), "baci")[0], "leak_words"))
 

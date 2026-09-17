@@ -164,11 +164,16 @@ def brief(asset_id: str, *, tenant: str = "") -> dict:
         return {"ok": False, "why": f"the reference is too tall to read whole ({len(parts)} strips)", "calls": 0}
     blocks = [ed._image_block(ed.contact_sheet(blob, edge))] + [ed._image_block(p["png"]) for p in parts]
     blocks.append({"type": "text", "text": _BRIEF_PROMPT})
-    reply = _ask("email_brief", blocks, tenant=tenant, max_tokens=6000)
+    # devices are objects now (kind, role, effect, instance) and a busy
+    # reference's brief runs past 6,000 tokens — the owner's re-read was cut
+    # off mid-JSON and reported as "not a JSON object" (2026-09-17)
+    reply = _ask("email_brief", blocks, tenant=tenant, max_tokens=16000)
     if not getattr(reply, "ok", False):
         return {"ok": False, "why": f"the reader did not answer — {getattr(reply, 'error', '')}", "calls": 1}
     got = _json(reply.text)
     why = brief_problem(got)
+    if why and getattr(reply, "stop_reason", "") == "max_tokens":
+        why = f"the reader's brief was cut off at the length limit ({len(reply.text or '')} characters) — {why}"
     if why:
         return {"ok": False, "why": why, "calls": 1}
     got["read"] = {"tier": tier, "edge": edge, "strips": len(parts), "model": getattr(reply, "model", "")}
@@ -691,6 +696,10 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "webview": " or {{VIEW_IN_BROWSER}}" if (kit_.get("esp") or {}).get("webview", True) else
                        " (this platform has no view-in-browser variable — offer none)"}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=16000)
+    if not getattr(reply, "ok", False) and "Connection" in str(getattr(reply, "error", "")):
+        # a dropped connection on a two-minute call is not the model's answer
+        # — one more try before the round is lost (owner's run, 2026-09-17)
+        reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=16000)
     if not getattr(reply, "ok", False):
         return {"ok": False, "html": "", "subject": "", "preheader": "", "edited": 0,
                 "why": "the composer did not answer — " + str(getattr(reply, "error", ""))}
@@ -968,11 +977,23 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
     # 8. links live
     if links:
         import httpx
+        def _alive(url: str) -> int:
+            """The status a real visit gets: HEAD, and on a 429 or a 405 a
+            GET after a breath — Shopify rate-limits scripted HEADs and answered
+            429 for two live product pages on the owner's run (2026-09-17)."""
+            import time as _t
+            r = httpx.head(url, timeout=8, follow_redirects=True)
+            if r.status_code in (429, 405):
+                _t.sleep(2)
+                r = httpx.get(url, timeout=12, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+            return r.status_code
         for href in sorted({h for h in w.links if h.startswith("http")}):
             try:
-                r = httpx.head(href, timeout=8, follow_redirects=True)
-                if r.status_code >= 400:
-                    add("link", "blocks", href[:80], f"answers {r.status_code}")
+                code = _alive(href)
+                if code == 429:
+                    add("link_busy", "note", href[:80], "the site rate-limited the check (429) — not proven dead")
+                elif code >= 400:
+                    add("link", "blocks", href[:80], f"answers {code}")
             except Exception as e:                                # noqa: BLE001
                 add("link", "blocks", href[:80], f"does not answer ({type(e).__name__})")
         # every picture resolves — a 404 is a broken image in every inbox
@@ -980,9 +1001,11 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
             if not src.startswith("http") or src.startswith(media_route):
                 continue
             try:
-                r = httpx.head(src, timeout=8, follow_redirects=True)
-                if r.status_code >= 400:
-                    add("picture_missing", "blocks", src[:80], f"the picture answers {r.status_code}")
+                code = _alive(src)
+                if code == 429:
+                    add("link_busy", "note", src[:80], "the host rate-limited the check (429) — not proven missing")
+                elif code >= 400:
+                    add("picture_missing", "blocks", src[:80], f"the picture answers {code}")
             except Exception as e:                                # noqa: BLE001
                 add("picture_missing", "blocks", src[:80], f"the picture does not answer ({type(e).__name__})")
     for href in w.links:
