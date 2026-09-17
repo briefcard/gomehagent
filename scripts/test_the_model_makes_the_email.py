@@ -287,6 +287,10 @@ def main() -> int:
     got_sys = {f["code"] for f in rc.system_check(choppy)}
     ck("insets and sizes outside the declared system block, by the numbers", {"system_inset", "system_scale"} <= got_sys, str(got_sys))
     ck("the good email keeps to its own system", not rc.system_check(email_html()), str(rc.system_check(email_html())))
+    named = email_html().replace("scale: 96/13/12/11/11", "scale: display=96 / headline=13 / body=12 / small=11 / tiny=11")
+    ck("a scale written as named steps is read whole, not as its first number", not rc.system_check(named), str(rc.system_check(named)))
+    four = email_html(extra='<p style="color:#ffffff;font-family:Georgia,serif">a</p><p style="color:#ffffff;font-family:Playfair Display,serif">b</p>')
+    ck("a fourth face blocks — two faces and one accent is the ceiling", any(f["code"] == "system_faces" for f in rc.system_check(four)))
     ck("an invented picture on the brand's own host blocks", blocks(email_html(photo_b=CDN + "table_staged_tray_1200x800.jpg"), "asset_invented"))
     ck("a cut of a filed picture is allowed", not any(f["code"] in ("asset", "asset_invented") for f in rc.check(email_html(photo_b=CDN + "table_1200x1500_crop_center.jpg"), kit, BRIEF, copy_)))
     httpx.head = lambda url, *a, **k: types.SimpleNamespace(status_code=404 if "gone" in url else 200)
@@ -323,9 +327,11 @@ def main() -> int:
             return {"fabricated": []}
         judged.append(1)
         if len(judged) == 1:
-            return {"same_concept": True, "devices_in_order": True, "weight_rhythm": "headline light", "brand_material": True,
+            return {"ours_first_words": "Don't just set the table. Set the scene!", "same_concept": True, "devices_in_order": True,
+                    "weight_rhythm": "headline light", "brand_material": True,
                     "findings": [{"where": "section 2", "what": "the headline sits at half the column", "do": "set it larger", "severity": "blocks"}]}
-        return {"same_concept": True, "devices_in_order": True, "weight_rhythm": "matched", "brand_material": True, "findings": []}
+        return {"ours_first_words": "Don't just set the table. Set the scene!", "same_concept": True, "devices_in_order": True,
+                "weight_rhythm": "matched", "brand_material": True, "findings": []}
     answers["email_judge"] = _judge
     got = rc.run(sid, "baci", "portofino", seed="s", message={"subject": "Set the scene", "claims": [CLAIM]})
     ck("the revise round LOOKS at its own email — the picture rides with the findings",
@@ -339,20 +345,63 @@ def main() -> int:
     judged.clear()
     worse = iter([1, 2, 2])
     answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else
-                                             {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
+                                             {"ours_first_words": "Don't just set the table.", "same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
                                               "findings": [{"where": f"s{i}", "what": "off", "do": "fix", "severity": "blocks"} for i in range(next(worse))]})
     got_w = rc.run(sid, "baci", "portofino", seed="w")
     best_w = (rc.latest(sid, "baci") or {}).get("best")
     judged.clear()
     leaky = iter([True, False])
     answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else
-                                             {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
+                                             {"ours_first_words": "Don't just set the table.", "same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
                                               "findings": ([{"where": "hook", "what": "the reference's hook says DON'T JUST SAUCE THE BREAD — ours lacks the pun",
                                                              "do": "add the words sauce the meat", "severity": "blocks"}] if next(leaky) else [])})
     got_l = rc.run(sid, "baci", "portofino", seed="l")
     ck("a judge finding that carries the reference's own words is dropped and said — never handed to the next edit",
        "asked for the reference's own words in 1 finding" in got_l["note"] and got_l["status"] == rc.SHIPPABLE
        and not any("sauce the meat" in p for p in compose_seen if "FINDINGS" in p), got_l.get("note"))
+    ck("the judge's pictures are labelled and stamped — REFERENCE then OURS — and it must say what it read in ours",
+       any(isinstance(p, list) and p[0].get("type") == "text" and p[0]["text"].startswith("REFERENCE") and "ours_first_words" in p[-1]["text"]
+           for p in seen["email_judge"] if isinstance(p, list) and p[-1]["text"].startswith("Two emails")))
+    judged.clear()
+    confused = iter([True, False, False])
+    def _mixed(prompt):
+        text = prompt[-1]["text"] if isinstance(prompt, list) else ""
+        if text.startswith("The words of an email"):
+            return {"fabricated": []}
+        if next(confused, False):
+            return {"ours_first_words": "Ayoh! DON'T JUST SAUCE THE BREAD. SAUCE THE MEAT!", "same_concept": True, "devices_in_order": True,
+                    "brand_material": True, "weight_rhythm": "", "findings": [{"where": "hero", "what": "the sando is small", "do": "shrink the photo to 55%", "severity": "blocks"}]}
+        return {"ours_first_words": "Don't just set the table. Set the scene!", "same_concept": True, "devices_in_order": True,
+                "brand_material": True, "weight_rhythm": "", "findings": []}
+    answers["email_judge"] = _mixed
+    got_c = rc.run(sid, "baci", "portofino", seed="c")
+    ck("a judge that read the reference as ours is asked again; its confused findings never reach the edit",
+       got_c["status"] == rc.SHIPPABLE and not any("55%" in p for p in compose_seen if "FINDINGS" in p)
+       and got_c["rounds"][0]["judged"] is True and len(seen["email_judge"]) >= 2, got_c.get("note"))
+    judged.clear()
+    always = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else
+                             {"ours_first_words": "Ayoh! DON'T JUST SAUCE THE BREAD.", "same_concept": True, "devices_in_order": True,
+                              "brand_material": True, "weight_rhythm": "", "findings": [{"where": "hero", "what": "x", "do": "shrink the photo to 55%", "severity": "blocks"}]})
+    answers["email_judge"] = always
+    got_cc = rc.run(sid, "baci", "portofino", seed="cc")
+    ck("confused twice, the judgement is refused and the story says so — never called shippable",
+       "the judge was confused twice" in got_cc["note"] and got_cc["status"] == rc.NOT_SHIPPABLE
+       and not any("55%" in p for p in compose_seen if "FINDINGS" in p), got_cc.get("note"))
+    judged.clear()
+    short_leak = iter([True, False])
+    def _short(prompt):
+        text = prompt[-1]["text"] if isinstance(prompt, list) else ""
+        if text.startswith("The words of an email"):
+            return {"fabricated": []}
+        return {"ours_first_words": "Don't just set the table. Set the scene!", "same_concept": True, "devices_in_order": True,
+                "brand_material": True, "weight_rhythm": "",
+                "findings": ([{"where": "hero", "what": "the word 'Ayoh!' should be the biggest word; add 'SAUCE THE MEAT!' as a sticker",
+                               "do": "set Ayoh! at 96px", "severity": "blocks"}] if next(short_leak, False) else [])}
+    answers["email_judge"] = _short
+    got_s = rc.run(sid, "baci", "portofino", seed="s2")
+    ck("a finding that quotes one of the reference's short lines whole is dropped too",
+       "asked for the reference's own words in 1 finding" in got_s["note"] and got_s["status"] == rc.SHIPPABLE, got_s.get("note"))
+    answers["email_judge"] = _judge
     ck("the truth pass is its own call and is handed the product's own material",
        any("THE MATERIAL" in p[-1]["text"] and "Melamine and porcelain" in p[-1]["text"] for p in seen["email_judge"] if isinstance(p, list))
        and not any("THE MATERIAL" in p[-1]["text"] and "REFERENCE" in p[-1]["text"] for p in seen["email_judge"] if isinstance(p, list)))
@@ -362,7 +411,7 @@ def main() -> int:
         text = prompt[-1]["text"] if isinstance(prompt, list) else ""
         if text.startswith("The words of an email"):
             return {"fabricated": [{"words": "BPA free", "why": "the material says nothing about BPA"}] if next(liar, False) else []}
-        return {"same_concept": True, "devices_in_order": True, "brand_material": True, "would_send": True, "weight_rhythm": "", "findings": []}
+        return {"ours_first_words": "Don't just set the table.", "same_concept": True, "devices_in_order": True, "brand_material": True, "would_send": True, "weight_rhythm": "", "findings": []}
     answers["email_judge"] = _truth_or_judge
     got_t = rc.run(sid, "baci", "portofino", seed="t2")
     ck("a product fact the material does not support blocks the round and is edited out",
@@ -381,7 +430,7 @@ def main() -> int:
     shots.shoot = lambda html, **k: {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""}
     judged.clear()
     answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else
-                                             {"same_concept": True, "devices_in_order": True, "brand_material": True, "weight_rhythm": "fine", "findings": []})
+                                             {"ours_first_words": "Don't just set the table.", "same_concept": True, "devices_in_order": True, "brand_material": True, "weight_rhythm": "fine", "findings": []})
     got3 = rc.run("", "baci", "portofino", seed="d", message={"subject": "Set the scene"})
     ck("with no reference the maker designs the email itself and is judged alone — shippable",
        got3["status"] == rc.SHIPPABLE and "designs this one itself" in got3["note"] and "DESIGN IT YOURSELF" in compose_seen[-1]

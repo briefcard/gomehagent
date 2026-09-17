@@ -73,7 +73,10 @@ def _norm(s: str) -> str:
 
 
 def _grams(text: str, n: int = 5) -> set:
-    words = re.findall(r"[a-z0-9']+", _norm(text).lower())
+    # an apostrophe inside a word stays (don't); a quote mark hugging a word
+    # goes ('PICKLES' is pickles) — a judge quotes the reference in quotes
+    words = [w.strip("'") for w in re.findall(r"[a-z0-9']+", _norm(text).lower())]
+    words = [w for w in words if w]
     return {" ".join(words[i:i + n]) for i in range(max(0, len(words) - n + 1))}
 
 
@@ -558,9 +561,11 @@ Declare it as the first line inside <body>, as a comment, and then USE ONLY THOS
      scale: display/headline/subhead/body/small = 64/40/24/16/12 (your numbers) ·
      space: 8/16/32/56 (your four steps) · inset: 34 (one side inset, the whole column) ·
      radius: 14 -->
-The faces: the brand's heading and body faces are the defaults; add at most ONE display
-face and ONE accent (script) face for roles the reference has, with email-safe fallbacks —
-never a fifth. The scale: five sizes with clear steps; every font-size in the email is one
+The faces: TWO — the brand's heading face for display and headlines, the brand's body face
+for everything else — plus at most ONE accent face (a script, a marker hand) used ONCE, for
+the single dressing device that needs it. Where the brand has no heading face on file, one
+display face stands in for it. An italic of a face is that face; a different face for the
+tagline, the pills, the buttons or the footer is a fourth voice and a fault. The scale: five sizes with clear steps; every font-size in the email is one
 of them. The space: four steps; every vertical gap is one of them, and like things get the
 same gap (headline→body, picture→caption, section→section). The inset: one number, every
 section's content sits on it; a card inside the column has its own one inner inset. Colours
@@ -616,7 +621,9 @@ declared in the <!-- system --> comment at the top of <body>: an edit uses ITS f
 sizes, ITS spacing steps and ITS inset — never a new value; if the system itself is wrong,
 change the comment and every place that follows from it.
 
-FINDINGS
+FINDINGS — a [contrast] finding is closed FIRST and by changing the text colour or the ground
+it sits on to a pair that reads at 4.5:1, never by leaving the palette as it is; the rest in
+the order given.
 %(findings)s
 
 OUTPUT, exactly:
@@ -1090,8 +1097,9 @@ def system_check(html: str) -> list[dict]:
     decl = m.group(1)
     body = html[m.end():]
     nums = lambda seg: [int(float(x)) for x in re.findall(r"\d+(?:\.\d+)?", seg)]  # noqa: E731
-    scale = nums((re.search(r"scale[^·\n]*?=\s*([\d/ .]+)", decl) or re.search(r"scale:?\s*([\d/ .]+)", decl) or [None, ""])[1])
-    inset = nums((re.search(r"inset:?\s*(\d+)", decl) or [None, ""])[1])
+    seg = lambda key: (re.search(key + r"\s*:?(.*?)(?:·|\n|$)", decl, re.I | re.S) or [None, ""])[1]  # noqa: E731
+    scale = [x for x in nums(seg("scale")) if x >= 8]     # "display=72 / headline=40 …" or "72/40/32/24/16/12"
+    inset = nums(seg("inset"))[:1]
     used_sizes = sorted({int(float(x)) for x in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", body) if float(x) > 2})
     if scale:
         stray = [x for x in used_sizes if not any(abs(x - d) <= 1 for d in scale)]
@@ -1119,10 +1127,10 @@ def system_check(html: str) -> list[dict]:
                             f"content sits on {inset[0]}, a card may have one inner inset, nothing else"})
     faces = {re.split(r"\s*,", f.strip().strip("'\""))[0].strip("'\" ").lower()
              for f in re.findall(r"font-family:\s*([^;\"]+)", body)}
-    if len(faces) > 4:
+    if len(faces) > 3:
         out.append({"code": "system_faces", "severity": "blocks", "where": "type",
-                    "what": f"{len(faces)} faces in use ({', '.join(sorted(faces))}) — four at most: the brand's heading and body, "
-                            f"one display, one accent"})
+                    "what": f"{len(faces)} faces in use ({', '.join(sorted(faces))}) — three at most: the brand's heading "
+                            f"face, its body face, and one accent used once"})
     return out
 
 
@@ -1171,13 +1179,17 @@ its own photographs, its own words, its own colours. The designer's brief of the
 concept: %(concept)s
 devices: %(devices)s
 
-Judge ours as an art director judges a finished email, and answer JSON only:
-{"same_concept": true|false,
+The pictures are labelled in their top band: REFERENCE, then OURS. Judge OURS — the email
+made for the other brand — as an art director judges a finished email, and answer JSON only:
+{"ours_first_words": the first eight words you can read in OURS, top to bottom — so we know
+                     you looked at the right email,
+ "same_concept": true|false,
  "devices_in_order": true|false,
  "weight_rhythm": one line on scale, spacing and visual weight compared,
  "one_system": true|false — ours reads as ONE email: the same inset down the column, the
-               same gap between like things, one type scale with clear steps, three faces
-               at most; where it breaks, a finding names the section and the value,
+               same gap between like things, one type scale with clear steps, two faces and
+               at most one accent used once; where it breaks, a finding names the section
+               and the value,
  "brand_material": true|false — everything in ours is the other brand's own,
  "would_send": true|false — as strong an idea, as bold a scale, as clear an ask as the
                reference, in this brand's things,
@@ -1263,39 +1275,97 @@ def truth(words: str, material: str, *, tenant: str = "") -> dict:
         for f in got.get("fabricated") or [] if isinstance(f, dict) and f.get("words")]}
 
 
+def _stamp(png: bytes, label: str) -> bytes:
+    """The label drawn INTO the picture, a black band across the top — so the
+    judge cannot take the reference for ours. On the owner's run of
+    2026-09-17 it did, twice: "the basket is cropped so the jar dominates",
+    "'PICKLES' is not oversized" — about an email with no basket, jar or
+    pickles — and the maker applied the edits. A label in the prompt alone
+    was not enough; a label in the pixels is what it reads."""
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+    im = Image.open(io.BytesIO(png)).convert("RGB")
+    band = max(28, im.width // 24)
+    out = Image.new("RGB", (im.width, im.height + band), "#000000")
+    out.paste(im, (0, band))
+    d = ImageDraw.Draw(out)
+    try:
+        font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", int(band * 0.7))
+    except Exception:                                             # noqa: BLE001
+        font = ImageFont.load_default()
+    d.text((12, band // 6), label, fill="#ffffff", font=font)
+    buf = io.BytesIO()
+    out.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def _confused(got: dict, brief_: dict) -> str:
+    """Why a judgement is not about OUR email: the words it says it read in
+    ours are the reference's. "" when it read ours."""
+    said = _norm(str(got.get("ours_first_words") or "")).lower()
+    if not said:
+        return ""
+    # a line of one short common word ("find", "shop") is no evidence; two
+    # words, or one distinctive word, is
+    lines = [_norm(str(x)).lower() for x in (brief_.get("reference_text") or [])
+             if len(_norm(str(x)).split()) >= 2 or len(_norm(str(x))) >= 7]
+    hit = [ln for ln in lines if f" {ln} " in f" {said} "]
+    return f"it read the reference's words ({hit[0][:30]!r}) as ours" if hit else ""
+
+
 def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "", material: str = "") -> dict:
     """`{ok, findings, verdict, why, calls}` — ours beside the reference, or
-    ours alone when there is no reference."""
+    ours alone when there is no reference. The pictures are stamped and
+    labelled, the judge must say what it read in ours, and a judgement that
+    read the reference as ours is refused as confused; a judge that answers
+    no JSON is asked once more."""
     from . import pictures as ed
     if not ours_png:
         return {"ok": False, "findings": [], "verdict": {}, "why": "no picture to judge", "calls": 0}
     _, edge = ed._tier_edge()
     blocks = []
     try:
-        for png in ((reference_png, ours_png) if reference_png else (ours_png,)):
-            blocks.append(ed._image_block(ed.contact_sheet(png, edge)))
-            blocks.append(ed._image_block(ed.strips(png, edge)[0]["png"]))
+        pairs = [("REFERENCE", reference_png), ("OURS", ours_png)] if reference_png else [("OURS", ours_png)]
+        for label, png in pairs:
+            blocks.append({"type": "text", "text": f"{label} — the whole email:"})
+            blocks.append(ed._image_block(_stamp(ed.contact_sheet(png, edge), f"{label} — whole")))
+            blocks.append({"type": "text", "text": f"{label} — its top, legible:"})
+            blocks.append(ed._image_block(_stamp(ed.strips(png, edge)[0]["png"], f"{label} — top")))
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {
         "concept": brief_.get("concept"), "devices": _devices_text(brief_)[:1500]})
         if reference_png else _JUDGE_ALONE})
-    reply = _ask("email_judge", blocks, tenant=tenant, max_tokens=2000)
-    got = _json(reply.text) if getattr(reply, "ok", False) else None
+    calls = 0
+    got, mixed = None, ""
+    for _try in range(2):
+        reply = _ask("email_judge", blocks, tenant=tenant, max_tokens=2500)
+        calls += 1
+        got = _json(reply.text) if getattr(reply, "ok", False) else None
+        if not isinstance(got, dict):
+            mixed = "no JSON"
+            continue
+        mixed = _confused(got, brief_) if reference_png else ""
+        if not mixed:
+            break
     if not isinstance(got, dict):
-        return {"ok": False, "findings": [], "verdict": {}, "calls": 1,
-                "why": "the judge did not answer — " + str(getattr(reply, "error", "") or "no JSON")}
+        return {"ok": False, "findings": [], "verdict": {}, "calls": calls,
+                "why": "the judge did not answer — " + str(getattr(reply, "error", "") or "no JSON, twice")}
+    if mixed:
+        return {"ok": False, "findings": [], "verdict": {}, "calls": calls,
+                "why": f"the judge was confused twice — {mixed}; its findings are not used"}
     finds = []
     for f in got.get("findings") or []:
         if isinstance(f, dict) and f.get("what"):
             finds.append({"code": "judge", "severity": "blocks" if str(f.get("severity", "")).lower() == "blocks" else "cosmetic",
                           "where": str(f.get("where") or "")[:80], "what": str(f.get("what"))[:300],
                           "do": str(f.get("do") or "")[:300]})
-    verdict = {k: got.get(k) for k in ("same_concept", "devices_in_order", "weight_rhythm", "brand_material")}
+    verdict = {k: got.get(k) for k in ("same_concept", "devices_in_order", "weight_rhythm", "brand_material",
+                                       "would_send", "one_system", "ours_first_words")}
     if verdict.get("same_concept") is False:
         finds.insert(0, {"code": "judge", "severity": "blocks", "where": "the whole",
                          "what": "not the reference's concept", "do": "recreate the concept the brief names"})
-    return {"ok": True, "findings": finds, "verdict": verdict, "why": "", "calls": 1}
+    return {"ok": True, "findings": finds, "verdict": verdict, "why": "", "calls": calls}
 
 
 # ---------------------------------------------------------------------------
@@ -1426,6 +1496,17 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     html, raw, findings_prev, prev_png = "", "", [], b""
     ref_grams = _grams(" ".join(map(str, brief_.get("reference_text") or [])), 3) - _grams(
         " ".join(e.get("name", "") + " " + e.get("description", "") for e in kit_.get("entities") or []), 3)
+    # the reference's own lines, whole — "PICKLES", "HOT GIRL", "mess-free" are one or two
+    # words and no 3-gram catches them; a finding that quotes one is the reference talking
+    brand_words = set(re.findall(r"[a-z0-9']+", " ".join(e.get("name", "") + " " + e.get("description", "")
+                                                          for e in kit_.get("entities") or []).lower()))
+    ref_lines = []
+    for x in brief_.get("reference_text") or []:
+        ln = re.sub(r"[^a-z0-9' ]+", " ", _norm(str(x)).lower()).strip()
+        ln = re.sub(r"\s+", " ", ln)
+        toks = ln.split()
+        if (len(toks) >= 2 or len(ln) >= 7) and len(ln) <= 40 and toks and not all(t in brand_words for t in toks):
+            ref_lines.append(ln)
     material_ = _material(kit_, entity_key)
     best_i, best_n = -1, 10 ** 6
     for n in range(ROUNDS + 1):
@@ -1460,11 +1541,14 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         # words ("add CRUNCHYYY!!!", "a wire basket like the reference's") would
         # be implemented by the next edit — the owner's run of 2026-09-17 grew
         # a pickle brand's copy that way. Such findings are dropped and said.
-        if ref_grams:
+        if ref_grams or ref_lines:
             kept, dropped = [], []
             for f in judged.get("findings") or []:
-                words = _grams(f"{f.get('what', '')} {f.get('do', '')}", 3)
-                (dropped if words & ref_grams else kept).append(f)
+                text_ = f"{f.get('what', '')} {f.get('do', '')}"
+                words = _grams(text_, 3)
+                low = " " + re.sub(r"[^a-z0-9' ]+", " ", _norm(text_).lower()) + " "
+                quoted = any(f" {ln} " in low for ln in ref_lines)
+                (dropped if (words & ref_grams) or quoted else kept).append(f)
             if dropped:
                 story.append(f"The judge asked for the reference's own words in {len(dropped)} finding(s) — ignored.")
                 judged = {**judged, "findings": kept}

@@ -156,11 +156,32 @@ def _seed(tenant: str, store: str, max_pictures: int) -> None:
     edits = {"footer.address": (addr.group(1).strip() if addr else ""), "logo_url": logo_url}
     if handle:
         edits["footer.socials"] = [{"name": "Instagram", "url": f"https://instagram.com/{handle.group(1)}"}]
+    # THE BRAND'S FACES AND ACCENT, from the storefront's own CSS variables — a
+    # Shopify theme declares --font-heading--family / --font-body--family and
+    # its primary button colour. Without them the maker invented Playfair and
+    # green on every local run (2026-09-17) and we judged it on a brand with no
+    # brand; the deploy's deriver fills these from Canva/Shopify/site.
+    def _var(name):
+        m2 = re.search(re.escape(name) + r"\s*:\s*([^;}]+)", home)
+        return m2.group(1).strip() if m2 else ""
+    heading, body = _var("--font-heading--family"), _var("--font-body--family")
+    if heading:
+        edits["font.heading"] = heading.split(",")[0].strip().strip("'\"")
+    if body:
+        edits["font.body"] = body.split(",")[0].strip().strip("'\"")
+    btn = _var("--color-primary-button-background") or _var("--color-button") or _var("--color-accent")
+    rgb = re.match(r"rgb\(\s*(\d+)\s+(\d+)\s+(\d+)", btn or "")
+    if rgb:
+        edits["colors.accent"] = "#%02x%02x%02x" % tuple(int(x) for x in rgb.groups())
+    elif re.match(r"#[0-9a-fA-F]{6}$", btn or ""):
+        edits["colors.accent"] = btn
     brand_theme.approve(tenant, {k: v for k, v in edits.items() if v})
     from app import pictures
     read = pictures.read_pictures(tenant, limit=max_pictures, vision=False)
     print(f"  · seeded {n_ent} products, {n_pic} pictures, {read.get('read', 0)} read for their tones"
-          + (f"; mark {logo_url}" if logo_url else "; no mark found") + (f"; address {edits['footer.address']}" if edits.get("footer.address") else ""))
+          + (f"; mark {logo_url}" if logo_url else "; no mark found") + (f"; address {edits['footer.address']}" if edits.get("footer.address") else "")
+          + (f"; faces {edits.get('font.heading')}/{edits.get('font.body')}" if edits.get("font.body") else "; no faces found on the site")
+          + (f"; accent {edits['colors.accent']}" if edits.get("colors.accent") else "; no accent found on the site"))
 
 
 if __name__ == "__main__":

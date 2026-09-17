@@ -283,7 +283,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`enabled`**() → `bool`  ·  **from nothing**
 - **`get_shipment`**(shipment_id) → `dict`  ·  from `command_agent.py`
 - **`list_company_documents`**() → `list[dict]`  ·  **from nothing**
-- **`match`**(query) → `list[dict]`  ·  from `ad_craft.py`, `admin_ui.py`, `claim_trace.py`, `command_agent.py`, `edits.py`, `email_structures.py`, `gbp_post.py`, `learning.py`, `oauth.py`, `ops_commands.py`, `palette.py`, `test_results.py`, `test_review_is_honest.py`, `test_the_review_answers_one_question.py`, `web.py`
+- **`match`**(query) → `list[dict]`  ·  from `ad_craft.py`, `admin_ui.py`, `claim_trace.py`, `command_agent.py`, `edits.py`, `email_structures.py`, `gbp_post.py`, `learning.py`, `oauth.py`, `ops_commands.py`, `palette.py`, `recreate_once.py`, `test_results.py`, `test_review_is_honest.py`, `test_the_review_answers_one_question.py`, `web.py`
 - **`register_document`**(shipment_id, doc_type?, status?, drive_url?, drive_file_id?, filename?, notes?) → `dict`  ·  from `command_agent.py`
 - **`update_document`**(shipment_id, doc_id, **fields) → `dict`  ·  from `command_agent.py`
 - **`update_shipment`**(shipment_id, **fields) → `dict`  ·  from `command_agent.py`
@@ -1101,7 +1101,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`comparable`**(text) → `str`  ·  from `test_results.py`
 - **`live_ads`**(tenant, limit?) → `dict`  ·  from `test_winning_look.py`
-- **`match`**(tenant, limit?) → `dict`  ·  from `ad_craft.py`, `admin_ui.py`, `claim_trace.py`, `command_agent.py`, `edits.py`, `email_structures.py`, `gbp_post.py`, `learning.py`, `oauth.py`, `ops_commands.py`, `palette.py`, `test_results.py`, `test_review_is_honest.py`, `test_the_review_answers_one_question.py`, `web.py`
+- **`match`**(tenant, limit?) → `dict`  ·  from `ad_craft.py`, `admin_ui.py`, `claim_trace.py`, `command_agent.py`, `edits.py`, `email_structures.py`, `gbp_post.py`, `learning.py`, `oauth.py`, `ops_commands.py`, `palette.py`, `recreate_once.py`, `test_results.py`, `test_review_is_honest.py`, `test_the_review_answers_one_question.py`, `web.py`
 - **`winners`**(tenant, limit?, top?, min_impressions?) → `dict`  ·  from `creative.py`, `test_winning_look.py`
 
 ### `metrics.py`
