@@ -546,15 +546,16 @@ THE MESSAGE this email carries%(message)s
 
 THE STANDARD — an email made by hand from another reference for another brand. Copy its
 CRAFT (a headline that fills the column; the page in the photograph's own tone; a device
-drawn faithfully; real product names and links; tight copy that turns), NOT its design and
-not one of its words:
+drawn faithfully; real product names and links; tight copy that turns), NOT its design, not
+one of its words, and none of its pictures or links — they are another email's:
 %(exemplar)s
 
 RULES
 - Table layout, every style inline, one centred column %(column)d px wide (a width="%(column)d"
   table, max-width:%(column)dpx), a full-width outer table painting the page ground.
 - Pictures: ONLY the URLs listed above, verbatim. Every <img> has alt text and an explicit
-  width. No background-image. No <script>, <form>, <video>, <iframe>.
+  width. No background-image. No <script>, <form>, <video>, <iframe>. An <svg> anywhere
+  outside a baked block is a defect — social links are text, an icon is baked or left out.
 - Type: outside baked blocks use email-safe stacks only (Georgia; Helvetica/Arial; Impact,
   'Arial Black' for a heavy display line; 'Brush Script MT', cursive for a script).
 - BAKED BLOCKS: a display headline, a script line, a device with icons — anything that needs
@@ -583,7 +584,10 @@ RULES
   you turned in one HTML comment at the top: <!-- turned: … -->. Never a store, a stockist,
   a "near you", a date or a discount that is not in the material.
 
-OUTPUT, exactly:
+OUTPUT, exactly — the FIRST characters of your answer are "Subject:". No preamble, no plan,
+no reasoning before it: what you turned and why goes ONLY inside the <!-- turned: … -->
+comment at the top of the HTML, in three sentences at most. (A reply that deliberated first
+ran out of room before the email was finished.)
 Subject: <the subject line>
 Preheader: <the preheader>
 <!DOCTYPE html>… the complete HTML document. Nothing after it."""
@@ -704,9 +708,12 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
         return {"ok": False, "html": "", "subject": "", "preheader": "", "edited": 0,
                 "why": "the composer did not answer — " + str(getattr(reply, "error", ""))}
     subject, pre, out = _parse_email(reply.text)
-    if "<table" not in out.lower():
+    if "<table" not in out.lower() or getattr(reply, "stop_reason", "") == "max_tokens":
+        cut = getattr(reply, "stop_reason", "") == "max_tokens"
         return {"ok": False, "html": "", "subject": "", "preheader": "", "edited": 0,
-                "why": "the composer did not return an email"}
+                "why": (f"the composer ran past the length limit ({len(reply.text or '')} characters) before the email was finished"
+                        if cut else "the composer did not return an email")
+                + (f" — it began: {(reply.text or '').strip()[:160]!r}" if (reply.text or "").strip() and not (reply.text or "").lstrip().startswith("Subject:") else "")}
     edited = 0
     if html:
         import difflib
