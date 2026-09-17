@@ -1197,7 +1197,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`norm`**(hexv) → `str`  ·  from `embed.py`
 - **`on`**(hexv, dark?, light?) → `str`  ·  **from nothing**
 - **`parse`**(hexv) → `tuple[int, int, int] | None`  ·  from `answer_engines.py`, `bundle.py`, `register.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_can_this_account_illustrate.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_semrush_asked_once.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_the_page_says_what_it_answers.py`, `test_the_route_sends_what_the_callee_takes.py`, `test_written_is_not_published.py`
-- **`saturation`**(hexv) → `float`  ·  **from nothing**
+- **`saturation`**(hexv) → `float`  ·  from `recreate.py`
 - **`signature`**(blob) → `dict`  ·  from `pictures.py`, `skill.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_review_is_honest.py`, `test_tenant_isolation.py`, `test_the_route_sends_what_the_callee_takes.py`, `web.py`
 - **`to_hex`**(rgb) → `str`  ·  **from nothing**
 

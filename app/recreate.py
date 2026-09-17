@@ -222,6 +222,7 @@ def kit(tenant: str) -> dict:
     caps = esp.caps(tenant)
     hosts = {urlparse(p["url"]).netloc for p in pics} | {urlparse(theme.get("logo_url") or "").netloc,
                                                         urlparse(config.PUBLIC_BASE_URL).netloc}
+    logo_tone = _logo_tone(theme.get("logo_url") or "")
     return {"tenant": tenant, "name": theme.get("name") or (getattr(b, "display_name", "") if b else tenant),
             "positioning": str(getattr(b, "positioning", "") or "") if b else "",
             "voice": {k: voice.get(k) for k in ("tone", "do_say", "never_say") if voice.get(k)},
@@ -229,7 +230,32 @@ def kit(tenant: str) -> dict:
             "rules": {"channel": kb.channel_rules(tenant, "campaign_email") or ""},
             "esp": {"provider": esp.provider_for(tenant), "tokens": list(esp.TOKENS),
                     "webview": bool(caps.get("webview", True))},
+            "logo_tone": logo_tone,
             "hosts": {h for h in hosts if h}}
+
+
+def _logo_tone(url: str) -> str:
+    """"light" | "dark" | "" — the mark's own luminance over its opaque pixels,
+    so the composer knows which ground it needs. Baci's only mark on file is
+    white; the maker set it on a yellow page (2026-09-17)."""
+    if not url:
+        return ""
+    try:
+        import io
+        from PIL import Image
+        from . import pictures
+        blob = pictures._fetch_bounded(url)
+        if not blob:
+            return ""
+        im = Image.open(io.BytesIO(blob)).convert("RGBA")
+        im.thumbnail((256, 256))
+        px = [(r, g, b) for r, g, b, a in im.getdata() if a > 128]
+        if not px:
+            return ""
+        lum = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in px) / (255 * len(px))
+        return "light" if lum > 0.6 else "dark" if lum < 0.4 else ""
+    except Exception:                                             # noqa: BLE001
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +497,10 @@ approximated by a plain paragraph.
 THE BRAND
 name: %(name)s — %(positioning)s
 voice: %(voice)s
-mark: %(logo)s
+mark: %(logo)s%(logo_tone)s
+accent colour on file: %(accent)s
+today: %(today)s — never name a season, holiday or date that has passed; never invent a
+  date, a deadline, a "this weekend", a launch or a discount that is not in the material
 instagram handle: %(handle)s
 postal address (footer, verbatim): %(address)s
 body face on file: %(body_face)s
@@ -482,6 +511,9 @@ the original and cut to 1:1, 4:5, 3:2 and 16:9 (centre crops, 1200 px wide): use
 that fits the slot, never stretch. The tones measured from each are the palette this email
 leads with: the page ground may be a photograph's bold tone if the reference's is, the card
 its light tone; the brand's accent supports; every text colour must read on its ground.
+THE REFERENCE'S COLOURS ARE NOT YOURS — not its ground, not its accent, not a near match of
+either: if the reference is yellow, yours is this brand's. A mark that is light needs a dark
+ground under it; on a light ground set the name in type instead.
 %(pictures)s
 %(cut)s
 
@@ -513,6 +545,11 @@ RULES
   {{UNSUBSCRIBE}}%(webview)s; no other {{token}}, no "#".
 - The footer carries the postal address verbatim and an Unsubscribe link on {{UNSUBSCRIBE}}.
 - Under %(size)d KB.
+- THE HONEST TURN: if the design's concept rests on a fact this brand's material does not
+  have — a list of stores that stock it, a launch, a deal, an event — turn the concept to the
+  nearest true one (the product on the site, the collection, the piece itself) and say what
+  you turned in one HTML comment at the top: <!-- turned: … -->. Never a store, a stockist,
+  a "near you", a date or a discount that is not in the material.
 
 OUTPUT, exactly:
 Subject: <the subject line>
@@ -608,6 +645,10 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "name": kit_.get("name"), "positioning": kit_.get("positioning") or "",
             "voice": ", ".join(map(str, voice.get("tone") or [])) or "as the material reads",
             "logo": theme.get("logo_url") or "(no mark on file — set the name in type)",
+            "logo_tone": (" — a LIGHT mark: it needs a dark ground" if kit_.get("logo_tone") == "light" else
+                          " — a dark mark: it needs a light ground" if kit_.get("logo_tone") == "dark" else ""),
+            "accent": ((theme.get("colors") or {}).get("accent") or "(none on file)"),
+            "today": db.utcnow().strftime("%d %B %Y"),
             "handle": (kit_.get("handles") or {}).get("instagram") or "(none on file)",
             "address": (theme.get("footer") or {}).get("address") or "",
             "body_face": (theme.get("font") or {}).get("body") or "Helvetica, Arial, sans-serif",
@@ -823,7 +864,11 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
     hit = _grams(text) & ref_grams
     if hit:
         add("leak_words", "blocks", "copy", "five words in a row from the reference: " + sorted(hit)[0])
-    ref_hex = {_expand(h) for h in map(str, brief_.get("reference_hexes") or []) if _HEX.fullmatch(h.strip())}
+    from . import palette as _pal
+    # a near-black, a near-white, a grey is nobody's colour — only the
+    # reference's SATURATED colours can leak (#1a1a1a blocked a run, 2026-09-17)
+    ref_hex = {_expand(h) for h in map(str, brief_.get("reference_hexes") or [])
+               if _HEX.fullmatch(h.strip()) and _pal.saturation(_expand(h)) >= 0.15}
     ours_hex = {_expand(h) for h in _HEX.findall(html)}
     if ref_hex & ours_hex:
         add("leak_hex", "blocks", "colour", "the reference's own colour: " + ", ".join(sorted(ref_hex & ours_hex)[:3]))
@@ -1047,6 +1092,14 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     # the kit and the cast
     say("gathering the brand's material and casting its pictures")
     kit_ = kit(tenant)
+    if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
+        # THE SUBJECT MUST EXIST. The owner's run asked for a key that was not
+        # on file and the maker quietly sold a different product (2026-09-17).
+        import difflib
+        near = difflib.get_close_matches(entity_key, [e.get("key") or "" for e in kit_.get("entities") or []], n=3, cutoff=0.4)
+        story.append(f"No product with the key {entity_key!r} on file"
+                     + (f" — did you mean {', '.join(near)}?" if near else "."))
+        return _finish(FAILED, brief=brief_)
     for x in (extra_pictures or []):
         if x.get("id") and x.get("url"):
             kit_["pictures"].insert(0, {"id": x["id"], "url": x["url"], "small": x["url"], "title": x.get("title") or "drawn",

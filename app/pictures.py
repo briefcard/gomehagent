@@ -140,8 +140,17 @@ def _tier_edge() -> tuple[str, int]:
     return tier, llm.IMAGE_TIERS[tier]["max_edge"]
 
 
+def _max_pixels() -> int:
+    """The model's picture budget in pixels: tokens × 750 at this tier. The
+    API refused a 1280×1568 strip on the owner's run (2026-09-17) — inside
+    the edge, over the budget — and the judge never looked."""
+    from . import llm
+    tier, _ = _tier_edge()
+    return int(llm.IMAGE_TIERS[tier]["max_tokens"]) * 750
+
+
 def strips(blob: bytes, max_edge: int, overlap: int = STRIP_OVERLAP) -> list[dict]:
-    """The screenshot as strips that fit `max_edge`, each
+    """The screenshot as strips that fit `max_edge` AND the pixel budget, each
     `{png, top, bottom, width, height}`, overlapping by `overlap` px so a
     section cut by a strip edge is seen whole in one of them. A picture
     that already fits is one strip. Lossless PNG: this is the one place
@@ -153,10 +162,11 @@ def strips(blob: bytes, max_edge: int, overlap: int = STRIP_OVERLAP) -> list[dic
     if W > max_edge:
         im = im.resize((max_edge, max(1, round(H * max_edge / W))), Image.LANCZOS)
         W, H = im.size
+    strip_h = max(200, min(max_edge, _max_pixels() // max(1, W)))
     out = []
     top = 0
     while True:
-        bottom = min(H, top + max_edge)
+        bottom = min(H, top + strip_h)
         crop = im.crop((0, top, W, bottom))
         buf = io.BytesIO()
         crop.save(buf, format="PNG", optimize=True)
@@ -175,7 +185,8 @@ def contact_sheet(blob: bytes, max_edge: int) -> bytes:
     from PIL import Image
     from . import llm
     im = Image.open(io.BytesIO(blob)).convert("RGB")
-    w, h = llm.resized_size(*im.size, max_edge, max_edge * 4)
+    tier, _ = _tier_edge()
+    w, h = llm.resized_size(*im.size, max_edge, llm.IMAGE_TIERS[tier]["max_tokens"])
     if (w, h) != im.size:
         im = im.resize((w, h), Image.LANCZOS)
     buf = io.BytesIO()

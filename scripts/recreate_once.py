@@ -35,7 +35,10 @@ def main() -> int:
     ap.add_argument("--max-pictures", type=int, default=60)
     ap.add_argument("--reread", action="store_true", help="read the reference again even if its brief is on file")
     a = ap.parse_args()
-    out = a.out or os.path.join(tempfile.gettempdir(), f"once-{a.tenant}-{int(time.time())}")
+    # A durable folder, not the system temp dir: macOS cleared the first
+    # runs' folders before anyone looked at them (2026-09-17). Git-ignored.
+    runs = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "runs")
+    out = a.out or os.path.join(runs, f"once-{a.tenant}-{time.strftime('%Y%m%d-%H%M%S')}")
     os.makedirs(out, exist_ok=True)
     dbfile = a.db or os.path.join(out, "once.db")
     os.environ["DATABASE_URL"] = f"sqlite:///{dbfile}"
@@ -76,8 +79,23 @@ def main() -> int:
     st = next((r for r in es.library() if r["id"] == got.get("structure_id")), {})
     with open(os.path.join(out, "brief.json"), "w") as f:
         json.dump(st.get("brief") or {}, f, indent=1, ensure_ascii=False)
+    html = rec.get("html") or ""
+    # the baked blocks live on our media route, which no server serves here:
+    # write them beside the page so the file opens whole (broken pictures on
+    # the owner's first look, 2026-09-17)
+    if html:
+        from app import config as _cfg, media as _media
+        base = _cfg.PUBLIC_BASE_URL.rstrip("/") + "/media/"
+        os.makedirs(os.path.join(out, "media"), exist_ok=True)
+        for bid, ext in set(re.findall(re.escape(base) + r"([0-9a-f]{32})\.(\w+)", html)):
+            try:
+                blob, _mime = _media.get(bid)
+                open(os.path.join(out, "media", f"{bid}.{ext}"), "wb").write(blob or b"")
+                html = html.replace(f"{base}{bid}.{ext}", f"media/{bid}.{ext}")
+            except Exception as e:                                # noqa: BLE001
+                print("  · could not localise", bid, e)
     with open(os.path.join(out, "email.html"), "w") as f:
-        f.write(rec.get("html") or "")
+        f.write(html)
     latest = recreate.latest(got["structure_id"], a.tenant) or {}
     if latest.get("png"):
         from app import media
