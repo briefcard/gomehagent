@@ -266,6 +266,7 @@ def main() -> int:
        and not any(f["code"] == "fabricated_quote" for f in rc.check(email_html(extra='<p style="color:#ffffff">“The best plates we have ever owned, hands down.” — Maria K.</p>'), {**kit, "claims": [{"id": "c", "claim": CLAIM}]}, BRIEF, copy_)))
     ck("the brand's ban list blocks", blocks(email_html(claim="Handmade for you."), "banned", copy={"claims": []}))
     ck("a placeholder link blocks", blocks(email_html(unsub="#unsubscribe"), "link_placeholder"))
+    ck("the same photograph twice blocks", blocks(email_html(photo_b=PHOTO_A), "picture_twice"))
     ck("words baked into a picture still count — the alt is read", blocks(email_html(bake=True, headline="Sauce the bread, sauce the meat, sauce it") and rc.bake(email_html(bake=True, headline="Don't just sauce the bread. Sauce the meat!"), "baci")[0], "leak_words"))
 
     print("— 6. the loop: best round kept, edits not rewrites, unjudged never shippable —")
@@ -299,6 +300,17 @@ def main() -> int:
     answers["email_judge"] = lambda prompt: {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
                                              "findings": [{"where": f"s{i}", "what": "off", "do": "fix", "severity": "blocks"} for i in range(next(worse))]}
     got_w = rc.run(sid, "baci", "portofino", seed="w")
+    judged.clear()
+    leaky = iter([True, False])
+    answers["email_judge"] = lambda prompt: {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
+                                             "findings": ([{"where": "hook", "what": "the reference's hook says DON'T JUST SAUCE THE BREAD — ours lacks the pun",
+                                                            "do": "add the words sauce the meat", "severity": "blocks"}] if next(leaky) else [])}
+    got_l = rc.run(sid, "baci", "portofino", seed="l")
+    ck("a judge finding that carries the reference's own words is dropped and said — never handed to the next edit",
+       "asked for the reference's own words in 1 finding" in got_l["note"] and got_l["status"] == rc.SHIPPABLE
+       and not any("sauce the meat" in p for p in compose_seen if "FINDINGS" in p), got_l.get("note"))
+    ck("the judge is handed the product's own material, and the shot inlines our media",
+       "THE OTHER BRAND'S MATERIAL" in seen["email_judge"][-1][-1]["text"] and "Melamine and porcelain" in seen["email_judge"][-1][-1]["text"])
     ck("when every edit made it worse, round 0 is kept — the best, never the last",
        got_w["status"] == rc.NOT_SHIPPABLE and [r["blocking"] for r in got_w["rounds"]] == [1, 2, 2] and rc.latest(sid, "baci")["best"] == 0)
     answers["email_judge"] = _judge

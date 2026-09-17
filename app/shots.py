@@ -132,8 +132,11 @@ def shoot_fragment(head: str, fragment: str, *, width: int = 600, scale: int = S
     which, why = door()
     if not which:
         return {"ok": False, "png": b"", "door": "", "why": why}
+    # a transparent page: the picture carries only what the block paints, so
+    # a device sits on the email's own ground — the owner saw white rectangles
+    # behind every baked word (2026-09-17)
     doc = (f"<!DOCTYPE html><html><head><meta charset='utf-8'>{head}</head>"
-           f"<body style='margin:0;padding:0;width:{width}px'>{fragment}</body></html>")
+           f"<body style='margin:0;padding:0;width:{width}px;background:transparent'>{fragment}</body></html>")
     t0 = time.monotonic()
     got = _SEM.acquire(timeout=TIMEOUT_MS / 1000)
     if not got:
@@ -152,7 +155,8 @@ def shoot_fragment(head: str, fragment: str, *, width: int = 600, scale: int = S
                 except Exception:                                # noqa: BLE001
                     pass
                 el = page.locator("body > table").first
-                png = el.screenshot(type="png") if el.count() else page.screenshot(full_page=True, type="png")
+                png = (el.screenshot(type="png", omit_background=True) if el.count()
+                       else page.screenshot(full_page=True, type="png", omit_background=True))
             finally:
                 browser.close()
         return {"ok": bool(png), "png": png, "door": which, "why": "" if png else "an empty picture",

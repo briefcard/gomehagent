@@ -206,7 +206,7 @@ def kit(tenant: str) -> dict:
         desc = re.sub(r"<[^>]+>", " ", str(getattr(e, "description", "") or ""))
         ents.append({"key": e.key, "name": e.name, "type": getattr(e, "type", "") or "",
                      "url": str(a.get("url") or ""), "price": str(a.get("price") or ""),
-                     "image": str(a.get("image") or ""), "description": _norm(desc)[:400]})
+                     "image": str(a.get("image") or ""), "description": _norm(desc)[:1200]})
     pics = []
     for a in kb.assets(tenant):
         if getattr(a, "rights", "") != kb.OWNED or getattr(a, "kind", "image") != "image" or not a.url:
@@ -534,9 +534,16 @@ RULES
   'Arial Black' for a heavy display line; 'Brush Script MT', cursive for a script).
 - BAKED BLOCKS: a display headline, a script line, a device with icons — anything that needs
   a web font or inline SVG — goes inside <!--bake-->…<!--/bake-->: exactly one complete
-  <table width="…"> that paints its own ground, no links inside. Each is photographed at 2×
-  and replaced by one <img>; a Google Fonts <link> in <head> is allowed for them. Body copy,
-  buttons and product names are never baked.
+  <table width="…">, no links inside, TYPE AND DRAWN SHAPES ONLY: never a photograph (no
+  <img> inside a baked block — a photograph is placed as its own <img>), never body copy
+  (a baked block holds at most a dozen words), never a button or a product name. It is
+  photographed on a transparent ground at 2× and replaced by one <img>; paint a ground
+  inside it only when the device has one. A Google Fonts <link> in <head> is allowed for them.
+- Every photograph appears ONCE. A second slot gets a second picture or a different cut,
+  never the same one again.
+- A product fact (dishwasher safe, BPA free, made in…, a material, a count) appears only if
+  it is in the product's own text or the claims below — a callout is never invented.
+- A social link only for a handle listed above; no "TikTok" without a TikTok handle.
 - Social proof (quotes, testimonials, reviews) exists only when a claim or review is listed
   under the message; with none on file, that block carries a short useful tip or fact from
   the brand's material instead — no quotation marks, no attribution, nothing presented as
@@ -874,6 +881,15 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
         add("leak_hex", "blocks", "colour", "the reference's own colour: " + ", ".join(sorted(ref_hex & ours_hex)[:3]))
     if reference_host and any(urlparse(im.get("src", "")).netloc == reference_host for im in w.imgs):
         add("leak_image", "blocks", "image", "a picture from the reference's host")
+    seen_src: dict = {}
+    for im in w.imgs:
+        src = re.sub(r"\?.*$", "", im.get("src", ""))
+        if src and src != re.sub(r"\?.*$", "", theme.get("logo_url") or "") and "/media/" not in src:
+            seen_src[src] = seen_src.get(src, 0) + 1
+    for src, n in seen_src.items():
+        if n > 1:
+            add("picture_twice", "blocks", src[-60:], f"the same photograph {n} times — a second slot gets a second picture")
+            break
     # 3. what must appear verbatim — the claims the message names (a claim
     #    reworded is a claim nobody approved)
     norm_text = _norm(text)
@@ -936,6 +952,37 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
     return out
 
 
+def _material(kit_: dict, entity_key: str) -> str:
+    """The product's own text — what the judge may hold ours to."""
+    ents = kit_.get("entities") or []
+    e = next((x for x in ents if x.get("key") == entity_key), None)
+    lines = []
+    if e:
+        lines.append(f"{e.get('name', '')}: {str(e.get('description') or '')[:1200]}")
+    for c in (kit_.get("claims") or [])[:12]:
+        lines.append("claim: " + str(c.get("claim") or ""))
+    return "\n".join(lines)
+
+
+def _inline_media(html: str) -> str:
+    """For the SHOT only: our own media route's pictures as data URIs, so the
+    judge sees the baked devices whether or not this process has a server
+    behind it (the runner on a laptop has none — the judge saw nine broken
+    pictures and said so, 2026-09-17)."""
+    import base64
+    from . import media
+    base = config.PUBLIC_BASE_URL.rstrip("/") + "/media/"
+    def _one(m):
+        try:
+            blob, mime = media.get(m.group(1))
+            if blob:
+                return f"data:{mime or 'image/png'};base64," + base64.b64encode(blob).decode()
+        except Exception:                                         # noqa: BLE001
+            pass
+        return m.group(0)
+    return re.sub(re.escape(base) + r"([0-9a-f]{32})\.\w+", _one, html)
+
+
 def blocking(findings) -> list[dict]:
     return [f for f in (findings or []) if f.get("severity") == "blocks"]
 
@@ -945,23 +992,32 @@ def blocking(findings) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _JUDGE_PROMPT = """Two emails: first the REFERENCE (whole, then its top), then OURS (whole, then its top).
-Ours was made to recreate the reference's design for another brand with that brand's own
-pictures and words. The designer's brief of the reference:
+Ours was made to RECREATE the reference's design for another brand — a different product,
+its own photographs, its own words, its own colours. The designer's brief of the reference:
 concept: %(concept)s
 devices: %(devices)s
 
-Judge ours against the reference as an art director would, and answer JSON only:
+THE OTHER BRAND'S MATERIAL — the only facts ours may state about the product:
+%(material)s
+
+Judge ours as an art director judges a recreation, and answer JSON only:
 {"same_concept": true|false,
  "devices_in_order": true|false,
  "weight_rhythm": one line on scale, spacing and visual weight compared,
- "brand_material": true|false — everything in ours is the other brand's own (no copied words or pictures),
+ "brand_material": true|false — everything in ours is the other brand's own,
  "findings": [{"where": "section n / the headline / the post card",
-               "what": what differs from the reference in a way that matters,
-               "do": the concrete edit that closes it,
+               "what": what falls short, in the ROLE the device plays,
+               "do": the concrete edit that closes it, in the other brand's terms,
                "severity": "blocks" if the recreation fails without it, else "cosmetic"}]}
-Name real differences only — proportions, a missing device, a device drawn wrong, type set too
-small or too light, a ground that should turn, spacing off by half. Do not ask for the
-reference's colours, words or pictures: the brand's own are correct by design."""
+What counts: proportions (a headline that fills the column in the reference and a third of it
+in ours), a device missing or drawn wrong FOR ITS ROLE, type too small or too light, a ground
+that should turn, spacing off by half, a picture cut badly, a broken or empty element, a
+product fact in ours that is not in the material above (say "fabricated": it blocks).
+What does not count — never write these: the reference's own prop, product, lettering,
+handwritten words, mascot, colours or exact copy. A wire basket, a bubble word, a pickle, a
+"CRUNCHY", a cartoon figure belong to the reference; ours plays the same ROLE with this
+brand's things (a tray, a table, the collection name at scale, a drawn accent) or leaves it
+out. A finding that names one of those is not a finding. Never quote the reference's words."""
 
 
 _JUDGE_ALONE = """One email, ours (whole, then its top), made for a brand with no reference to follow.
@@ -974,9 +1030,10 @@ one ask, nothing generic. Answer JSON only:
                "severity": "blocks" if it must change before sending, else "cosmetic"}]}"""
 
 
-def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "") -> dict:
+def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "", material: str = "") -> dict:
     """`{ok, findings, verdict, why, calls}` — ours beside the reference, or
-    ours alone when there is no reference."""
+    ours alone when there is no reference. `material` is the product's own
+    text: a fact stated in ours that is not in it is a fabrication."""
     from . import pictures as ed
     if not ours_png:
         return {"ok": False, "findings": [], "verdict": {}, "why": "no picture to judge", "calls": 0}
@@ -989,7 +1046,8 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {
-        "concept": brief_.get("concept"), "devices": "; ".join(map(str, brief_.get("devices") or []))[:1500]})
+        "concept": brief_.get("concept"), "devices": "; ".join(map(str, brief_.get("devices") or []))[:1500],
+        "material": (material or "(nothing beyond the product's name)")[:2500]})
         if reference_png else _JUDGE_ALONE})
     reply = _ask("email_judge", blocks, tenant=tenant, max_tokens=2000)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
@@ -1135,6 +1193,9 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         story.append("The reference picture could not be fetched — ours is judged on its own.")
     rounds: list[dict] = []
     html, raw, findings_prev = "", "", []
+    ref_grams = _grams(" ".join(map(str, brief_.get("reference_text") or [])), 3) - _grams(
+        " ".join(e.get("name", "") + " " + e.get("description", "") for e in kit_.get("entities") or []), 3)
+    material_ = _material(kit_, entity_key)
     best_i, best_n = -1, 10 ** 6
     for n in range(ROUNDS + 1):
         say(f"round {n}: " + ("writing the email" if n == 0 else "editing to the findings"))
@@ -1151,13 +1212,25 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         copy_.update(subject=made.get("subject") or copy_.get("subject", ""),
                      preheader=made.get("preheader") or copy_.get("preheader", ""))
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
-        shot = shots.shoot(html)
+        shot = shots.shoot(_inline_media(html))
         png_id = ""
         if shot.get("ok"):
             put = media.put(tenant, shot["png"], mime="image/png", origin="generated")
             png_id = put.get("id", "") if put.get("ok") else ""
-        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant) if shot.get("ok")
+        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant, material=material_) if shot.get("ok")
                   else {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0})
+        # THE JUDGE IS NOT A LEAK: a finding that carries the reference's own
+        # words ("add CRUNCHYYY!!!", "a wire basket like the reference's") would
+        # be implemented by the next edit — the owner's run of 2026-09-17 grew
+        # a pickle brand's copy that way. Such findings are dropped and said.
+        if ref_grams:
+            kept, dropped = [], []
+            for f in judged.get("findings") or []:
+                words = _grams(f"{f.get('what', '')} {f.get('do', '')}", 3)
+                (dropped if words & ref_grams else kept).append(f)
+            if dropped:
+                story.append(f"The judge asked for the reference's own words in {len(dropped)} finding(s) — ignored.")
+                judged = {**judged, "findings": kept}
         calls += judged.get("calls", 0)
         open_ = blocking(checks) + blocking(judged.get("findings"))
         rounds.append({"n": n, "png_id": png_id, "baked": sum(1 for b_ in baked if b_.startswith("baked:")),
