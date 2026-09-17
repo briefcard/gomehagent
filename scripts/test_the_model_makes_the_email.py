@@ -108,7 +108,7 @@ def email_html(*, photo_a=PHOTO_A, photo_b=PHOTO_B, logo=LOGO, address=ADDRESS, 
                     f'<!--/bake--></td></tr>')
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{headline}</title>
 <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet"></head>
-<body style="margin:0;background:{page}">{extra}
+<body style="margin:0;background:{page}"><!-- system: faces display=Impact headline=Helvetica body=Helvetica accent=Brush Script MT · scale: 96/13/12/11/11 · space: 8/16/30/34 · inset: 34 · radius: 14 -->{extra}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{page}"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px">
 <tr><td align="center" style="padding:30px"><img src="{logo}" alt="the brand" width="150"></td></tr>
@@ -280,6 +280,13 @@ def main() -> int:
     ck("the brand's ban list blocks", blocks(email_html(claim="Handmade for you."), "banned", copy={"claims": []}))
     ck("a placeholder link blocks", blocks(email_html(unsub="#unsubscribe"), "link_placeholder"))
     ck("the same photograph twice blocks", blocks(email_html(photo_b=PHOTO_A), "picture_twice"))
+    no_sys = email_html().replace("<!-- system:", "<!-- was:")
+    ck("an email with no declared system blocks", any(f["code"] == "system" for f in rc.system_check(no_sys)))
+    choppy = email_html(extra='<table><tr><td style="padding:0 20px">a</td><td style="padding:0 24px">b</td><td style="padding:0 28px">c</td><td style="padding:0 44px">d</td></tr></table>'
+                        '<p style="color:#ffffff;font-size:22px">x</p><p style="color:#ffffff;font-size:31px">y</p>')
+    got_sys = {f["code"] for f in rc.system_check(choppy)}
+    ck("insets and sizes outside the declared system block, by the numbers", {"system_inset", "system_scale"} <= got_sys, str(got_sys))
+    ck("the good email keeps to its own system", not rc.system_check(email_html()), str(rc.system_check(email_html())))
     ck("an invented picture on the brand's own host blocks", blocks(email_html(photo_b=CDN + "table_staged_tray_1200x800.jpg"), "asset_invented"))
     ck("a cut of a filed picture is allowed", not any(f["code"] in ("asset", "asset_invented") for f in rc.check(email_html(photo_b=CDN + "table_1200x1500_crop_center.jpg"), kit, BRIEF, copy_)))
     httpx.head = lambda url, *a, **k: types.SimpleNamespace(status_code=404 if "gone" in url else 200)

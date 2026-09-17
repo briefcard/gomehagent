@@ -528,7 +528,7 @@ today: %(today)s — never name a season, holiday or date that has passed; never
   date, a deadline, a "this weekend", a launch or a discount that is not in the material
 instagram handle: %(handle)s
 postal address (footer, verbatim): %(address)s
-body face on file: %(body_face)s
+faces on file: heading %(heading_face)s · body %(body_face)s
 %(rules_brand)s
 
 THE PICTURES — the brand's own, cast for this design by looking at them. Each is offered in
@@ -549,6 +549,22 @@ CRAFT (a headline that fills the column; the page in the photograph's own tone; 
 drawn faithfully; real product names and links; tight copy that turns), NOT its design, not
 one of its words, and none of its pictures or links — they are another email's:
 %(exemplar)s
+
+THE SYSTEM FIRST — the way a designer at a good studio works: before the first section,
+set the system, then lay every section out from it. One rhythm reads as one email; a
+different inset and a different size in every section reads as pieces glued together.
+Declare it as the first line inside <body>, as a comment, and then USE ONLY THOSE VALUES:
+<!-- system: faces display=… headline=… body=… accent=…(optional) ·
+     scale: display/headline/subhead/body/small = 64/40/24/16/12 (your numbers) ·
+     space: 8/16/32/56 (your four steps) · inset: 34 (one side inset, the whole column) ·
+     radius: 14 -->
+The faces: the brand's heading and body faces are the defaults; add at most ONE display
+face and ONE accent (script) face for roles the reference has, with email-safe fallbacks —
+never a fifth. The scale: five sizes with clear steps; every font-size in the email is one
+of them. The space: four steps; every vertical gap is one of them, and like things get the
+same gap (headline→body, picture→caption, section→section). The inset: one number, every
+section's content sits on it; a card inside the column has its own one inner inset. Colours
+change, designs change; this discipline does not.
 
 RULES
 - Table layout, every style inline, one centred column %(column)d px wide (a width="%(column)d"
@@ -595,7 +611,10 @@ Preheader: <the preheader>
 _REVISE_PROMPT = """Below is the email you wrote and the judge's findings after comparing it to the reference.
 EDIT the HTML to close each finding. Change only what a finding requires; every other line
 stays exactly as it is. The same rules apply (email-safe outside baked blocks; only the
-listed pictures; the address and {{UNSUBSCRIBE}}; nothing invented).
+listed pictures; the address and {{UNSUBSCRIBE}}; nothing invented). Keep to the system
+declared in the <!-- system --> comment at the top of <body>: an edit uses ITS faces, ITS
+sizes, ITS spacing steps and ITS inset — never a new value; if the system itself is wrong,
+change the comment and every place that follows from it.
 
 FINDINGS
 %(findings)s
@@ -704,6 +723,7 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "handle": (kit_.get("handles") or {}).get("instagram") or "(none on file)",
             "address": (theme.get("footer") or {}).get("address") or "",
             "body_face": (theme.get("font") or {}).get("body") or "Helvetica, Arial, sans-serif",
+            "heading_face": (theme.get("font") or {}).get("heading") or "(none — the body face)",
             "rules_brand": rules_brand,
             "brief": (json.dumps({k: brief_.get(k) for k in ("concept", "sections", "visual_system", "devices")},
                                  ensure_ascii=False, indent=1) if brief_.get("concept") else
@@ -1051,6 +1071,61 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
     return out
 
 
+_SYSTEM = re.compile(r"<!--\s*system:(.*?)-->", re.S | re.I)
+
+
+def system_check(html: str) -> list[dict]:
+    """The composer is held to the system IT declared: the sizes it uses are
+    its scale, the side insets its inset, the faces its four at most. Not a
+    taste rule — its own word. The owner, 2026-09-17: "the padding is
+    inconsistent per section so it looks choppy; too much variation in fonts
+    and sizes." Baked blocks are pictures by now, so display type set inside
+    them is not counted. `{code, severity, where, what}` findings."""
+    out: list[dict] = []
+    m = _SYSTEM.search(html)
+    if not m:
+        return [{"code": "system", "severity": "blocks", "where": "body",
+                 "what": "no <!-- system: … --> declared at the top of <body> — set the faces, the scale, the "
+                         "spacing steps and the inset first, then lay out from them"}]
+    decl = m.group(1)
+    body = html[m.end():]
+    nums = lambda seg: [int(float(x)) for x in re.findall(r"\d+(?:\.\d+)?", seg)]  # noqa: E731
+    scale = nums((re.search(r"scale[^·\n]*?=\s*([\d/ .]+)", decl) or re.search(r"scale:?\s*([\d/ .]+)", decl) or [None, ""])[1])
+    inset = nums((re.search(r"inset:?\s*(\d+)", decl) or [None, ""])[1])
+    used_sizes = sorted({int(float(x)) for x in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", body) if float(x) > 2})
+    if scale:
+        stray = [x for x in used_sizes if not any(abs(x - d) <= 1 for d in scale)]
+        if len(stray) >= 2:
+            out.append({"code": "system_scale", "severity": "blocks", "where": "type",
+                        "what": f"font sizes {', '.join(map(str, stray))} px are not in the declared scale "
+                                f"{'/'.join(map(str, scale))} — set each to a step of the scale"})
+    sides: dict = {}
+    # cell insets only — a button's own padding or a paragraph's is not the column's
+    for td in re.findall(r"<td\b[^>]*>", body, re.I):
+        pm = re.search(r"padding:\s*([^;\"]+)", td)
+        if not pm:
+            continue
+        v = nums(pm.group(1).replace("!important", ""))
+        if not v:
+            continue
+        r_, l_ = (v[0], v[0]) if len(v) == 1 else (v[1], v[1]) if len(v) in (2, 3) else (v[1], v[3])
+        for x in (r_, l_):
+            if x >= 12:
+                sides[x] = sides.get(x, 0) + 1
+    distinct = sorted(sides)
+    if inset and len([x for x in distinct if abs(x - inset[0]) > 1]) > 3:
+        out.append({"code": "system_inset", "severity": "blocks", "where": "spacing",
+                    "what": f"side insets {', '.join(map(str, distinct))} px — the system declares {inset[0]}; the column "
+                            f"content sits on {inset[0]}, a card may have one inner inset, nothing else"})
+    faces = {re.split(r"\s*,", f.strip().strip("'\""))[0].strip("'\" ").lower()
+             for f in re.findall(r"font-family:\s*([^;\"]+)", body)}
+    if len(faces) > 4:
+        out.append({"code": "system_faces", "severity": "blocks", "where": "type",
+                    "what": f"{len(faces)} faces in use ({', '.join(sorted(faces))}) — four at most: the brand's heading and body, "
+                            f"one display, one accent"})
+    return out
+
+
 def _material(kit_: dict, entity_key: str) -> str:
     """The product's own text — what the judge may hold ours to."""
     ents = kit_.get("entities") or []
@@ -1100,6 +1175,9 @@ Judge ours as an art director judges a finished email, and answer JSON only:
 {"same_concept": true|false,
  "devices_in_order": true|false,
  "weight_rhythm": one line on scale, spacing and visual weight compared,
+ "one_system": true|false — ours reads as ONE email: the same inset down the column, the
+               same gap between like things, one type scale with clear steps, three faces
+               at most; where it breaks, a finding names the section and the value,
  "brand_material": true|false — everything in ours is the other brand's own,
  "would_send": true|false — as strong an idea, as bold a scale, as clear an ask as the
                reference, in this brand's things,
@@ -1370,7 +1448,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         told = truth(_Walk_words(html), material_, tenant=tenant)
         calls += told.get("calls", 0)
-        checks = checks + told["findings"] + bake_findings
+        checks = checks + told["findings"] + bake_findings + system_check(html)
         shot = shots.shoot(_inline_media(html))
         png_id = ""
         if shot.get("ok"):
