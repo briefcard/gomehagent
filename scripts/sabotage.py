@@ -160,7 +160,7 @@ SABOTAGES = [
     {
         "name": 'an_outside_picture_is_refused',
         "file": 'app/recreate.py',
-        "find": '        if src not in allowed and host not in hosts:\n',
+        "find": '        if _base(src) not in allowed and host not in hosts:\n',
         "replace": '        if False:\n',
         "suites": ['test_the_model_makes_the_email.py'],
         "why": "a picture from any host on the internet — a competitor's, the reference's — can be shipped in a client's email as if it were theirs",

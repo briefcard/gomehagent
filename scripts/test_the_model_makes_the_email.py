@@ -147,6 +147,7 @@ def main() -> int:
     kb.add_asset("baci", PHOTO_A, rights=kb.OWNED, subject="photo", title="spaghetti on the Portofino plate", entity_key="portofino", origin="human")
     kb.add_asset("baci", PHOTO_B, rights=kb.OWNED, subject="photo", title="the Portofino place setting", entity_key="portofino", origin="human")
     kb.add_asset("baci", PHOTO_C, rights=kb.OWNED, subject="photo", title="the walls", origin="crawl")
+    kb.add_asset("baci", PHOTO_B.replace("table", "gone_table"), rights=kb.OWNED, subject="photo", title="a picture that went away", origin="crawl")
     kb.add_asset("baci", CDN + "ref.jpg", rights=kb.REFERENCE, subject="scene", title="a pin", origin="pinterest")
     ids = {a.url: a.id for a in kb.assets("baci")}
     a_id, b_id = ids[PHOTO_A], ids[PHOTO_B]
@@ -201,7 +202,8 @@ def main() -> int:
     print("— 2. the cast looks at a sheet that fits the tier —")
     kit = rc.kit("baci")
     ck("the kit carries the publishable pictures with their readings, never a reference pin",
-       {p["id"] for p in kit["pictures"]} == {a_id, b_id, ids[PHOTO_C]} and all(p["kind"] for p in kit["pictures"]))
+       {p["id"] for p in kit["pictures"]} >= {a_id, b_id, ids[PHOTO_C]} and not any("ref.jpg" in p["url"] for p in kit["pictures"])
+       and all(p["kind"] for p in kit["pictures"] if p["id"] in (a_id, b_id, ids[PHOTO_C])))
     from PIL import Image
     sheet = Image.open(io.BytesIO(rc._sheet([png()] * 24)))
     ck("a full sheet is under the 1568-px edge the model refuses above", max(sheet.size) <= 1568, str(sheet.size))
@@ -228,6 +230,10 @@ def main() -> int:
     good = email_html()
     answers["email_compose"] = reply_email(good)
     made = rc.compose(BRIEF, kit, cast, {"subject": "Set the scene"}, tenant="baci", fitted=fitted)
+    dev = rc._devices_text({"devices": [{"what": "a tiny drawn figure beside the button", "kind": "dressing", "role": "points at the button",
+                                          "effect": "playful", "instance": "a cartoon shopper"}, "a script closer"]})
+    ck("a device with a role and an effect is rendered for the judge; a plain one still reads",
+       "[dressing] a tiny drawn figure beside the button — role: points at the button; effect: playful" in dev and "a script closer" in dev)
     ck("the composer's reply is parsed into subject, preheader and the HTML",
        made["ok"] and made["subject"] == "Set the scene" and made["preheader"].startswith("The Sunday") and made["html"].startswith("<!DOCTYPE"))
     prompt = seen["email_compose"][-1]
@@ -267,6 +273,11 @@ def main() -> int:
     ck("the brand's ban list blocks", blocks(email_html(claim="Handmade for you."), "banned", copy={"claims": []}))
     ck("a placeholder link blocks", blocks(email_html(unsub="#unsubscribe"), "link_placeholder"))
     ck("the same photograph twice blocks", blocks(email_html(photo_b=PHOTO_A), "picture_twice"))
+    ck("an invented picture on the brand's own host blocks", blocks(email_html(photo_b=CDN + "table_staged_tray_1200x800.jpg"), "asset_invented"))
+    ck("a cut of a filed picture is allowed", not any(f["code"] in ("asset", "asset_invented") for f in rc.check(email_html(photo_b=CDN + "table_1200x1500_crop_center.jpg"), kit, BRIEF, copy_)))
+    httpx.head = lambda url, *a, **k: types.SimpleNamespace(status_code=404 if "gone" in url else 200)
+    ck("a picture that answers 404 blocks", blocks(email_html(photo_b=PHOTO_B.replace("table", "gone_table")), "picture_missing", links=True))
+    httpx.head = lambda *a, **k: types.SimpleNamespace(status_code=200)
     ck("words baked into a picture still count — the alt is read", blocks(email_html(bake=True, headline="Sauce the bread, sauce the meat, sauce it") and rc.bake(email_html(bake=True, headline="Don't just sauce the bread. Sauce the meat!"), "baci")[0], "leak_words"))
 
     print("— 6. the loop: best round kept, edits not rewrites, unjudged never shippable —")
@@ -283,6 +294,9 @@ def main() -> int:
     judged: list = []
 
     def _judge(prompt):
+        text = prompt[-1]["text"] if isinstance(prompt, list) else ""
+        if text.startswith("The words of an email"):
+            return {"fabricated": []}
         judged.append(1)
         if len(judged) == 1:
             return {"same_concept": True, "devices_in_order": True, "weight_rhythm": "headline light", "brand_material": True,
@@ -297,22 +311,40 @@ def main() -> int:
        (rc.latest(sid, "baci") or {}).get("status") == rc.SHIPPABLE and rc.latest(sid, "baci")["png"] and not rc.latest(sid, "baci")["findings"])
     judged.clear()
     worse = iter([1, 2, 2])
-    answers["email_judge"] = lambda prompt: {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
-                                             "findings": [{"where": f"s{i}", "what": "off", "do": "fix", "severity": "blocks"} for i in range(next(worse))]}
+    answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else
+                                             {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
+                                              "findings": [{"where": f"s{i}", "what": "off", "do": "fix", "severity": "blocks"} for i in range(next(worse))]})
     got_w = rc.run(sid, "baci", "portofino", seed="w")
+    best_w = (rc.latest(sid, "baci") or {}).get("best")
     judged.clear()
     leaky = iter([True, False])
-    answers["email_judge"] = lambda prompt: {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
-                                             "findings": ([{"where": "hook", "what": "the reference's hook says DON'T JUST SAUCE THE BREAD — ours lacks the pun",
-                                                            "do": "add the words sauce the meat", "severity": "blocks"}] if next(leaky) else [])}
+    answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else
+                                             {"same_concept": True, "devices_in_order": True, "weight_rhythm": "", "brand_material": True,
+                                              "findings": ([{"where": "hook", "what": "the reference's hook says DON'T JUST SAUCE THE BREAD — ours lacks the pun",
+                                                             "do": "add the words sauce the meat", "severity": "blocks"}] if next(leaky) else [])})
     got_l = rc.run(sid, "baci", "portofino", seed="l")
     ck("a judge finding that carries the reference's own words is dropped and said — never handed to the next edit",
        "asked for the reference's own words in 1 finding" in got_l["note"] and got_l["status"] == rc.SHIPPABLE
        and not any("sauce the meat" in p for p in compose_seen if "FINDINGS" in p), got_l.get("note"))
-    ck("the judge is handed the product's own material, and the shot inlines our media",
-       "THE OTHER BRAND'S MATERIAL" in seen["email_judge"][-1][-1]["text"] and "Melamine and porcelain" in seen["email_judge"][-1][-1]["text"])
+    ck("the truth pass is its own call and is handed the product's own material",
+       any("THE MATERIAL" in p[-1]["text"] and "Melamine and porcelain" in p[-1]["text"] for p in seen["email_judge"] if isinstance(p, list))
+       and not any("THE MATERIAL" in p[-1]["text"] and "REFERENCE" in p[-1]["text"] for p in seen["email_judge"] if isinstance(p, list)))
+    judged.clear()
+    liar = iter([True, False, False])
+    def _truth_or_judge(prompt):
+        text = prompt[-1]["text"] if isinstance(prompt, list) else ""
+        if text.startswith("The words of an email"):
+            return {"fabricated": [{"words": "BPA free", "why": "the material says nothing about BPA"}] if next(liar, False) else []}
+        return {"same_concept": True, "devices_in_order": True, "brand_material": True, "would_send": True, "weight_rhythm": "", "findings": []}
+    answers["email_judge"] = _truth_or_judge
+    got_t = rc.run(sid, "baci", "portofino", seed="t2")
+    ck("a product fact the material does not support blocks the round and is edited out",
+       got_t["status"] == rc.SHIPPABLE and got_t["rounds"][0]["blocking"] >= 1
+       and any(c["code"] == "fabricated" and "BPA" in c["where"] for c in got_t["rounds"][0]["check"]), str(got_t["rounds"][0]["check"])[:300])
+    answers["email_judge"] = _judge
     ck("when every edit made it worse, round 0 is kept — the best, never the last",
-       got_w["status"] == rc.NOT_SHIPPABLE and [r["blocking"] for r in got_w["rounds"]] == [1, 2, 2] and rc.latest(sid, "baci")["best"] == 0)
+       got_w["status"] == rc.NOT_SHIPPABLE and [r["blocking"] for r in got_w["rounds"]] == [1, 2, 2] and best_w == 0,
+       str([r["blocking"] for r in got_w["rounds"]]) + f" best={best_w}")
     answers["email_judge"] = _judge
     shots.shoot = lambda html, **k: {"ok": False, "png": b"", "door": "", "ms": 0, "why": "playwright is not installed"}
     judged.clear()
@@ -321,11 +353,12 @@ def main() -> int:
        got2["status"] == rc.NOT_SHIPPABLE and "playwright" in got2["note"], got2.get("note"))
     shots.shoot = lambda html, **k: {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""}
     judged.clear()
-    answers["email_judge"] = lambda prompt: {"same_concept": True, "devices_in_order": True, "brand_material": True, "weight_rhythm": "fine", "findings": []}
+    answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else
+                                             {"same_concept": True, "devices_in_order": True, "brand_material": True, "weight_rhythm": "fine", "findings": []})
     got3 = rc.run("", "baci", "portofino", seed="d", message={"subject": "Set the scene"})
     ck("with no reference the maker designs the email itself and is judged alone — shippable",
        got3["status"] == rc.SHIPPABLE and "designs this one itself" in got3["note"] and "DESIGN IT YOURSELF" in compose_seen[-1]
-       and "no reference to follow" in seen["email_judge"][-1][-1]["text"], got3.get("note"))
+       and any("no reference to follow" in p[-1]["text"] for p in seen["email_judge"][-3:]), got3.get("note"))
     answers["email_judge"] = _judge
 
     print("— 7. a link is a design and a recreation in one press; the rotation —")

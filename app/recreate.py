@@ -124,8 +124,17 @@ Write the brief as JSON with exactly these keys:
    small-caps kicker, script accent, body size), "colour": how colour is used (which
    grounds are dark, where the accent goes, how much contrast, whether the page turns),
    "rhythm": spacing, widths, insets, corner radii, rules, "column": the content width you see}
-"devices": an array of every distinct device you can see, each described so it can be
-   drawn without the picture.
+"devices": an array of every distinct device you can see, each an object:
+   {"what": how it is drawn — shape, placement, scale, weight — so it can be drawn without
+            the picture,
+    "kind": "structure" (it carries the email: the hero, the post card, the product frame,
+            the headline stack, the button, the footer) | "dressing" (it adds character: a
+            mascot, a handwritten aside, a badge, a sticker, a doodle, a texture),
+    "role": what it does for the reader in this email — points at the button, names the
+            new format, adds a sensory cue, breaks the grid, signs the brand,
+    "effect": the feeling it adds — informal, playful, handmade, urgent, premium,
+    "instance": the reference's own instance in a phrase (its mascot, its word, its
+            prop) — recorded so the other brand knows what NOT to copy}
 "reference_text": every visible word of the email, line by line, verbatim.
 "reference_hexes": the six most dominant colours as hex.
 
@@ -488,10 +497,21 @@ Work the way a designer at a good studio works: the design comes from the brief,
 comes from you, the material comes only from the brand.
 
 THE BRIEF — the reference, read by a designer. Recreate its concept, every section in order,
-its devices, its type roles, its colour logic and its rhythm. A device it describes (a social
-post shown as a post with avatar, handle, icon row and dots; a script closer; a bordered
-button; a numbered recipe) is DRAWN — in HTML/CSS, or inside a baked block (below) — never
-approximated by a plain paragraph.
+its type roles, its colour logic and its rhythm. Its devices are of two kinds:
+- STRUCTURE (a social post shown as a post; a product frame; a headline stack; a bordered
+  button; a numbered recipe) is recreated faithfully — DRAWN in HTML/CSS or inside a baked
+  block (below), never approximated by a plain paragraph.
+- DRESSING (a mascot, a handwritten aside, a badge, a sticker, a doodle) is KEPT, and
+  RE-AUTHORED FROM THIS BRAND'S WORLD so it means something here: the same role and the same
+  effect, played by a thing of this brand — its products, its place, its voice, what its
+  photographs show. A snack brand's crunch word becomes a word that is TRUE of this product
+  and of this email's idea; its cartoon shopper becomes a drawn thing from this brand's own
+  world; its badge carries a fact from the material. Never the reference's instance, never a
+  generic stand-in (a random exclamation, a random emoji), never decoration that says
+  nothing. The standard below shows the move: a sauce brand's "SAUCE THE MEAT!" became a
+  tableware brand's "Set the scene!"; its recipe's last step became "Mangia!". If nothing in
+  this brand can play a dressing device honestly, leave it out and say so in the turned
+  comment.
 %(brief)s
 
 THE BRAND
@@ -853,18 +873,27 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
             add("alt", "blocks", im.get("src", "")[:80], "an image without alt text")
         if not im.get("width"):
             add("img_width", "note", im.get("src", "")[:80], "an image without an explicit width")
-    # 1. brand assets only
-    allowed = {p["url"] for p in kit_.get("pictures") or []} | ({theme.get("logo_url")} if theme.get("logo_url") else set())
+    # 1. brand assets only — a filed picture, a cut of one (`fit` writes
+    # `_WxH_crop_center` before the extension), the mark, or our own media
+    # route (a baked device). A plausible file name on the brand's host that
+    # is NOT on file is an invented picture: the maker wrote
+    # `…_staged_tray_1200x800.png` and `Portofino_Collection_Range_…` on the
+    # owner's third run (2026-09-17), both 404 — and this was a note.
+    def _base(u: str) -> str:
+        u = u.split("?", 1)[0]
+        return re.sub(r"_\d+x\d*(?:_crop_\w+)?(\.\w+)$", r"\1", u)
+    allowed = {_base(p["url"]) for p in kit_.get("pictures") or []} | ({_base(theme.get("logo_url"))} if theme.get("logo_url") else set())
+    media_route = config.PUBLIC_BASE_URL.rstrip("/") + "/media/"
     hosts = set(kit_.get("hosts") or ())
     for im in w.imgs:
         src = im.get("src") or ""
         host = urlparse(src).netloc
-        if src.startswith("data:"):
+        if src.startswith("data:") or src.startswith(media_route):
             continue
-        if src not in allowed and host not in hosts:
+        if _base(src) not in allowed and host not in hosts:
             add("asset", "blocks", src[:100], "not one of the brand's own pictures")
-        elif src not in allowed:
-            add("asset_unlisted", "note", src[:100], "a brand host, but not a filed picture")
+        elif _base(src) not in allowed:
+            add("asset_invented", "blocks", src[:100], "the brand's host, but no such picture on file — use a listed URL verbatim")
     # 2. nothing from the reference
     ref_words = brief_.get("reference_text") or []
     ref_grams = _grams(" ".join(map(str, ref_words)))
@@ -946,6 +975,16 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
                     add("link", "blocks", href[:80], f"answers {r.status_code}")
             except Exception as e:                                # noqa: BLE001
                 add("link", "blocks", href[:80], f"does not answer ({type(e).__name__})")
+        # every picture resolves — a 404 is a broken image in every inbox
+        for src in sorted({im.get("src") or "" for im in w.imgs}):
+            if not src.startswith("http") or src.startswith(media_route):
+                continue
+            try:
+                r = httpx.head(src, timeout=8, follow_redirects=True)
+                if r.status_code >= 400:
+                    add("picture_missing", "blocks", src[:80], f"the picture answers {r.status_code}")
+            except Exception as e:                                # noqa: BLE001
+                add("picture_missing", "blocks", src[:80], f"the picture does not answer ({type(e).__name__})")
     for href in w.links:
         if href in ("#", "") or href.startswith("#"):
             add("link_placeholder", "blocks", href or "#", "a placeholder link")
@@ -997,27 +1036,28 @@ its own photographs, its own words, its own colours. The designer's brief of the
 concept: %(concept)s
 devices: %(devices)s
 
-THE OTHER BRAND'S MATERIAL — the only facts ours may state about the product:
-%(material)s
-
-Judge ours as an art director judges a recreation, and answer JSON only:
+Judge ours as an art director judges a finished email, and answer JSON only:
 {"same_concept": true|false,
  "devices_in_order": true|false,
  "weight_rhythm": one line on scale, spacing and visual weight compared,
  "brand_material": true|false — everything in ours is the other brand's own,
+ "would_send": true|false — as strong an idea, as bold a scale, as clear an ask as the
+               reference, in this brand's things,
  "findings": [{"where": "section n / the headline / the post card",
-               "what": what falls short, in the ROLE the device plays,
-               "do": the concrete edit that closes it, in the other brand's terms,
-               "severity": "blocks" if the recreation fails without it, else "cosmetic"}]}
-What counts: proportions (a headline that fills the column in the reference and a third of it
-in ours), a device missing or drawn wrong FOR ITS ROLE, type too small or too light, a ground
-that should turn, spacing off by half, a picture cut badly, a broken or empty element, a
-product fact in ours that is not in the material above (say "fabricated": it blocks).
-What does not count — never write these: the reference's own prop, product, lettering,
-handwritten words, mascot, colours or exact copy. A wire basket, a bubble word, a pickle, a
-"CRUNCHY", a cartoon figure belong to the reference; ours plays the same ROLE with this
-brand's things (a tray, a table, the collection name at scale, a drawn accent) or leaves it
-out. A finding that names one of those is not a finding. Never quote the reference's words."""
+               "what": what is WEAK — in the role the device plays, in this brand's terms,
+               "do": the concrete edit that makes it strong, in this brand's terms,
+               "severity": "blocks" if you would not send it without this, else "cosmetic"}]}
+The question is never "what differs from the reference" — a difference is correct by design.
+The question is "would you send this": is the idea as sharp, the headline as loud, the hero
+as big, the rhythm as tight, the ask as clear. Name what is timid, dead, cramped, unreadable,
+broken, empty or generic, and say the edit.
+DRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
+to this brand and EARNS its place: re-authored from this brand's world — its products, its
+place, its voice — it is correct however much it differs from the reference's; a generic
+stand-in (a random exclamation, an emoji, a doodle that means nothing) or the reference's own
+instance in disguise is a fault — say "cut it" or say what of this brand's world should play
+the role instead. Never ask for the reference's prop, word, mascot, lettering or colours, and
+never quote the reference's words."""
 
 
 _JUDGE_ALONE = """One email, ours (whole, then its top), made for a brand with no reference to follow.
@@ -1030,10 +1070,59 @@ one ask, nothing generic. Answer JSON only:
                "severity": "blocks" if it must change before sending, else "cosmetic"}]}"""
 
 
+_TRUTH_PROMPT = """The words of an email, then the ONLY material the brand has on file about what it sells.
+List every statement in the email about the product or the brand — an origin, a material, a
+property (safe, free of, proof), a count, a place it is sold, an award, a claim of who uses
+it — that the material does not support. A word that merely describes (beautiful, complete,
+ready) is not a fact. Answer JSON only: {"fabricated": [{"words": the exact words in the
+email, "why": what the material says instead, or that it says nothing}]}
+
+THE EMAIL'S WORDS
+%(words)s
+
+THE MATERIAL
+%(material)s"""
+
+
+def _Walk_words(html: str) -> str:
+    w = _Walk()
+    w.feed(html)
+    return w.words()
+
+
+def _devices_text(brief_: dict) -> str:
+    out = []
+    for d in brief_.get("devices") or []:
+        if isinstance(d, dict):
+            out.append(f"[{d.get('kind') or 'device'}] {d.get('what') or ''} — role: {d.get('role') or ''}"
+                       + (f"; effect: {d['effect']}" if d.get("effect") else ""))
+        else:
+            out.append(str(d))
+    return "; ".join(out)
+
+
+def truth(words: str, material: str, *, tenant: str = "") -> dict:
+    """The fact check, apart from the design judge: every product statement in
+    the email against the brand's own material. `{ok, findings, calls}`.
+    Asked with the design questions, it got a ninth of the attention and let
+    "BPA Free" through (2026-09-17); asked alone it is one short text call."""
+    if not words.strip():
+        return {"ok": True, "findings": [], "calls": 0}
+    reply = _ask("email_judge", [{"type": "text", "text": _TRUTH_PROMPT % {
+        "words": words[:6000], "material": (material or "(nothing beyond the product's name)")[:3000]}}],
+        tenant=tenant, max_tokens=1200)
+    got = _json(reply.text) if getattr(reply, "ok", False) else None
+    if not isinstance(got, dict):
+        return {"ok": False, "findings": [], "calls": 1}
+    return {"ok": True, "calls": 1, "findings": [
+        {"code": "fabricated", "severity": "blocks", "where": str(f.get("words") or "")[:120],
+         "what": "not in the brand's material — " + str(f.get("why") or "")[:200]}
+        for f in got.get("fabricated") or [] if isinstance(f, dict) and f.get("words")]}
+
+
 def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "", material: str = "") -> dict:
     """`{ok, findings, verdict, why, calls}` — ours beside the reference, or
-    ours alone when there is no reference. `material` is the product's own
-    text: a fact stated in ours that is not in it is a fabrication."""
+    ours alone when there is no reference."""
     from . import pictures as ed
     if not ours_png:
         return {"ok": False, "findings": [], "verdict": {}, "why": "no picture to judge", "calls": 0}
@@ -1046,8 +1135,7 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {
-        "concept": brief_.get("concept"), "devices": "; ".join(map(str, brief_.get("devices") or []))[:1500],
-        "material": (material or "(nothing beyond the product's name)")[:2500]})
+        "concept": brief_.get("concept"), "devices": _devices_text(brief_)[:1500]})
         if reference_png else _JUDGE_ALONE})
     reply = _ask("email_judge", blocks, tenant=tenant, max_tokens=2000)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
@@ -1212,6 +1300,9 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         copy_.update(subject=made.get("subject") or copy_.get("subject", ""),
                      preheader=made.get("preheader") or copy_.get("preheader", ""))
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
+        told = truth(_Walk_words(html), material_, tenant=tenant)
+        calls += told.get("calls", 0)
+        checks = checks + told["findings"]
         shot = shots.shoot(_inline_media(html))
         png_id = ""
         if shot.get("ok"):
