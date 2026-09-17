@@ -1297,7 +1297,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`candidates`**(kit_, entity_key?, recent_media?, seed?) → `list[dict]`  ·  **from nothing**
 - **`cast`**(tenant, brief_, kit_, entity_key?, recent_media?, seed?) → `dict`  ·  from `test_the_model_makes_the_email.py`
 - **`check`**(html, kit_, brief_, copy_?, links?, reference_host?) → `list[dict]`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_can_the_engines_read_us.py`, `test_claim_trace.py`, `test_seo_guard.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_model_makes_the_email.py`, `triage.py`, `web.py`, `wordpress_seo.py`
-- **`compose`**(brief_, kit_, cast_, message?, tenant?, fitted?, html?, findings?) → `dict`  ·  from `skill_pack.py`, `test_the_model_makes_the_email.py`
+- **`compose`**(brief_, kit_, cast_, message?, tenant?, fitted?, html?, findings?, png?) → `dict`  ·  from `skill_pack.py`, `test_the_model_makes_the_email.py`
 - **`exemplar`**() → `str`  ·  **from nothing**
 - **`fit`**(tenant, url, aspect, width?) → `str`  ·  from `test_the_model_makes_the_email.py`
 - **`fits`**(tenant, cast_) → `dict`  ·  from `test_the_model_makes_the_email.py`

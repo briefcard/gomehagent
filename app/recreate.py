@@ -642,15 +642,31 @@ def _parse_email(text: str) -> tuple[str, str, str]:
 
 
 def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, *, tenant: str = "",
-            fitted: dict | None = None, html: str = "", findings=()) -> dict:
+            fitted: dict | None = None, html: str = "", findings=(), png: bytes = b"") -> dict:
     """`{ok, subject, preheader, html, why, edited}` — ONE MIND writes the
-    copy and the HTML together; with `html` and `findings` it EDITS."""
+    copy and the HTML together; with `html` and `findings` it EDITS, LOOKING
+    at `png` — its own email as a browser showed it. A designer who cannot
+    see the render guesses sizes: the owner's run set a figure at 24 px and a
+    script at 90 px beside a 520 px button and called the row centred
+    (2026-09-17). The picture costs a few thousand tokens and ends that."""
     theme = kit_.get("theme") or {}
+    seen_blocks: list = []
     if html and findings:
         prompt = _REVISE_PROMPT % {
             "findings": "\n".join(f'- [{f.get("severity", "")}] {f.get("where", "")}: {f.get("what", "")}'
                                   + (f' → {f["do"]}' if f.get("do") else "") for f in findings),
             "html": html}
+        if png:
+            from . import pictures as ed
+            try:
+                _, edge = ed._tier_edge()
+                seen_blocks = [ed._image_block(ed.contact_sheet(png, edge))] + \
+                              [ed._image_block(p["png"]) for p in ed.strips(png, edge)[:4]]
+                prompt = ("YOUR EMAIL AS A BROWSER SHOWS IT is above — whole, then top to bottom. LOOK before "
+                          "you edit: what is tiny, what is clipped, what is off-centre, what is heavier or lighter "
+                          "than you meant. Fix what you see as well as what the findings name.\n\n") + prompt
+            except Exception:                                     # noqa: BLE001
+                seen_blocks = []
     else:
         fitted = fitted if fitted is not None else fits(tenant, cast_)
         pics = []
@@ -699,11 +715,12 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "column": COLUMN, "size": HTML_MAX // 1000,
             "webview": " or {{VIEW_IN_BROWSER}}" if (kit_.get("esp") or {}).get("webview", True) else
                        " (this platform has no view-in-browser variable — offer none)"}
-    reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=16000)
+    asked = seen_blocks + [{"type": "text", "text": prompt}] if seen_blocks else prompt
+    reply = _ask("email_compose", asked, tenant=tenant, max_tokens=16000)
     if not getattr(reply, "ok", False) and "Connection" in str(getattr(reply, "error", "")):
         # a dropped connection on a two-minute call is not the model's answer
         # — one more try before the round is lost (owner's run, 2026-09-17)
-        reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=16000)
+        reply = _ask("email_compose", asked, tenant=tenant, max_tokens=16000)
     if not getattr(reply, "ok", False):
         return {"ok": False, "html": "", "subject": "", "preheader": "", "edited": 0,
                 "why": "the composer did not answer — " + str(getattr(reply, "error", ""))}
@@ -742,11 +759,24 @@ def bake(html: str, tenant: str) -> tuple[str, list[str]]:
     notes = []
     out = html
     for frag in frags:
-        shot = shots.shoot_fragment(head, frag)
         words = _norm(re.sub(r"<[^>]+>", " ", frag))[:200]
+        if re.search(r"<img\b", frag, re.I):
+            # a photograph is never pixels inside a picture — it stays an <img>
+            # of its own (the owner's hero was baked into a 1200×800 PNG with
+            # no alt, 2026-09-17); the block is left as HTML and said
+            notes.append(f"not baked — a photograph inside the block: {words[:50] or '(no words)'}")
+            out = out.replace(f"<!--bake-->{frag}<!--/bake-->", frag, 1)
+            continue
+        shot = shots.shoot_fragment(head, frag)
         if not shot.get("ok"):
             notes.append(f"a block could not be baked ({shot.get('why')}) — left as HTML")
             continue
+        if shot.get("overflow"):
+            notes.append(f"clipped: the baked block '{words[:40]}' is {shot['overflow']} px wider than its "
+                         f"{shot.get('box', '?')} px box — its type must be smaller or its box wider")
+        if shot.get("smallest_px") and float(shot["smallest_px"]) < 11:
+            notes.append(f"unreadable: type at {float(shot['smallest_px']):.0f} px in the baked block "
+                         f"'{words[:40]}' — 11 px is the floor for a phone")
         put = media.put(tenant, shot["png"], mime="image/png", origin="derived")
         if not put.get("ok"):
             notes.append("a baked block could not be hosted — left as HTML")
@@ -1077,6 +1107,11 @@ Judge ours as an art director judges a finished email, and answer JSON only:
                "what": what is WEAK — in the role the device plays, in this brand's terms,
                "do": the concrete edit that makes it strong, in this brand's terms,
                "severity": "blocks" if you would not send it without this, else "cosmetic"}]}
+Every "do" is an edit the composer can make in HTML/CSS with the pictures already in the
+email and web type — resize, re-set, re-colour, move, cut, rewrite the words, draw a simple
+shape. Never "photograph", "stage", "shoot", "commission", "composite" or "source" a picture
+that does not exist: a finding that needs a new picture is not a finding, say "cut it" or
+name the picture in the email that should play the role instead.
 The question is never "what differs from the reference" — a difference is correct by design.
 The question is "would you send this": is the idea as sharp, the headline as loud, the hero
 as big, the rhythm as tight, the ask as clear. Name what is timid, dead, cramped, unreadable,
@@ -1310,20 +1345,23 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     if aid and not ref_png:
         story.append("The reference picture could not be fetched — ours is judged on its own.")
     rounds: list[dict] = []
-    html, raw, findings_prev = "", "", []
+    html, raw, findings_prev, prev_png = "", "", [], b""
     ref_grams = _grams(" ".join(map(str, brief_.get("reference_text") or [])), 3) - _grams(
         " ".join(e.get("name", "") + " " + e.get("description", "") for e in kit_.get("entities") or []), 3)
     material_ = _material(kit_, entity_key)
     best_i, best_n = -1, 10 ** 6
     for n in range(ROUNDS + 1):
         say(f"round {n}: " + ("writing the email" if n == 0 else "editing to the findings"))
-        made = compose(brief_, kit_, cast_, message, tenant=tenant, fitted=fitted, html=raw, findings=findings_prev)
+        made = compose(brief_, kit_, cast_, message, tenant=tenant, fitted=fitted, html=raw, findings=findings_prev,
+                       png=prev_png)
         calls += 1
         if not made.get("ok"):
             story.append(f"Round {n}: {made.get('why')}.")
             break
         raw = made["html"]                                   # the model's HTML, edited next round
-        html, baked = bake(raw, tenant)                      # what is checked, shot, judged and sent
+        html, baked = bake(raw, tenant)
+        bake_findings = [{"code": "baked_" + n.split(":", 1)[0], "severity": "blocks", "where": "a baked block",
+                          "what": n.split(":", 1)[1].strip()} for n in baked if n.startswith(("clipped:", "unreadable:"))]                      # what is checked, shot, judged and sent
         for b_ in baked:
             if not b_.startswith("baked:"):
                 story.append(b_ + ".")
@@ -1332,7 +1370,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         told = truth(_Walk_words(html), material_, tenant=tenant)
         calls += told.get("calls", 0)
-        checks = checks + told["findings"]
+        checks = checks + told["findings"] + bake_findings
         shot = shots.shoot(_inline_media(html))
         png_id = ""
         if shot.get("ok"):
@@ -1370,6 +1408,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         if not open_:
             break
         findings_prev = open_ + [f for f in judged.get("findings", []) if f.get("severity") == "cosmetic"][:3]
+        prev_png = shot.get("png") or b""
     if best_i < 0:
         return _finish(FAILED, brief=brief_, cast=cast_, copy=copy_)
     best = rounds[best_i]

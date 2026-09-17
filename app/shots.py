@@ -157,10 +157,42 @@ def shoot_fragment(head: str, fragment: str, *, width: int = 600, scale: int = S
                 el = page.locator("body > table").first
                 png = (el.screenshot(type="png", omit_background=True) if el.count()
                        else page.screenshot(full_page=True, type="png", omit_background=True))
+                # THE MEASUREMENTS the composer cannot make itself: a word wider
+                # than its box is clipped in the picture ("MELAMINE" lost its
+                # last letter on the owner's run, 2026-09-17, through three
+                # edit rounds), and type set at 8 px is unreadable on a phone.
+                try:
+                    measured = page.evaluate("""() => {
+                        const t = document.querySelector('body > table');
+                        if (!t) return {};
+                        let smallest = null;
+                        const walker = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+                        let n;
+                        while ((n = walker.nextNode())) {
+                            if (!n.textContent.trim()) continue;
+                            const px = parseFloat(getComputedStyle(n.parentElement).fontSize);
+                            if (px && (smallest === null || px < smallest)) smallest = px;
+                        }
+                        // the rightmost edge any text reaches, against the box: a
+                        // table never scrolls, so scrollWidth hides the clipping
+                        const box = t.getBoundingClientRect();
+                        let right = box.right;
+                        const w2 = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+                        let m;
+                        while ((m = w2.nextNode())) {
+                            if (!m.textContent.trim()) continue;
+                            const r = document.createRange(); r.selectNodeContents(m);
+                            for (const rect of r.getClientRects()) if (rect.right > right) right = rect.right;
+                        }
+                        return {overflow: Math.round(Math.max(0, right - box.right)),
+                                box: Math.round(box.width), smallest_px: smallest};
+                    }""") or {}
+                except Exception:                                # noqa: BLE001
+                    measured = {}
             finally:
                 browser.close()
         return {"ok": bool(png), "png": png, "door": which, "why": "" if png else "an empty picture",
-                "ms": int((time.monotonic() - t0) * 1000)}
+                "ms": int((time.monotonic() - t0) * 1000), **{k: v for k, v in measured.items() if v is not None}}
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "png": b"", "door": which,
                 "why": f"the browser did not answer: {type(e).__name__}: {str(e)[:160]}"}

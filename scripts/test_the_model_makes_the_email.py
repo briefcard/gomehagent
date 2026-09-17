@@ -247,6 +247,13 @@ def main() -> int:
     shots.shoot_fragment = lambda head, frag, **k: {"ok": False, "png": b"", "door": "", "why": "playwright is not installed"}
     unbaked, notes2 = rc.bake(email_html(bake=True), "baci")
     ck("without a door the block stays as HTML and the note says why", "<!--bake-->" in unbaked and "playwright" in notes2[0])
+    shots.shoot_fragment = lambda head, frag, **k: {"ok": True, "png": png(600, 200), "door": "local", "why": "", "overflow": 74, "box": 528, "smallest_px": 8.0}
+    _, notes3 = rc.bake(email_html(bake=True), "baci")
+    ck("a baked word wider than its box, and type too small to read, are said in numbers",
+       any(n.startswith("clipped:") and "74 px wider" in n for n in notes3) and any(n.startswith("unreadable:") and "8 px" in n for n in notes3), str(notes3))
+    photo_bake = email_html(bake=True).replace("<!--bake--><table", f'<!--bake--><table><tr><td><img src="{PHOTO_A}" alt="x" width="600"></td></tr></table><table', 1)
+    kept, notes4 = rc.bake(photo_bake, "baci")
+    ck("a photograph inside a baked block is left as HTML and said", any(n.startswith("not baked") for n in notes4) and f'<img src="{PHOTO_A}"' in kept)
     shots.shoot_fragment = lambda head, frag, **k: {"ok": True, "png": png(600, 200), "door": "local", "why": ""}
 
     print("— 5. the checks: each invariant fails on its fixture; the good email passes —")
@@ -295,6 +302,7 @@ def main() -> int:
     compose_seen: list = []
 
     def _compose(prompt):
+        prompt = prompt[-1]["text"] if isinstance(prompt, list) else prompt
         compose_seen.append(prompt)
         if "FINDINGS" in prompt and "THE HTML" in prompt:
             return reply_email(email_html(headline_px=112))
@@ -313,6 +321,9 @@ def main() -> int:
         return {"same_concept": True, "devices_in_order": True, "weight_rhythm": "matched", "brand_material": True, "findings": []}
     answers["email_judge"] = _judge
     got = rc.run(sid, "baci", "portofino", seed="s", message={"subject": "Set the scene", "claims": [CLAIM]})
+    ck("the revise round LOOKS at its own email — the picture rides with the findings",
+       any(isinstance(p, list) and any(b.get("type") == "image" for b in p) and "LOOK before" in p[-1]["text"]
+           for p in seen["email_compose"] if isinstance(p, list)))
     ck("round 1 closed the judge's finding — shippable, the edit counted in lines, the subject kept",
        got["status"] == rc.SHIPPABLE and len(got["rounds"]) == 2 and got["rounds"][1]["blocking"] == 0
        and got["rounds"][1]["edited"] > 0 and "THE HTML" in compose_seen[1] and got["subject"] == "Set the scene", got.get("note"))
