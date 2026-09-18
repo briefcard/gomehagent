@@ -33,6 +33,46 @@ pushed automatically to Shopify while keeping the plan keywords etc. in mind,
 based on the system we have today."* Three clauses, three sections below: the
 quality loop (§3), the automatic push (§5), the plan (§4).
 
+**Amended 2026-09-18, on the owner's note:** *"we don't necessarily want to
+always have a reference but it would be nice to have one; but with blogs there
+is usually a certain layout that stays consistent between blogs."* So the
+reference splits in three, and only one of them is per article — see §0a.
+
+---
+
+## 0a. The reference, for a blog, is three things — and the layout is not one of them per piece
+
+An email is a one-off; its reference gives it its whole design. A blog is a
+series; its layout is the brand's and stays put while the content changes.
+So what the email called "the reference" becomes:
+
+| | What it is | How often | Where it comes from | What it decides |
+|---|---|---|---|---|
+| **The pattern** | The brand's standing article layout, in words: the blocks an article of this brand carries and in what order — a key-takeaways box after the answer, H2 sections with one picture each, a comparison table where two things are compared, a product callout card, the FAQ, a closing CTA band; the devices (a pull quote, a "what you'll need" list, a note box) and how each is drawn inside the store's theme | **once per brand**, standing | a reference article URL the owner likes, read once into the pattern (optional); else the pattern the maker declares for the first article, filed when the owner approves it; the hand-made article of Phase 0 is Baci's | the layout of every article; the judge's "one pattern" check across articles |
+| **The SERP brief** | What ranks for this keyword: the rivals' structure, depth, the questions they answer and miss, the media they carry, the length that wins | **per article** | the rivals already on file (`keywords.latest_serp`), fetched and read | the story, the length, the sections that must exist |
+| **An approach reference** | An article the owner likes for its *way in* — "X vs Y, compared", "the buyer's mistakes", "a season's guide" — read into a brief of concept and argument, like the email's brief | **optional, per article** | a URL pasted on the plan item or the card | the story's shape; never the layout |
+
+Three consequences:
+
+1. **A brand with no reference of any kind still gets a well-laid-out
+   article** — the pattern has a default the maker declares (the email's
+   DESIGNLESS path), and it becomes the brand's after the first approval.
+2. **Consistency is a check, not a hope.** The maker emits its blocks marked
+   (`<!-- block: takeaways -->` … `<!-- /block -->`), so `articles.check` can
+   see that the pattern's blocks are present in the pattern's order, and the
+   judge is asked whether this article is laid out like the last approved one.
+   That is the article's version of the email's "one system", held across
+   pieces rather than within one.
+3. **The theme owns the chrome.** Title, date, author, featured image and the
+   page around the body are Shopify's; the pattern lives inside the body as
+   HTML that the theme's CSS will style — so every device the pattern names
+   is drawn in the store's faces and colours, read from the theme, and
+   rendered for the judge in a template that carries them.
+
+The Brand tab gets one card, **Article layout**: the pattern in words, the
+reference it was read from (if any), the exemplar article, and *Use this
+layout for every article* — the same room the email's designs have.
+
 ---
 
 ## 1. What exists today (`file:line`, checked 2026-09-18)
@@ -99,16 +139,25 @@ What is **missing**, against the email loop:
 article for Baci, written by hand in this chat with the SERP open and the
 material open, for one keyword on the plan (a support term with a real
 question behind it). Owner judges it. If it is not better than what ranks,
-nothing below is worth building. It becomes `docs/recreations/<tenant>-<slug>.html`
-and the first exemplar.
+nothing below is worth building. It becomes `docs/recreations/<tenant>-<slug>.html`,
+the first exemplar, **and Baci's pattern** — its blocks, in its order, are
+what every Baci article is laid out in until the owner files another.
 
-**Phase 1 — the reference and the story (1 day).**
+**Phase 1 — the pattern, the reference and the story (1½ days).**
+- `articles.pattern(tenant)`: the brand's standing layout — read once from a
+  reference URL when the owner pastes one (`articles.read_pattern(url)`,
+  one call, text + a screenshot), else the default declared by the maker;
+  filed on the brand (`KbBrand.visual["article_pattern"]`, the way the
+  email's standing design is) when the owner approves an article in it.
 - `articles.brief`: read the rivals on file into a brief (headings, depth,
   gaps, media, length). No vision needed — pages are text; one call.
+- `articles.approach(url)` (optional): a pasted article read into a brief of
+  its concept and argument, for the story only.
 - `articles.story`: the argument before the prose, resting on claims and the
   brief; contrast beats framed; nothing implied that is untrue.
-- The drafter receives brief + story + exemplar + length; streamed; the
-  output contract `Title:` / `Meta:` / HTML.
+- The drafter receives the pattern + brief + story + exemplar + length;
+  streamed; the output contract `Title:` / `Meta:` / HTML with the pattern's
+  blocks marked (`<!-- block: … -->`), drawn in the store's faces and colours.
 - The runner: `scripts/article_once.py --tenant --store --keyword` — the
   looking loop on a laptop, like `recreate_once.py`, writing `brief.json`,
   `story.json`, `article.html`, `article.png`, `findings.json`.
@@ -116,11 +165,13 @@ and the first exemplar.
 **Phase 2 — the invariants and the eyes (1 day).**
 - `articles.check`: keyword in H1 and first paragraph; meta present and ≤ 155;
   alt on every image; length within the brief's band; no second article on
-  the plan already targeting this phrase (cannibalisation); links resolve
-  (exists); claims cited (exists); ban list (exists); truth by implication
-  (the email's pass, reused).
+  the plan already targeting this phrase (cannibalisation); **the pattern's
+  blocks present, in its order**; links resolve (exists); claims cited
+  (exists); ban list (exists); truth by implication (the email's pass, reused).
 - `articles.shoot` + `articles.judge` + the edit loop; best round kept; an
-  unjudged article is never called publishable.
+  unjudged article is never called publishable. The judge sees the last
+  approved article beside this one and answers `one_pattern` as well as
+  `would_publish`.
 - The judge's `do` must be makeable in the body; a `do` that needs a new
   photograph names a picture already in the piece or says cut.
 
@@ -138,12 +189,14 @@ that kind; the writer and the judge see the last approved one beside the
 reference. The owner's note on the card is a finding and is remembered per
 brand ("what the owner has said about this brand's articles").
 
-**Phase 5 — the card (½ day).** The article's page shows the brief (what
+**Phase 5 — the cards (1 day).** The article's page shows the brief (what
 ranks, in a line each), the story (the beats), the render beside the top
 rival's screenshot, the findings, the cost line from `Usage`, and the two
-buttons: *Publish* / *Not this one*.
+buttons: *Publish* / *Not this one*. The Brand tab's **Article layout** card
+shows the pattern in words, its reference (if any), the exemplar, and *Use
+this layout for every article*; pasting a URL there reads a new pattern.
 
-Total: about four days, of which the first half-day is the one that decides
+Total: about five days, of which the first half-day is the one that decides
 whether the rest happens.
 
 ---
