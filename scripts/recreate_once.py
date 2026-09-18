@@ -108,11 +108,19 @@ def main() -> int:
             f.write(png or b"")
     with open(os.path.join(out, "findings.json"), "w") as f:
         json.dump({"status": rec.get("status"), "subject": rec.get("subject"), "preheader": rec.get("preheader"),
+                   "story": latest.get("story"),
                    "findings": rec.get("findings"), "rounds": latest.get("rounds"), "verdict": latest.get("verdict")},
                   f, indent=1, ensure_ascii=False)
     print()
     print("STATUS:", rec.get("status"), "· subject:", rec.get("subject"))
     print("STORY:", rec.get("note"))
+    st_ = latest.get("story") or {}
+    if st_:
+        print("THE STORY:", st_.get("hook", ""))
+        for b_ in st_.get("beats") or []:
+            print(f"  [{b_.get('beat', '')}] ({b_.get('about', '')}) {b_.get('says', '')}" + (f"  <- {b_['rests_on']}" if b_.get("rests_on") else ""))
+        if st_.get("turned"):
+            print("  turned:", "; ".join(map(str, st_["turned"])))
     for fnd in rec.get("findings") or []:
         print(f"  [{fnd.get('severity')}] {fnd.get('where')} — {fnd.get('what')}" + (f" → {fnd['do']}" if fnd.get("do") else ""))
     print("OUT:", out)

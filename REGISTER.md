@@ -818,7 +818,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`audience`**(tenant, key) → `db.KbAudience | None`  ·  **from nothing**
 - **`audience_entities`**(tenant, audience_key, available_only?) → `list`  ·  from `skill_pack.py`, `test_audience_entities.py`
 - **`audiences`**(tenant, include_proposed?) → `list[db.KbAudience]`  ·  from `admin_ui.py`, `assurance.py`, `creative.py`, `planner.py`, `resolve.py`, `segments.py`, `skill_pack.py`, `systems.py`, `test_audience_entities.py`, `test_esp.py`, `test_funnel.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_provenance.py`, `test_schema_tab.py`, `web.py`
-- **`banned_claims`**(tenant) → `list[str]`  ·  from `catalog_sync.py`, `compliance.py`, `email_harvest.py`, `harvest.py`, `keywords.py`, `seed_demo.py`, `sources.py`, `systems.py`, `test_ban_list.py`, `test_catalog_sync.py`, `test_intake.py`, `test_kb.py`, `test_objection_scope.py`, `test_systems.py`, `validator.py`, `voice.py`
+- **`banned_claims`**(tenant) → `list[str]`  ·  from `catalog_sync.py`, `compliance.py`, `email_harvest.py`, `harvest.py`, `keywords.py`, `recreate.py`, `seed_demo.py`, `sources.py`, `systems.py`, `test_ban_list.py`, `test_catalog_sync.py`, `test_intake.py`, `test_kb.py`, `test_objection_scope.py`, `test_systems.py`, `validator.py`, `voice.py`
 - **`batch_assets`**(tenant, batch) → `list[db.KbAsset]`  ·  from `test_creative_batch.py`, `web.py`
 - **`batches`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `test_the_model_takes_what_the_docs_say.py`
 - **`board`**(tenant, boards_?) → `dict`  ·  from `admin_ui.py`, `creative.py`, `test_article_review.py`, `test_keyword_attention.py`, `test_keywords.py`, `test_mute_replacement.py`, `test_plan_lifecycle.py`, `test_systems.py`, `test_the_board_reaches_the_generator.py`, `web.py`
@@ -1297,12 +1297,14 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`candidates`**(kit_, entity_key?, recent_media?, seed?) → `list[dict]`  ·  from `test_the_model_makes_the_email.py`
 - **`cast`**(tenant, brief_, kit_, entity_key?, recent_media?, seed?) → `dict`  ·  from `test_the_model_makes_the_email.py`
 - **`check`**(html, kit_, brief_, copy_?, links?, reference_host?) → `list[dict]`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_can_the_engines_read_us.py`, `test_claim_trace.py`, `test_seo_guard.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_model_makes_the_email.py`, `triage.py`, `web.py`, `wordpress_seo.py`
-- **`compose`**(brief_, kit_, cast_, message?, tenant?, fitted?, html?, findings?, png?) → `dict`  ·  from `skill_pack.py`, `test_the_model_makes_the_email.py`
+- **`compose`**(brief_, kit_, cast_, message?, tenant?, fitted?, html?, findings?, png?, story_?) → `dict`  ·  from `skill_pack.py`, `test_the_model_makes_the_email.py`
+- **`decide_story`**(brief_, kit_, message, tenant?, entity_key?) → `dict`  ·  from `test_the_model_makes_the_email.py`
 - **`exemplar`**() → `str`  ·  **from nothing**
 - **`fit`**(tenant, url, aspect, width?) → `str`  ·  from `test_the_model_makes_the_email.py`
 - **`fits`**(tenant, cast_) → `dict`  ·  from `test_the_model_makes_the_email.py`
 - **`html_of`**(recreation_id) → `str`  ·  from `web.py`
 - **`judge`**(reference_png, ours_png, brief_, tenant?, material?) → `dict`  ·  **from nothing**
+- **`kb_ban`**(tenant) → `list`  ·  **from nothing**
 - **`kit`**(tenant) → `dict`  ·  from `test_the_model_makes_the_email.py`
 - **`latest`**(structure_id, tenant) → `dict | None`  ·  from `admin_ui.py`, `recreate_once.py`, `test_the_model_makes_the_email.py`, `web.py`
 - **`run`**(structure_id, tenant, entity_key?, recent_media?, seed?, progress?, message?, via?, extra_pictures?) → `dict`  ·  from `command_agent.py`, `sabotage.py`, `seed_demo.py`, `skill.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_board.py`, `test_ad_panel.py`, `test_approval_gate.py`, `test_article_repair.py`, `test_article_review.py`, `test_audience_entities.py`, `test_auto_ships.py`, `test_blog_skill.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_catalog_vocabulary.py`, `test_coherence.py`, `test_entity_scope.py`, `test_every_system_draws.py`, `test_funnel.py`, `test_gbp_listing.py`, `test_gbp_post.py`, `test_offers.py`, `test_plans.py`, `test_refresh_lands.py`, `test_refresh_lane.py`, `test_register.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_reorder_skill.py`, `test_replies.py`, `test_reports_skill.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_the_ad_is_about_the_thing_you_chose.py`, `test_the_model_makes_the_email.py`, `test_the_page_says_what_it_answers.py`, `test_workroom_email.py`, `web.py`, `worker.py`

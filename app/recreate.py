@@ -144,6 +144,17 @@ Write the brief as JSON with exactly these keys:
             prop) — recorded so the other brand knows what NOT to copy}
 "reference_text": every visible word of the email, line by line, verbatim.
 "reference_hexes": the six most dominant colours as hex.
+"argument": the email's copy as ONE argument, top to bottom, an array of beats:
+   {"beat": "problem" | "evidence" | "reframe" | "proof" | "risk reversal" | "offer" |
+            "invitation" | "ask" | "sign-off" (or a word of your own),
+    "says": what the beat says, in a phrase (not the words verbatim — they are in
+            reference_text),
+    "does": what it does to the reader — names their disappointment, removes the risk,
+            gives permission, earns the ask,
+    "rests_on": what the beat needs to be TRUE — a fact, a test, a guarantee, a feeling the
+            reader already has, nothing}
+   — so the colleague can write the SAME ARGUMENT for the other brand, resting each beat on
+   what that brand actually has, and drop or turn a beat it cannot rest.
 
 Rules: describe, never rate. Do not round a thing you see to a familiar name — if it is a
 screenshot of a social post, say so; if lettering is drawn, say so. Copy ids are unique.
@@ -584,7 +595,7 @@ ground under it; on a light ground set the name in type instead.
 %(cut)s
 
 THE MESSAGE this email carries%(message)s
-
+%(story)s
 THE STANDARD — an email made by hand from another reference for another brand. Copy its
 CRAFT (a headline that fills the column; the page in the photograph's own tone; a device
 drawn faithfully; real product names and links; tight copy that turns), NOT its design, not
@@ -659,6 +670,7 @@ declared in the <!-- system --> comment at the top of <body>: an edit uses ITS f
 sizes, ITS spacing steps and ITS inset — never a new value; if the system itself is wrong,
 change the comment and every place that follows from it.
 
+%(story)s
 FINDINGS — a [contrast] finding is closed FIRST and by changing the text colour or the ground
 it sits on to a pair that reads at 4.5:1, never by leaving the palette as it is; the rest in
 the order given.
@@ -671,6 +683,95 @@ Preheader: <the preheader>
 
 THE HTML
 %(html)s"""
+
+
+_STORY_PROMPT = """You are the writer. Before a line of the email is set, decide THE STORY — the argument
+this email makes for %(name)s — the way a good copywriter does: the reader's real objection,
+the brand's real answer, the real reason to act, each resting on something the brand has.
+
+THE REFERENCE'S ARGUMENT — another brand's email, read as beats:
+%(argument)s
+
+THE BRAND
+name: %(name)s — %(positioning)s
+voice: %(voice)s
+%(rules_brand)s
+THE MATERIAL — the only facts available (a product's own text, the approved claims):
+%(material)s
+
+THE MESSAGE this email carries%(message)s
+
+Write %(name)s's argument in the SHAPE of the reference's — its energy, its moves, its
+contrast — not one-to-one: keep the beats that work for this brand, merge or drop the ones
+that do not, re-order if that tells it better. Every beat RESTS on something named in the
+material or the message; a beat with nothing to rest on (a guarantee the brand does not make,
+a test nobody ran, a launch that is not happening) is turned to the nearest true thing or
+dropped, and you say which. A contrast beat — the category's failing, what the reader has
+settled for — NAMES WHOSE failing it is in its own words, so it can never read as the
+brand's own product ("You know how most melamine goes." → the failings). No line implies what
+is not true (a melamine plate is plastic; "the plastic is gone" is a lie by implication).
+The hook means something on its own. The close is earned by what came before. Answer JSON:
+{"hook": the headline stack's idea in a line,
+ "beats": [{"beat": "...", "says": the beat in this brand's words — a line or two, the copy
+            itself, "rests_on": the fact or claim it rests on, quoted from the material,
+            "about": "the category" | "the reader" | "us" — whose failing or whose promise}],
+ "turned": [what you turned or dropped and why],
+ "close": the last line and the ask}"""
+
+
+def decide_story(brief_: dict, kit_: dict, message: dict | None, *, tenant: str = "", entity_key: str = "") -> dict:
+    """The argument for THIS brand, decided before the HTML. `{ok, story, why, calls}`.
+    Owner, 2026-09-18: the maker had mapped the reference's copy slot by slot
+    — a list of the category's failings landed beside Baci's own product with
+    no frame, "NOT ALL MELAMINE" stood alone, "the plastic is gone" lied by
+    implication. The story is one argument, held to the material, before a
+    line is set."""
+    arg = brief_.get("argument") or []
+    if not arg:
+        # an older brief with no argument read: the copy jobs stand in for it
+        arg = [{"beat": f"section {sec.get('n')}", "says": "; ".join(str(c.get("job") or "") for c in sec.get("copy") or []),
+                "does": sec.get("does") or "", "rests_on": "(not read)"} for sec in brief_.get("sections") or [] if sec.get("copy")]
+    if not arg:
+        return {"ok": True, "story": {}, "why": "the reference carries no copy to argue with", "calls": 0}
+    theme = kit_.get("theme") or {}
+    voice = kit_.get("voice") or {}
+    never = list(voice.get("never_say") or []) + list((kb_ban(kit_.get("tenant", "")) or [])[:30])
+    rules_brand = ("never say: " + ", ".join(map(str, never[:24])) + "\n") if never else ""
+    if (kit_.get("rules") or {}).get("channel"):
+        rules_brand += "the brand's email instructions: " + kit_["rules"]["channel"][:600] + "\n"
+    prompt = _STORY_PROMPT % {
+        "name": kit_.get("name") or theme.get("name") or "the brand",
+        "positioning": kit_.get("positioning") or "", "voice": ", ".join(map(str, voice.get("tone") or [])) or "as the material reads",
+        "rules_brand": rules_brand, "material": (_material(kit_, entity_key) or "(nothing beyond the product's name)")[:3000],
+        "argument": json.dumps(arg, ensure_ascii=False, indent=1)[:5000], "message": _message_text(message)}
+    reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=2500)
+    got = _json(reply.text) if getattr(reply, "ok", False) else None
+    if not isinstance(got, dict) or not got.get("beats"):
+        return {"ok": False, "story": {}, "calls": 1,
+                "why": "the writer did not answer with a story — " + str(getattr(reply, "error", "") or "no JSON")}
+    return {"ok": True, "story": got, "why": "", "calls": 1}
+
+
+def kb_ban(tenant: str) -> list:
+    try:
+        from . import kb
+        return list(kb.banned_claims(tenant) or [])
+    except Exception:                                             # noqa: BLE001
+        return []
+
+
+def _story_text(st: dict | None) -> str:
+    if not st:
+        return ""
+    lines = [f"hook: {st.get('hook', '')}"]
+    for b in st.get("beats") or []:
+        lines.append(f"- [{b.get('beat', '')}] ({b.get('about', '')}) {b.get('says', '')}"
+                     + (f"  — rests on: {b['rests_on']}" if b.get("rests_on") else ""))
+    if st.get("close"):
+        lines.append(f"close: {st['close']}")
+    if st.get("turned"):
+        lines.append("turned: " + "; ".join(map(str, st["turned"])))
+    return "\n".join(lines)
 
 
 def _message_text(message: dict | None) -> str:
@@ -706,7 +807,7 @@ def _parse_email(text: str) -> tuple[str, str, str]:
 
 
 def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, *, tenant: str = "",
-            fitted: dict | None = None, html: str = "", findings=(), png: bytes = b"") -> dict:
+            fitted: dict | None = None, html: str = "", findings=(), png: bytes = b"", story_: dict | None = None) -> dict:
     """`{ok, subject, preheader, html, why, edited}` — ONE MIND writes the
     copy and the HTML together; with `html` and `findings` it EDITS, LOOKING
     at `png` — its own email as a browser showed it. A designer who cannot
@@ -719,7 +820,9 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
         prompt = _REVISE_PROMPT % {
             "findings": "\n".join(f'- [{f.get("severity", "")}] {f.get("where", "")}: {f.get("what", "")}'
                                   + (f' → {f["do"]}' if f.get("do") else "") for f in findings),
-            "html": html}
+            "html": html,
+            "story": ("THE STORY this email tells — an edit never changes a beat's meaning or drops its frame:\n"
+                      + _story_text(story_) + "\n") if story_ else ""}
         if png:
             from . import pictures as ed
             try:
@@ -777,6 +880,10 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
                       "a real device or two, one ask)"),
             "pictures": "\n".join(pics) or "(none)", "cut": cut,
             "message": _message_text(message), "exemplar": exemplar()[:14000],
+            "story": ("\nTHE STORY — the argument this email makes, decided first; every line of copy belongs to a\n"
+                      "beat and says what its beat says (its words may be tightened, never its meaning changed; a\n"
+                      "beat marked \"the category\" keeps its frame so it never reads as ours):\n" + _story_text(story_) + "\n")
+                     if story_ else "",
             "column": COLUMN, "size": HTML_MAX // 1000,
             "webview": " or {{VIEW_IN_BROWSER}}" if (kit_.get("esp") or {}).get("webview", True) else
                        " (this platform has no view-in-browser variable — offer none)"}
@@ -1244,6 +1351,12 @@ The question is never "what differs from the reference" — a difference is corr
 The question is "would you send this": is the idea as sharp, the headline as loud, the hero
 as big, the rhythm as tight, the ask as clear. Name what is timid, dead, cramped, unreadable,
 broken, empty or generic, and say the edit.
+THE COPY is judged as an editor judges it, in the same findings: does the hook mean something
+on its own (a fragment that needs the next line to make sense is a fault); is every beat
+clearly about WHOM — a list of the category's failings must carry its frame ("you know how
+most … goes") or it reads as the brand's own product; does the close earn its ask from what
+came before; is there a line that says nothing ("set the table like you mean it" is a mood,
+not a claim — allowed once, as a closer, never as the argument).
 DRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
 to this brand and EARNS its place: re-authored from this brand's world — its products, its
 place, its voice — it is correct however much it differs from the reference's; a generic
@@ -1266,8 +1379,11 @@ one ask, nothing generic. Answer JSON only:
 _TRUTH_PROMPT = """The words of an email, then the ONLY material the brand has on file about what it sells.
 List every statement in the email about the product or the brand — an origin, a material, a
 property (safe, free of, proof), a count, a place it is sold, an award, a claim of who uses
-it — that the material does not support. A word that merely describes (beautiful, complete,
-ready) is not a fact. Answer JSON only: {"fabricated": [{"words": the exact words in the
+it, a guarantee, a test — that the material does not support, INCLUDING what a line implies
+rather than says: "the plastic is gone" about a melamine plate implies it is not plastic;
+"we're sure enough to put it on us" implies a guarantee; "tested" implies a test. A word that
+merely describes (beautiful, complete, ready) is not a fact; a contrast that names the
+CATEGORY's failing ("most melamine fades") is not a claim about this product. Answer JSON only: {"fabricated": [{"words": the exact words in the
 email, "why": what the material says instead, or that it says nothing}]}
 
 THE EMAIL'S WORDS
@@ -1525,6 +1641,17 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
                                   "what": f"needs {x['needs']}"} for x in cast_.get("none") or []])
     # the copy
     fitted = fits(tenant, cast_)
+    say("deciding the story")
+    told_story = decide_story(brief_, kit_, message, tenant=tenant, entity_key=entity_key)
+    calls += told_story.get("calls", 0)
+    story_ = told_story.get("story") or None
+    if story_:
+        story_note = f"The story: {str(story_.get('hook') or '')[:90]} — {len(story_.get('beats') or [])} beats"
+        if story_.get("turned"):
+            story_note += "; turned: " + "; ".join(map(str, story_["turned"]))[:240]
+        story.append(story_note + ".")
+    elif told_story.get("why"):
+        story.append("No story decided: " + str(told_story.get("why")) + ".")
     copy_ = {"claims": list((message or {}).get("claims") or [])}
     # the rounds
     ref_png, ref_host = _reference_png(structure_id)
@@ -1550,7 +1677,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     for n in range(ROUNDS + 1):
         say(f"round {n}: " + ("writing the email" if n == 0 else "editing to the findings"))
         made = compose(brief_, kit_, cast_, message, tenant=tenant, fitted=fitted, html=raw, findings=findings_prev,
-                       png=prev_png)
+                       png=prev_png, story_=story_)
         calls += 1
         if not made.get("ok"):
             story.append(f"Round {n}: {made.get('why')}.")
@@ -1620,7 +1747,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     slim = [{k: v for k, v in r.items() if k != "html"} for r in rounds]
     return _finish(status, brief=brief_, cast=cast_, copy=copy_, html=best["html"], png_id=best["png_id"],
                    rounds=slim, findings=kept, best=best_i,
-                   models={"calls": calls, "door": best["shot"]["door"]})
+                   models={"calls": calls, "door": best["shot"]["door"], "story": story_ or {}})
 
 
 def swipe(url: str, tenant: str, *, entity_key: str = "", progress=None) -> dict:
@@ -1696,7 +1823,8 @@ def latest(structure_id: str, tenant: str) -> dict | None:
                 "png": media.url_for(r.png_id) if r.png_id else "", "findings": list(r.findings or []),
                 "rounds": rounds, "best": best, "at": r.created_at.isoformat(timespec="minutes")
                 if r.created_at else "", "concept": (r.brief or {}).get("concept", ""),
-                "has_html": bool(r.html), "verdict": verdict, "via": (r.models or {}).get("via", "")}
+                "has_html": bool(r.html), "verdict": verdict, "via": (r.models or {}).get("via", ""),
+                "story": (r.models or {}).get("story") or {}}
 
 
 def html_of(recreation_id: str) -> str:

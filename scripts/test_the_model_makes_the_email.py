@@ -246,6 +246,21 @@ def main() -> int:
     print("— 4. one mind writes the email; baked blocks become pictures —")
     good = email_html()
     answers["email_compose"] = reply_email(good)
+    told = rc.decide_story({**BRIEF, "argument": [{"beat": "problem", "says": "most decaf is flat", "does": "names the disappointment", "rests_on": "the reader's experience"},
+                                                   {"beat": "risk reversal", "says": "30 days, money back", "does": "removes the risk", "rests_on": "a guarantee"}]},
+                           kit, {"subject": "Set the scene"}, tenant="baci", entity_key="portofino")
+    ck("the story is decided before the HTML — the writer is handed the reference's argument and the brand's material, and answers with beats that rest on it",
+       "THE REFERENCE'S ARGUMENT" in seen["email_compose"][-1] and "30 days, money back" in seen["email_compose"][-1]
+       and "Melamine and porcelain" in seen["email_compose"][-1] and (told["ok"] is False or isinstance(told.get("story"), dict)))
+    answers["email_compose"] = lambda prompt: ({"hook": "Set the scene", "beats": [{"beat": "problem", "says": "You know how most Sunday lunches go.", "rests_on": "the reader", "about": "the category"}],
+                                                "turned": ["the guarantee is dropped"], "close": "Shop Portofino"}
+                                               if str(prompt).startswith("You are the writer") else reply_email(good))
+    st_ = rc.decide_story({**BRIEF, "argument": [{"beat": "problem", "says": "x", "does": "y", "rests_on": "z"}]}, kit, None, tenant="baci", entity_key="portofino")
+    made = rc.compose(BRIEF, kit, cast, {"subject": "Set the scene"}, tenant="baci", fitted=fitted, story_=st_["story"])
+    ck("the composer writes from the story — every beat and its frame ride in the prompt",
+       "THE STORY — the argument this email makes" in seen["email_compose"][-1] and "[problem] (the category) You know how most Sunday lunches go." in seen["email_compose"][-1]
+       and "turned: the guarantee is dropped" in seen["email_compose"][-1])
+    answers["email_compose"] = reply_email(good)
     made = rc.compose(BRIEF, kit, cast, {"subject": "Set the scene"}, tenant="baci", fitted=fitted)
     dev = rc._devices_text({"devices": [{"what": "a tiny drawn figure beside the button", "kind": "dressing", "role": "points at the button",
                                           "effect": "playful", "instance": "a cartoon shopper"}, "a script closer"]})
@@ -332,6 +347,12 @@ def main() -> int:
     def _compose(prompt):
         prompt = prompt[-1]["text"] if isinstance(prompt, list) else prompt
         compose_seen.append(prompt)
+        if prompt.startswith("You are the writer. Before a line of the email is set, decide THE STORY"):
+            return {"hook": "Don't just set the table. Set the scene.",
+                    "beats": [{"beat": "problem", "says": "You know how most Sunday lunches go. Same plates, same table.", "rests_on": "the reader's own experience", "about": "the category"},
+                              {"beat": "reframe", "says": "Portofino: melamine and porcelain, coral and shells — the table becomes the scene.", "rests_on": "Melamine and porcelain, coral and shells.", "about": "us"},
+                              {"beat": "ask", "says": "Shop Portofino", "rests_on": "the collection page", "about": "us"}],
+                    "turned": ["no guarantee on file — the risk-reversal beat is dropped"], "close": "Mangia! Shop Portofino"}
         if "FINDINGS" in prompt and "THE HTML" in prompt:
             return reply_email(email_html(headline_px=112))
         return reply_email(email_html())
@@ -356,7 +377,10 @@ def main() -> int:
            for p in seen["email_compose"] if isinstance(p, list)))
     ck("round 1 closed the judge's finding — shippable, the edit counted in lines, the subject kept",
        got["status"] == rc.SHIPPABLE and len(got["rounds"]) == 2 and got["rounds"][1]["blocking"] == 0
-       and got["rounds"][1]["edited"] > 0 and "THE HTML" in compose_seen[1] and got["subject"] == "Set the scene", got.get("note"))
+       and got["rounds"][1]["edited"] > 0 and any("THE HTML" in p for p in compose_seen) and got["subject"] == "Set the scene", got.get("note"))
+    ck("the run decided a story first, said it, and kept it on the row with its turn",
+       "The story: Don't just set the table" in got["note"] and "turned: no guarantee on file" in got["note"]
+       and (rc.latest(sid, "baci") or {}).get("id") and any("THE STORY this email tells" in p for p in compose_seen if "FINDINGS" in p), got.get("note"))
     ck("the run is on file with its picture and no open finding",
        (rc.latest(sid, "baci") or {}).get("status") == rc.SHIPPABLE and rc.latest(sid, "baci")["png"] and not rc.latest(sid, "baci")["findings"])
     judged.clear()
