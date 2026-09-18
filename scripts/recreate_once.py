@@ -33,6 +33,9 @@ def main() -> int:
     ap.add_argument("--out", default="")
     ap.add_argument("--db", default="", help="reuse a seeded database from an earlier run")
     ap.add_argument("--max-pictures", type=int, default=60)
+    ap.add_argument("--no-vision", action="store_true",
+                    help="skip reading each picture's KIND with the model (a lifestyle shot vs a packshot); the "
+                         "cast sheet is then mixed by the store's ordering alone")
     ap.add_argument("--reread", action="store_true", help="read the reference again even if its brief is on file")
     a = ap.parse_args()
     # A durable folder, not the system temp dir: macOS cleared the first
@@ -62,7 +65,7 @@ def main() -> int:
     tenants.seed()
     kb.ensure_brand(a.tenant, a.tenant.title())
     if not a.db:
-        _seed(a.tenant, a.store, a.max_pictures)
+        _seed(a.tenant, a.store, a.max_pictures, a.no_vision)
     print(f"— recreating {a.url} for {a.tenant}" + (f" about {a.entity}" if a.entity else ""))
     steps: list[str] = []
     if a.reread and a.db:
@@ -116,7 +119,7 @@ def main() -> int:
     return 0
 
 
-def _seed(tenant: str, store: str, max_pictures: int) -> None:
+def _seed(tenant: str, store: str, max_pictures: int, no_vision: bool = False) -> None:
     """The brand as its public store shows it: products with their images
     (packshot first), the mark, the address, the Instagram handle."""
     import httpx
@@ -177,8 +180,16 @@ def _seed(tenant: str, store: str, max_pictures: int) -> None:
         edits["colors.accent"] = btn
     brand_theme.approve(tenant, {k: v for k, v in edits.items() if v})
     from app import pictures
-    read = pictures.read_pictures(tenant, limit=max_pictures, vision=False)
-    print(f"  · seeded {n_ent} products, {n_pic} pictures, {read.get('read', 0)} read for their tones"
+    # KINDS BY LOOKING, as the deploy does from the Brand tab: without them the
+    # cast sheet cannot put a scene beside a packshot, and the owner's run of
+    # 2026-09-17 cast the product alone twice ("a bit plain")
+    read = pictures.read_pictures(tenant, limit=max_pictures, vision=not no_vision)
+    kinds: dict = {}
+    for a in kb.assets(tenant):
+        k = (a.reading or {}).get("kind") or "unread"
+        kinds[k] = kinds.get(k, 0) + 1
+    print(f"  · seeded {n_ent} products, {n_pic} pictures, {read.get('read', 0)} read"
+          + (" by looking: " + ", ".join(f"{n} {k}" for k, n in sorted(kinds.items(), key=lambda x: -x[1])) if not no_vision else " for their tones")
           + (f"; mark {logo_url}" if logo_url else "; no mark found") + (f"; address {edits['footer.address']}" if edits.get("footer.address") else "")
           + (f"; faces {edits.get('font.heading')}/{edits.get('font.body')}" if edits.get("font.body") else "; no faces found on the site")
           + (f"; accent {edits['colors.accent']}" if edits.get("colors.accent") else "; no accent found on the site"))

@@ -210,6 +210,23 @@ def main() -> int:
     answers["email_cast"] = {"picks": [{"section": 3, "cell": 1, "why": "food on the plate, in the sun"},
                                        {"section": 5, "cell": 1, "why": "again"}, {"section": 5, "cell": 2, "why": "the table"}], "none": []}
     cast = rc.cast("baci", BRIEF, kit, entity_key="portofino", seed="one")
+    kb.add_asset("baci", CDN + "other_scene.jpg", rights=kb.OWNED, subject="photo", title="a dinner party, the Aqua line", entity_key="aqua", origin="human")
+    kb.add_asset("baci", CDN + "other_pack.jpg", rights=kb.OWNED, subject="object", title="Aqua pitcher packshot", entity_key="aqua", tags=["packshot"], origin="human")
+    with db.SessionLocal() as s:
+        for a in kb.assets("baci"):
+            if "other_scene" in (a.url or ""):
+                a.reading = {"kind": "lifestyle", "colours": {}, "size": [1200, 800], "aspect": "landscape", "alone": False, "person": True}
+            if "other_pack" in (a.url or ""):
+                a.reading = {"kind": "packshot-on-plain", "colours": {}, "size": [1200, 1200], "aspect": "square", "alone": True, "person": False}
+        s.commit()
+    kit = rc.kit("baci")
+    mix = rc.candidates(kit, entity_key="portofino", seed="mix")
+    ck("the cast sheet is a mix by role — the subject's own, the brand's scenes of other products, packshots",
+       any(p.get("entity_key") == "portofino" for p in mix) and any("other_scene" in p["url"] for p in mix)
+       and any("other_pack" in p["url"] for p in mix), str([(p.get("title") or "")[:20] for p in mix]))
+    ck("the slot's role is read from the brief's role, or its older shows",
+       rc._role({"asset": {"role": "in use: at the table", "shows": "old"}}) == "in use: at the table"
+       and rc._role({"asset": {"shows": "the pieces at the table"}}) == "the pieces at the table")
     ck("a pick names the picture and why; the same picture never fills two slots",
        cast["picks"][3]["why"].startswith("food") and cast["picks"][5]["asset_id"] != cast["picks"][3]["asset_id"], str(cast)[:200])
     answers["email_cast"] = {"picks": [], "none": [{"section": 3, "needs": "a photograph of food on the plate"}]}

@@ -111,14 +111,18 @@ Write the brief as JSON with exactly these keys:
             avatar, handle, photo, icon row, dots, caption'),
     "does": what it does for the reader,
     "asset": {"kind": "photograph" | "mark" | "illustration" | "none",
-              "shows": the ROLE the picture plays, in terms ANY brand's own photograph could
-              fill — "the hero product, alone, big", "the product in a scene of use — food on
-              it, hands, sunlight", "the product being bought — in a basket, a bag, at the
-              counter", "the range side by side, packs standing together", "a person with the
-              product". NEVER the reference's own product, props, colours or background: the
-              other brand has none of them. What the reference's picture LOOKS like (its
-              ground colour, its frame, its angle) belongs in "look", where it is recreated
-              in the other brand's tones},
+              "role": which of these the picture plays — "hero: the product alone, big" |
+                      "in use: the product in a scene, with food, hands, a person, a place" |
+                      "the range: several pieces or formats together" | "detail: close on
+                      texture, pattern, material" | "lifestyle: the world of the brand, the
+                      product secondary" | "a person" — one of these, in these words, with
+                      at most one clause of what the scene should FEEL like (sunlit, at the
+                      table, on the move). NEVER the reference's prop, product, angle,
+                      tilt or background — a basket, a jar, "viewed from above" — the other
+                      brand casts from its own shelf and has none of those,
+              "instance": the reference's own picture in a phrase, for the record only —
+                      "a jar in a wire basket, tilted, from above",
+              "shows": the same as "role" (kept for older readers)},
     "copy": [{"id": "s1_kicker", "job": what these words must do, in one line —
               'a two-line hook that turns on how the product is used', 'four numbered steps
               naming the product, the last step one word', "limit": words or lines}],
@@ -287,10 +291,13 @@ The brief's picture slots — each names the ROLE a picture plays in the design:
 %(slots)s
 
 The brand's pictures will never match the reference's subject — a different product, in
-different colours, on different tables. Cast by ROLE: for each slot pick the ONE picture on
-the sheet that plays that role best for this brand (a hero of the product; the product in
-use or in a scene; the product being bought or carried; the range side by side; a person
-with it) and say why in a line. Colours do not matter — the email's tones follow the
+different colours, on different tables, and NEVER its prop, its angle or its tilt. Cast by
+ROLE: for each slot pick the ONE picture on the sheet that plays that role best for this
+brand — a hero of the product; the product in use, in a scene, with people; the range
+together; a detail; the brand's world — and say why in a line. Two slots with different
+roles get two different KINDS of picture: a scene for "in use" or "lifestyle", the product
+alone for "hero" or "the range". A picture of another product of the brand plays a
+lifestyle role perfectly well. Colours do not matter — the email's tones follow the
 picture you pick. Prefer a picture not used lately (%(recent)s), and among equals prefer
 the ones about %(subject)s. Say "none" for a slot only when no picture on the sheet could
 play the role at all. Never pick the same picture for two slots.
@@ -338,20 +345,51 @@ def _sheet(cells: list[bytes]) -> bytes:
     return buf.getvalue()
 
 
+def _role(sec: dict) -> str:
+    """The role a slot's picture plays — `role` where the brief has it, the
+    older `shows` otherwise."""
+    a = sec.get("asset") or {}
+    return str(a.get("role") or a.get("shows") or "").strip()
+
+
+def _is_scene(p: dict) -> bool:
+    """A photograph of the world — a scene, a person, a table — as against a
+    packshot. Read by vision where a reading exists; by the store's own
+    ordering and subject where it does not (locally no vision runs)."""
+    k = str(p.get("kind") or "").lower()
+    if k:
+        return not k.startswith("packshot") and k not in ("mark", "logo", "graphic")
+    if p.get("person") is True:
+        return True
+    return str(p.get("subject") or "") == "photo" and "packshot" not in (p.get("tags") or [])
+
+
 def candidates(kit_: dict, *, entity_key: str = "", recent_media=(), seed: str = "") -> list[dict]:
-    """The pictures the caster is shown: the subject's first, then the rest,
-    what this list saw lately last; a seeded shuffle inside each rank so two
-    campaigns on the same subject are shown a different order."""
+    """The pictures the caster is shown — A MIX BY ROLE, so every slot has
+    something to cast: the subject's own pictures (capped, scenes first),
+    then the brand's scenes (people, tables, places — other products
+    included), then packshots; what this list saw lately last; a seeded
+    shuffle inside each rank so two campaigns on the same subject see a
+    different order. The owner's run of 2026-09-17 offered 24 Portofino
+    pictures and nothing else, and the lifestyle role went uncast."""
     import random
     recent = set(recent_media or ())
     rnd = random.Random(seed or "cast")
     pics = list(kit_.get("pictures") or [])
     rnd.shuffle(pics)
-    rank = lambda p: (0 if entity_key and p.get("entity_key") == entity_key else 1,  # noqa: E731
-                      1 if p["id"] in recent else 0,
-                      0 if p.get("kind") and not str(p.get("kind")).startswith("packshot") else 1)
-    pics.sort(key=rank)
-    return pics[:CAST_MAX]
+    own = [p for p in pics if entity_key and p.get("entity_key") == entity_key]
+    own.sort(key=lambda p: (1 if p["id"] in recent else 0, 0 if _is_scene(p) else 1))
+    rest = [p for p in pics if p not in own]
+    scenes = sorted([p for p in rest if _is_scene(p)], key=lambda p: 1 if p["id"] in recent else 0)
+    shots = sorted([p for p in rest if not _is_scene(p)], key=lambda p: 1 if p["id"] in recent else 0)
+    third = max(4, CAST_MAX // 3)
+    chosen = own[:third * 2 if not scenes else third] + scenes[:third] + shots[:third]
+    for p in own[third:] + scenes[third:] + shots[third:]:
+        if len(chosen) >= CAST_MAX:
+            break
+        if p not in chosen:
+            chosen.append(p)
+    return chosen[:CAST_MAX]
 
 
 def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
@@ -375,13 +413,13 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
         return out
     cands = candidates(kit_, entity_key=entity_key, recent_media=recent_media, seed=seed)
     if not cands:
-        out["none"] = [{"section": s.get("n"), "needs": (s.get("asset") or {}).get("shows") or "a photograph"} for s in slots]
+        out["none"] = [{"section": s.get("n"), "needs": _role(s) or "a photograph"} for s in slots]
         out["said"].append("no publishable picture on file — every photograph slot is cut")
         return out
     blobs = [ed._fetch_bounded(p["small"]) or ed._fetch_bounded(p["url"]) for p in cands]
     keep = [(p, b) for p, b in zip(cands, blobs) if b]
     if not keep:
-        out["none"] = [{"section": s.get("n"), "needs": (s.get("asset") or {}).get("shows") or "a photograph"} for s in slots]
+        out["none"] = [{"section": s.get("n"), "needs": _role(s) or "a photograph"} for s in slots]
         out["said"].append("no picture could be fetched for the sheet — every photograph slot is cut")
         return out
     cands = [p for p, _ in keep]
@@ -390,7 +428,7 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
                       + (f' — about {p["entity_key"]}' if p.get("entity_key") else "")
                       + (" — a person in it" if p.get("person") else "") for i, p in enumerate(cands))
     slot_text = "\n".join(f'section {s.get("n")}: {s.get("what")} — must show: '
-                          f'{(s.get("asset") or {}).get("shows") or "(not said)"}' for s in slots)
+                          f'{_role(s) or "(not said)"}' for s in slots)
     subject = next((e["name"] for e in kit_.get("entities") or [] if e["key"] == entity_key), "") or "the brand"
     recent_titles = [p["title"] for p in cands if p["id"] in set(recent_media or ())][:6]
     prompt = _CAST_PROMPT % {"name": kit_.get("name"), "slots": slot_text, "subject": subject,
@@ -421,7 +459,7 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
         n = s.get("n")
         if n not in out["picks"]:
             needs = next((str(x.get("needs") or "") for x in (got.get("none") or []) if x.get("section") == n), "")
-            out["none"].append({"section": n, "needs": needs or ((s.get("asset") or {}).get("shows") or "a photograph")})
+            out["none"].append({"section": n, "needs": needs or (_role(s) or "a photograph")})
     out["said"].append(f"{len(out['picks'])} of {len(slots)} photograph slot(s) cast from {len(cands)} on the sheet"
                        + (f"; cut: {', '.join('section ' + str(x['section']) for x in out['none'])}" if out["none"] else ""))
     return out
