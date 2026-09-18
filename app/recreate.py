@@ -882,7 +882,15 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "message": _message_text(message), "exemplar": exemplar()[:14000],
             "story": ("\nTHE STORY — the argument this email makes, decided first; every line of copy belongs to a\n"
                       "beat and says what its beat says (its words may be tightened, never its meaning changed; a\n"
-                      "beat marked \"the category\" keeps its frame so it never reads as ours):\n" + _story_text(story_) + "\n")
+                      "beat marked \"the category\" keeps its frame so it never reads as ours).\n"
+                      "A FAILING IS NEVER SET BESIDE THE PRODUCT: a beat about the category or the reader — what\n"
+                      "they have settled for, how most of it goes — is set as TYPE ALONE on its ground, with no\n"
+                      "photograph of this brand's product in that section, beside it, or directly above it; the\n"
+                      "photograph arrives with the beat that answers it (\"Then there's …\"). Where the reference\n"
+                      "paired its problem with a picture, that slot becomes type, or the picture moves down to the\n"
+                      "answer. (The owner's run set \"STIFF. GENERIC. FORGOTTEN.\" beside a photograph of the\n"
+                      "brand's own table, 2026-09-18 — it read as the product's failing.)\n"
+                      + _story_text(story_) + "\n")
                      if story_ else "",
             "column": COLUMN, "size": HTML_MAX // 1000,
             "webview": " or {{VIEW_IN_BROWSER}}" if (kit_.get("esp") or {}).get("webview", True) else
@@ -1279,6 +1287,52 @@ def system_check(html: str) -> list[dict]:
     return out
 
 
+def story_check(html: str, story_: dict | None, kit_: dict) -> list[dict]:
+    """A beat about the category or the reader is never set in the same
+    row as, or the row next to, a photograph of the brand's product. Held
+    from the story the maker itself decided. `{code, severity, where, what}`."""
+    if not story_:
+        return []
+    # a FAILING: the category's, or a problem/objection beat about the reader — an
+    # invitation or an offer addressed to the reader sits beside the product happily
+    beats = [b for b in (story_.get("beats") or [])
+             if str(b.get("about") or "").lower() == "the category"
+             or (str(b.get("about") or "").lower() == "the reader"
+                 and re.search(r"problem|objection|pain|failing|doubt|scepticism|skepticism|settled", str(b.get("beat") or ""), re.I))]
+    if not beats:
+        return []
+    theme = kit_.get("theme") or {}
+    logo = re.sub(r"\?.*$", "", theme.get("logo_url") or "")
+    media_route = config.PUBLIC_BASE_URL.rstrip("/") + "/media/"
+    filed = {re.sub(r"\?.*$", "", p["url"]) for p in kit_.get("pictures") or []}
+    def _product_img(chunk: str) -> bool:
+        for src in re.findall(r"<img[^>]*src=\"([^\"]+)\"", chunk, re.I):
+            base = re.sub(r"\?.*$", "", src)
+            if base.startswith(media_route) or base == logo:
+                continue
+            stem = re.sub(r"_\d+x\d*(?:_crop_\w+)?(\.\w+)$", r"\1", base)
+            if base in filed or stem in filed or any(f.startswith(stem.rsplit(".", 1)[0]) for f in filed):
+                return True
+        return False
+    rows = re.split(r"(?=<tr\b)", html, flags=re.I)
+    plain = [re.sub(r"\s+", " ", _norm(re.sub(r"<[^>]+>", " ", r))).lower() for r in rows]
+    out: list[dict] = []
+    for b in beats:
+        key = " ".join(re.findall(r"[a-z0-9']+", _norm(str(b.get("says") or "")).lower())[:5])
+        if len(key) < 12:
+            continue
+        for i, txt in enumerate(plain):
+            if key in txt:
+                near = rows[max(0, i - 1): i + 2]
+                if any(_product_img(c) for c in near):
+                    out.append({"code": "failing_beside_product", "severity": "blocks", "where": f"the beat '{key[:40]}…'",
+                                "what": "a failing of the category is set beside or under a photograph of the brand's product "
+                                        "— it reads as the product's failing; set the failing as type alone and move the "
+                                        "photograph to the beat that answers it"})
+                    break
+    return out
+
+
 def _material(kit_: dict, entity_key: str) -> str:
     """The product's own text — what the judge may hold ours to."""
     ents = kit_.get("entities") or []
@@ -1354,7 +1408,10 @@ broken, empty or generic, and say the edit.
 THE COPY is judged as an editor judges it, in the same findings: does the hook mean something
 on its own (a fragment that needs the next line to make sense is a fault); is every beat
 clearly about WHOM — a list of the category's failings must carry its frame ("you know how
-most … goes") or it reads as the brand's own product; does the close earn its ask from what
+most … goes") or it reads as the brand's own product, and a failing set BESIDE or directly
+under a photograph of the brand's product reads as the product's failing whatever the words
+say — a fault, fixed by setting the failing as type alone and moving the picture to the
+answer; does the close earn its ask from what
 came before; is there a line that says nothing ("set the table like you mean it" is a mood,
 not a claim — allowed once, as a closer, never as the argument).
 DRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
@@ -1694,7 +1751,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         told = truth(_Walk_words(html), material_, tenant=tenant)
         calls += told.get("calls", 0)
-        checks = checks + told["findings"] + bake_findings + system_check(html)
+        checks = checks + told["findings"] + bake_findings + system_check(html) + story_check(html, story_, kit_)
         shot = shots.shoot(_inline_media(html))
         png_id = ""
         if shot.get("ok"):

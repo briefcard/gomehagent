@@ -319,6 +319,16 @@ def main() -> int:
     got_sys = {f["code"] for f in rc.system_check(choppy)}
     ck("insets and sizes outside the declared system block, by the numbers", {"system_inset", "system_scale"} <= got_sys, str(got_sys))
     ck("the good email keeps to its own system", not rc.system_check(email_html()), str(rc.system_check(email_html())))
+    tale = {"beats": [{"beat": "problem", "about": "the category", "says": "You know how most Sunday lunches go. Same plates, same table."},
+                      {"beat": "invitation", "about": "the reader", "says": "Set the scene tonight."}]}
+    beside = email_html(extra=f'<table><tr><td style="color:#ffffff">You know how most Sunday lunches go. Same plates, same table.</td>'
+                              f'<td><img src="{PHOTO_C}" alt="the walls" width="280"></td></tr></table>')
+    alone = email_html(extra='<table><tr><td style="color:#ffffff">You know how most Sunday lunches go. Same plates, same table.</td></tr></table>'
+                             + '<table><tr><td>a rule</td></tr><tr><td>another</td></tr></table>')
+    invite = email_html(extra=f'<table><tr><td style="color:#ffffff">Set the scene tonight.</td><td><img src="{PHOTO_C}" alt="the walls" width="280"></td></tr></table>')
+    ck("a failing of the category set beside the brand's photograph blocks; the same failing as type alone passes; an invitation beside a photograph passes",
+       any(f["code"] == "failing_beside_product" for f in rc.story_check(beside, tale, kit))
+       and not rc.story_check(alone, tale, kit) and not rc.story_check(invite, tale, kit))
     named = email_html().replace("scale: 96/13/12/11/11", "scale: display=96 / headline=13 / body=12 / small=11 / tiny=11")
     ck("a scale written as named steps is read whole, not as its first number", not rc.system_check(named), str(rc.system_check(named)))
     four = email_html(extra='<p style="color:#ffffff;font-family:Georgia,serif">a</p><p style="color:#ffffff;font-family:Playfair Display,serif">b</p>')
