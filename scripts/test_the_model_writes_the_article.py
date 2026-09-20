@@ -230,6 +230,9 @@ def main() -> int:
     j2 = ar.judge(png(760, 3000), png(1000, 4000), STORY, {**got_b["brief"], "rivals": [{"title": "Melamine vs Porcelain: A Guide", "url": "https://rival.test/a"}]}, KW, tenant="baci")
     ck("a judge that read the rival's title as ours is asked again", j2["ok"] and len(seen["email_judge"]) >= 3)
 
+    ck("a number the material does not give is found; the brand's own prices are not",
+       ar.numbers_not_in("melamine sets $25–$80, above 160°F", "Portofino · $640.00") == ["$25", "$80", "160°F"]
+       and ar.numbers_not_in("$640 against $920", "Portofino · $640.00; Mamma Mia · $920.00") == [])
     print("— 7. the loop —")
     seen["email_compose"].clear()
     round_ = {"n": 0}
@@ -254,6 +257,24 @@ def main() -> int:
     answers["email_judge"] = _judge
     answers["email_brief"] = {"answer_first": "a", "must_cover": [], "gaps": [], "questions": [], "length_words": 1600, "media": "", "tone": "", "beat": "answer first"}
     got = ar.run("baci", KW, entity_key="portofino-melamine", rival_urls=["https://rival.test/a"], collections=COLL)
+    jn["n"] = 0
+    inv = iter([True, False])
+    def _judge_num(prompt):
+        text = prompt[-1]["text"] if isinstance(prompt, list) else prompt
+        if isinstance(text, str) and text.startswith("The words of an email"):
+            return {"fabricated": []}
+        if next(inv, False):
+            return {"ours_first_words": "Melamine vs porcelain dinnerware comes down", "would_publish": False, "one_pattern": True,
+                    "findings": [{"where": "the table", "what": "no prices", "do": "add 'melamine sets $25–$80 / porcelain $60–$300+'", "severity": "blocks"}]}
+        return {"ours_first_words": "Melamine vs porcelain dinnerware comes down", "would_publish": True, "one_pattern": True, "findings": []}
+    answers["email_judge"] = _judge_num
+    got_n = ar.run("baci", KW, entity_key="portofino-melamine", rival_urls=["https://rival.test/a"], collections=COLL)
+    ck("a judge finding that asks for a number the material does not give is dropped and said, never handed to the edit",
+       "asked for numbers the material does not give in 1 finding(s)" in got_n["note"] and not any("$25" in p for p in seen["email_compose"] if isinstance(p, str) and "FINDINGS" in p), got_n.get("note"))
+    ck("the brief and the judge are handed the material", any("WHAT THE BRAND HAS" in p and "dishwasher safe" in p for p in seen["email_brief"] if isinstance(p, str))
+       and any(isinstance(p, list) and "THE MATERIAL the article may state" in p[-1]["text"] for p in seen["email_judge"]))
+    answers["email_judge"] = _judge
+    jn["n"] = 0
     ck("brief → story → write → check → shoot → judge → edit; the edit closed the finding; publishable only when judged and the judge would publish",
        got["ok"] and got["status"] == ar.PUBLISHABLE and len(got["rounds"]) == 2 and got["rounds"][0]["blocking"] == 1 and got["rounds"][1]["blocking"] == 0
        and got["rounds"][1]["edited"] > 0 and "The story:" in got["note"] and "Read 1 rival page" in got["note"], got.get("note"))

@@ -263,13 +263,15 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `articles.py`
 
 - **`approach`**(url, tenant?) → `dict`  ·  **from nothing**
-- **`brief`**(tenant, keyword, reads) → `dict`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
+- **`article_material`**(kit_, entity_key, keyword) → `str`  ·  **from nothing**
+- **`brief`**(tenant, keyword, reads, material?) → `dict`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`check`**(html, title, meta, keyword, pattern_, kit_, products?, collections?, links?) → `list[dict]`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_can_the_engines_read_us.py`, `test_claim_trace.py`, `test_seo_guard.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `triage.py`, `web.py`, `wordpress_seo.py`
 - **`compose`**(kit_, pattern_, brief_, story_, keyword, tenant?, products?, collections?, html?, findings?, png?) → `dict`  ·  from `skill_pack.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
-- **`decide_story`**(brief_, kit_, keyword, entity_key?, questions?, approach_?, tenant?) → `dict`  ·  from `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
+- **`decide_story`**(brief_, kit_, keyword, entity_key?, questions?, approach_?, tenant?, material?) → `dict`  ·  from `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`exemplar`**() → `str`  ·  **from nothing**
 - **`file_pattern`**(tenant, pattern_, source_url?, by?) → `str`  ·  from `test_the_model_writes_the_article.py`
-- **`judge`**(ours_png, rival_png, story_, brief_, keyword, tenant?) → `dict`  ·  from `test_the_model_writes_the_article.py`
+- **`judge`**(ours_png, rival_png, story_, brief_, keyword, tenant?, material?) → `dict`  ·  from `test_the_model_writes_the_article.py`
+- **`numbers_not_in`**(text, material) → `list[str]`  ·  from `test_the_model_writes_the_article.py`
 - **`page`**(html, title, kit_) → `str`  ·  from `article_once.py`
 - **`pattern`**(tenant) → `dict`  ·  from `test_the_model_writes_the_article.py`
 - **`read_pattern`**(url, tenant?) → `dict`  ·  from `test_the_model_writes_the_article.py`

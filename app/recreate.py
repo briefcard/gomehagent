@@ -237,7 +237,7 @@ def kit(tenant: str) -> dict:
         a = getattr(e, "attributes", None) or {}
         desc = re.sub(r"<[^>]+>", " ", str(getattr(e, "description", "") or ""))
         ents.append({"key": e.key, "name": e.name, "type": getattr(e, "type", "") or "",
-                     "url": str(a.get("url") or ""), "price": str(a.get("price") or ""),
+                     "url": str(a.get("url") or ""), "price": str(getattr(e, "price", "") or a.get("price") or ""),
                      "image": str(a.get("image") or ""), "description": _norm(desc)[:1200]})
     pics = []
     for a in kb.assets(tenant):
@@ -1440,7 +1440,9 @@ it, a guarantee, a test — that the material does not support, INCLUDING what a
 rather than says: "the plastic is gone" about a melamine plate implies it is not plastic;
 "we're sure enough to put it on us" implies a guarantee; "tested" implies a test. A word that
 merely describes (beautiful, complete, ready) is not a fact; a contrast that names the
-CATEGORY's failing ("most melamine fades") is not a claim about this product. Answer JSON only: {"fabricated": [{"words": the exact words in the
+CATEGORY's failing ("most melamine fades") is not a claim about this product — but a NUMBER about the
+category (a temperature, a percentage, a year, a price band, "studies show") that the material
+does not give is fabricated. Answer JSON only: {"fabricated": [{"words": the exact words in the
 email, "why": what the material says instead, or that it says nothing}]}
 
 THE EMAIL'S WORDS
@@ -1474,13 +1476,22 @@ def truth(words: str, material: str, *, tenant: str = "") -> dict:
     "BPA Free" through (2026-09-17); asked alone it is one short text call."""
     if not words.strip():
         return {"ok": True, "findings": [], "calls": 0}
-    reply = _ask("email_judge", [{"type": "text", "text": _TRUTH_PROMPT % {
-        "words": words[:6000], "material": (material or "(nothing beyond the product's name)")[:3000]}}],
-        tenant=tenant, max_tokens=1200)
-    got = _json(reply.text) if getattr(reply, "ok", False) else None
+    got, calls = None, 0
+    for _ in range(2):
+        reply = _ask("email_judge", [{"type": "text", "text": _TRUTH_PROMPT % {
+            "words": words[:9000], "material": (material or "(nothing beyond the product's name)")[:5000]}}],
+            tenant=tenant, max_tokens=2500)
+        calls += 1
+        got = _json(reply.text) if getattr(reply, "ok", False) else None
+        if isinstance(got, dict):
+            break
     if not isinstance(got, dict):
-        return {"ok": False, "findings": [], "calls": 1}
-    return {"ok": True, "calls": 1, "findings": [
+        # SAID, never silent: a truth pass that did not answer left a round
+        # with "0 checks block" and fifteen fabrications (2026-09-20)
+        return {"ok": False, "calls": calls, "why": "the truth pass did not answer — " + str(getattr(reply, "error", "") or "no JSON, twice"),
+                "findings": [{"code": "truth_unread", "severity": "blocks", "where": "the words",
+                              "what": "the fact check did not answer, so nothing here is proven true"}]}
+    return {"ok": True, "calls": calls, "findings": [
         {"code": "fabricated", "severity": "blocks", "where": str(f.get("words") or "")[:120],
          "what": "not in the brand's material — " + str(f.get("why") or "")[:200]}
         for f in got.get("fabricated") or [] if isinstance(f, dict) and f.get("words")]}
@@ -1495,8 +1506,17 @@ def _stamp(png: bytes, label: str) -> bytes:
     was not enough; a label in the pixels is what it reads."""
     import io
     from PIL import Image, ImageDraw, ImageFont
+    from . import llm, pictures as ed
     im = Image.open(io.BytesIO(png)).convert("RGB")
     band = max(28, im.width // 24)
+    # the band must not push the picture past the model's edge or budget —
+    # a sheet cut to exactly 1568 tall came back 1596 and was REFUSED, so the
+    # article judge never answered (2026-09-20); shrink first, then stamp
+    tier, edge = ed._tier_edge()
+    w, h = llm.resized_size(im.width, im.height + band, edge, llm.IMAGE_TIERS[tier]["max_tokens"])
+    if (w, h) != (im.width, im.height + band):
+        im = im.resize((max(1, w), max(1, h - band)), Image.LANCZOS)
+        band = min(band, max(20, im.width // 24))
     out = Image.new("RGB", (im.width, im.height + band), "#000000")
     out.paste(im, (0, band))
     d = ImageDraw.Draw(out)
@@ -1792,6 +1812,9 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         if not open_:
             break
         findings_prev = open_ + [f for f in judged.get("findings", []) if f.get("severity") == "cosmetic"][:3]
+        if not findings_prev:
+            story.append("Nothing to edit and no judgement — the round stands.")
+            break
         prev_png = shot.get("png") or b""
     if best_i < 0:
         return _finish(FAILED, brief=brief_, cast=cast_, copy=copy_)

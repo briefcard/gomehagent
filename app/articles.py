@@ -177,7 +177,14 @@ def rivals(tenant: str, keyword: str, *, urls: list | None = None) -> list[dict]
 
 
 _BRIEF_PROMPT = """You are an editor briefing a writer who must beat these pages for the search "%(keyword)s".
-Read them as a rival does. Then write the brief as JSON:
+Read them as a rival does. The writer may state only what the brand's material holds — a gap the
+material cannot fill honestly (a number, a price, a study the brand does not have) is not a gap
+to name; name the ones it can.
+
+WHAT THE BRAND HAS, in brief:
+%(material)s
+
+Then write the brief as JSON:
 {"answer_first": the one-sentence answer the article must open with (the searcher's question,
     answered plainly),
  "must_cover": [the sub-questions and sections every strong page covers — in the reader's words],
@@ -194,8 +201,9 @@ THE PAGES THAT RANK
 %(pages)s"""
 
 
-def brief(tenant: str, keyword: str, reads: list[dict]) -> dict:
-    """The SERP brief: what ranks, read into what ours must do. `{ok, brief, why, calls}`."""
+def brief(tenant: str, keyword: str, reads: list[dict], *, material: str = "") -> dict:
+    """The SERP brief: what ranks, read into what ours must do — told what the
+    brand has, so a gap it names is one the writer can fill. `{ok, brief, why, calls}`."""
     if not reads:
         return {"ok": True, "brief": {"answer_first": "", "must_cover": [], "gaps": [], "questions": [], "length_words": 1400,
                                       "media": "", "tone": "", "beat": "no rival pages were on file — write the best page you can",
@@ -203,7 +211,8 @@ def brief(tenant: str, keyword: str, reads: list[dict]) -> dict:
     pages = "\n\n".join(f"--- {p['url']} — {p['words']} words, {p['images']} pictures, "
                         f"{'a table' if p.get('table') else 'no table'}, {'an FAQ' if p.get('faq') else 'no FAQ'}\n{p['outline'][:4500]}"
                         for p in reads)
-    reply = _ask("email_brief", _BRIEF_PROMPT % {"keyword": keyword, "pages": pages}, tenant=tenant, max_tokens=2500)
+    reply = _ask("email_brief", _BRIEF_PROMPT % {"keyword": keyword, "pages": pages,
+                                                 "material": (material or "(nothing beyond the product names)")[:2500]}, tenant=tenant, max_tokens=2500)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
     if not isinstance(got, dict):
         return {"ok": False, "brief": {}, "calls": 1, "why": "the editor did not answer with a brief — " + str(getattr(reply, "error", "") or "no JSON")}
@@ -276,7 +285,7 @@ plan for about %(length)s words. Answer with the JSON only, nothing before it.""
 
 
 def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = "", questions: list | None = None,
-                 approach_: dict | None = None, tenant: str = "") -> dict:
+                 approach_: dict | None = None, tenant: str = "", material: str = "") -> dict:
     from .recreate import kb_ban
     voice = kit_.get("voice") or {}
     never = list(voice.get("never_say") or []) + list((kb_ban(kit_.get("tenant", "")) or [])[:30])
@@ -285,7 +294,7 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
         rules_brand += "the brand's writing instructions: " + kit_["rules"]["channel"][:600] + "\n"
     prompt = _STORY_PROMPT % {
         "name": kit_.get("name") or "the brand", "positioning": kit_.get("positioning") or "", "keyword": keyword,
-        "rules_brand": rules_brand, "material": (_material(kit_, entity_key) or "(nothing beyond the product names)")[:3500],
+        "rules_brand": rules_brand, "material": (material or article_material(kit_, entity_key, keyword) or "(nothing beyond the product names)")[:5000],
         "brief": json.dumps({k: brief_.get(k) for k in ("answer_first", "must_cover", "gaps", "questions", "media", "tone", "beat")},
                             ensure_ascii=False, indent=1)[:4000],
         "approach": ("\nTHE APPROACH the owner likes — its concept and argument, not its layout or facts:\n"
@@ -299,6 +308,22 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
         return {"ok": False, "story": {}, "calls": 1, "why": "the writer did not answer with a story — "
                 + (f"it ran past the length limit ({len(reply.text or '')} characters)" if cut else str(getattr(reply, "error", "") or "no JSON"))}
     return {"ok": True, "story": got, "why": "", "calls": 1}
+
+
+def article_material(kit_: dict, entity_key: str, keyword: str) -> str:
+    """What the article may state about what the brand sells: the hero
+    product's own text, then the products the keyword names (so a "melamine
+    vs porcelain" piece sees the brand's porcelain too), then the claims."""
+    ents = kit_.get("entities") or []
+    words = {w for w in re.findall(r"[a-z]{4,}", keyword.lower())}
+    hero = [e for e in ents if entity_key and e.get("key") == entity_key]
+    related = [e for e in ents if e not in hero and any(w in (e.get("name") or "").lower() for w in words)][:8]
+    lines = []
+    for e in hero + related:
+        lines.append(f"{e.get('name', '')}" + (f" · {e.get('price')}" if e.get("price") else "") + f": {str(e.get('description') or '')[:700]}")
+    for c in (kit_.get("claims") or [])[:12]:
+        lines.append("claim: " + str(c.get("claim") or ""))
+    return "\n".join(lines)
 
 
 def _story_text(st: dict | None) -> str:
@@ -378,8 +403,11 @@ RULES
   FAQ question. Every picture has alt text. No links but the ones listed.
 - The keyword "%(keyword)s" appears in the title and in the first paragraph, naturally — never
   stuffed. Meta ≤ 155 characters, says what the reader gets.
-- Every product fact is in the material; a category fact is said as the category's; a contrast
-  is framed as whose it is; nothing implied that is untrue (melamine is plastic).
+- Every product fact is in the material; a category fact is said as the category's and is one
+  you would bet on without a source — NO number, temperature, percentage, price band, lifespan,
+  regulatory approval ("FDA-approved") or study about the category unless the material gives it:
+  say "never in the microwave", not "above 70 °C"; a contrast is framed as whose it is; nothing
+  implied that is untrue (melamine is plastic).
 - Never "handmade", "artisanal", "crafted", "made in" a country, unless the material says so.
 
 OUTPUT, exactly — the FIRST characters of your answer are "Title:":
@@ -628,10 +656,40 @@ Judge OURS as an editor and an SEO judge a page before it goes live, and answer 
                "do": the concrete edit the writer can make in the body,
                "severity": "blocks" if you would not publish without it, else "cosmetic"}]}
 Never ask for the rival's words or pictures. Never ask for a photograph that does not exist —
-name one in the article or say cut. A category fact framed as the category's is not a claim."""
+name one in the article or say cut. A category fact framed as the category's is not a claim.
+NEVER ASK FOR A NUMBER THE MATERIAL DOES NOT GIVE — no price band, temperature, percentage,
+lifespan, approval or study; "real prices" means the brand's own, listed below, or none. An
+edit that would add such a number is not an edit.
+THE MATERIAL the article may state:
+%(material)s"""
 
 
-def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword: str, *, tenant: str = "") -> dict:
+_NUM = re.compile(r"(?:\$\s?\d(?:[\d,]*\d)?(?:\.\d+)?|\d(?:[\d,]*\d)?(?:\.\d+)?\s?(?:°\s?[FC]|%|percent|years?|hours?|minutes?))", re.I)
+
+
+def numbers_not_in(text: str, material: str) -> list[str]:
+    """The numbers with units — prices, temperatures, percentages, spans —
+    in `text` that the material does not carry. A judge that asks for
+    "$25–$80" or "160°F" is asking the writer to invent."""
+    norm = lambda n: re.sub(r"\.0+(?=\D|$)", "", re.sub(r"[\s,]", "", n)).lower()  # noqa: E731 — "$640.00" is "$640"
+    have = {norm(n) for n in _NUM.findall(material or "")}
+    return [n for n in _NUM.findall(text or "") if norm(n) not in have]
+
+
+def _top(png: bytes, height: int) -> bytes:
+    """The first `height` pixels of a tall page — a 15,000-px rival shrunk
+    whole is a 100-px sliver nobody can judge."""
+    import io
+    from PIL import Image
+    im = Image.open(io.BytesIO(png))
+    if im.height <= height:
+        return png
+    buf = io.BytesIO()
+    im.crop((0, 0, im.width, height)).save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword: str, *, tenant: str = "", material: str = "") -> dict:
     from . import pictures as ed
     from .recreate import _confused, _stamp
     if not ours_png:
@@ -640,15 +698,17 @@ def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword
     blocks = []
     try:
         if rival_png:
-            blocks.append({"type": "text", "text": "THE RIVAL — the page that ranks, whole:"})
-            blocks.append(ed._image_block(_stamp(ed.contact_sheet(rival_png, edge), "RIVAL — whole")))
+            rival_png = _top(rival_png, 4200)
+            blocks.append({"type": "text", "text": "THE RIVAL — the page that ranks, its first screens:"})
+            blocks.append(ed._image_block(_stamp(ed.contact_sheet(rival_png, edge), "RIVAL — top")))
         blocks.append({"type": "text", "text": "OURS — whole:"})
         blocks.append(ed._image_block(_stamp(ed.contact_sheet(ours_png, edge), "OURS — whole")))
         blocks.append({"type": "text", "text": "OURS — its top, legible:"})
         blocks.append(ed._image_block(_stamp(ed.strips(ours_png, edge)[0]["png"], "OURS — top")))
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
-    blocks.append({"type": "text", "text": _JUDGE_PROMPT % {"keyword": keyword, "story": _story_text(story_)[:2500], "beat": brief_.get("beat") or ""}})
+    blocks.append({"type": "text", "text": _JUDGE_PROMPT % {"keyword": keyword, "story": _story_text(story_)[:2500], "beat": brief_.get("beat") or "",
+                                                            "material": (material or "(nothing beyond the product names)")[:3000]}})
     calls, got, mixed = 0, None, ""
     for _ in range(2):
         reply = _ask("email_judge", blocks, tenant=tenant, max_tokens=2500)
@@ -693,7 +753,8 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
     pat = pattern(tenant)
     say("reading what ranks")
     reads = rivals(tenant, keyword, urls=rival_urls)
-    got_b = brief(tenant, keyword, reads)
+    material_ = article_material(kit_, entity_key, keyword)
+    got_b = brief(tenant, keyword, reads, material=material_)
     calls += got_b.get("calls", 0)
     if not got_b.get("ok"):
         return {"ok": False, "status": FAILED, "note": "The brief could not be read: " + str(got_b.get("why")), "rounds": []}
@@ -725,7 +786,6 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
     rounds: list[dict] = []
     html, title, meta, prev_png, findings_prev = "", "", "", b"", []
     best_i, best_n = -1, 10 ** 6
-    material_ = _material(kit_, entity_key)
     for n in range(ROUNDS + 1):
         say(f"round {n}: " + ("writing the article" if n == 0 else "editing to the findings"))
         kit_["_title"], kit_["_meta"] = title, meta
@@ -741,9 +801,15 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
         calls += told.get("calls", 0)
         checks += told["findings"]
         shot = shoot(html, title, kit_)
-        judged = judge(shot.get("png") or b"", rival_png, story_, brief_, keyword, tenant=tenant) if shot.get("ok") else \
+        judged = judge(shot.get("png") or b"", rival_png, story_, brief_, keyword, tenant=tenant, material=material_) if shot.get("ok") else \
             {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0}
         calls += judged.get("calls", 0)
+        kept, dropped = [], []
+        for f in judged.get("findings") or []:
+            (dropped if numbers_not_in(f"{f.get('what', '')} {f.get('do', '')}", material_) else kept).append(f)
+        if dropped:
+            story.append(f"The judge asked for numbers the material does not give in {len(dropped)} finding(s) — ignored.")
+            judged = {**judged, "findings": kept}
         open_ = blocking(checks) + blocking(judged.get("findings"))
         rounds.append({"n": n, "png": shot.get("png") or b"", "html": html, "title": title, "meta": meta, "check": checks,
                        "judge": judged.get("findings") or [], "verdict": judged.get("verdict") or {}, "judged": bool(judged.get("ok")),
@@ -757,6 +823,12 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
         if not open_ and judged.get("ok"):
             break
         findings_prev = open_ + [f for f in judged.get("findings") or [] if f["severity"] == "cosmetic"][:3]
+        if not findings_prev:
+            # nothing to edit — an unjudged clean round is kept as it is, never
+            # REWRITTEN from scratch (the first live run rewrote a clean article
+            # into one with fifteen fabrications, 2026-09-20)
+            story.append("Nothing to edit and no judgement — the round stands.")
+            break
         prev_png = shot.get("png") or b""
     if best_i < 0:
         return {"ok": False, "status": FAILED, "note": " ".join(story), "rounds": rounds, "brief": brief_, "story": story_, "calls": calls}
