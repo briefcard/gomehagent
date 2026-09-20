@@ -38,6 +38,38 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'an_article_may_open_without_its_keyword',
+        "file": 'app/articles.py',
+        "find": '    if want and not want <= set(_kw.tokens(first)):\n',
+        "replace": '    if False:\n',
+        "suites": ['test_the_model_writes_the_article.py'],
+        "why": "the searcher's phrase never reaches the first paragraph — the answer-first rule the whole blog rests on is unenforced",
+    },
+    {
+        "name": 'an_article_may_carry_a_stranger_s_picture',
+        "file": 'app/articles.py',
+        "find": '        if stem(src) not in allowed_pics and not any(a.startswith(stem(src).rsplit(".", 1)[0]) for a in allowed_pics):\n',
+        "replace": '        if False:\n',
+        "suites": ['test_the_model_writes_the_article.py'],
+        "why": "a picture from any host — a rival's — ships on the client's own domain as theirs",
+    },
+    {
+        "name": 'a_missing_pattern_block_is_not_noticed',
+        "file": 'app/articles.py',
+        "find": '        if b.get("required") and str(b.get("name") or "").lower() not in names:\n',
+        "replace": '        if False:\n',
+        "suites": ['test_the_model_writes_the_article.py'],
+        "why": "the brand's standing layout stops being held — every article is laid out differently again",
+    },
+    {
+        "name": 'an_unjudged_article_is_called_publishable',
+        "file": 'app/articles.py',
+        "find": '    status = PUBLISHABLE if best["blocking"] == 0 and best["judged"] and (best["verdict"] or {}).get("would_publish") else NOT_PUBLISHABLE\n',
+        "replace": '    status = PUBLISHABLE if best["blocking"] == 0 else NOT_PUBLISHABLE\n',
+        "suites": ['test_the_model_writes_the_article.py'],
+        "why": "an article nobody looked at goes live on auto — the one condition §5 of the plan adds is gone",
+    },
+    {
         "name": 'the_clock_resets_to_the_least_recent',
         "file": 'app/email_structures.py',
         "find": '        oldest = least_recent(any_usable, recent_designs, recent_shapes) if seen else any_usable\n',
