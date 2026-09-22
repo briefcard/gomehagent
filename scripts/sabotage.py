@@ -1076,6 +1076,17 @@ SABOTAGES = [
                "ad for the pitcher proved by a claim about the platter",
     },
     {
+        "name": "evidence_carries_a_stranger_into_the_ad",
+        "file": "app/skill_pack.py",
+        "find": "    _own = [_own_evidence(c) for c in ctx.claims[:want]]",
+        "replace": "    _own = list(ctx.claims[:want])  # SABOTAGE",
+        "suites": ["test_the_ad_is_about_the_thing_you_chose.py"],
+        "why": "a brand-wide claim whose evidence is a support reply about a "
+               "DIFFERENT product carries that product into both the panel's "
+               "brief and the drafter's prompt — the zodiac batch's third "
+               "failure, reopened",
+    },
+    {
         "name": "our_bookkeeping_is_offered_as_a_product_fact",
         "file": "app/bundle.py",
         "find": '            if not str(k).startswith("_") and k not in NOT_A_FACT',

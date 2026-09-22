@@ -1575,7 +1575,48 @@ def _run_ad_copy(ctx: Context) -> dict:
     # rotation, and this is the belt to that brace: concept 1 is built on a
     # claim ABOUT the thing the ad is for whenever one exists. Stable, so
     # rotation still decides the order within a tier.
-    _lead = sorted(ctx.claims[:want],
+    # …AND ITS EVIDENCE MAY NOT CARRY A PRODUCT THIS AD IS NOT ABOUT.
+    #
+    # The zodiac batch's third failure, and the only one of the three left
+    # open: *"then the claim's evidence carried the wrong product into the
+    # panel."* Entry closed the other two for NEW claims — the harvester
+    # scopes by `entity_for`, approval refuses an unscoped machine claim —
+    # but every row approved before those gates still carries whatever its
+    # evidence says, and `evidence` is printed verbatim in BOTH prompts:
+    # `ad_craft.panel_prompt` per concept, `ad_prompt` beside the claim. So
+    # it is answered ONCE here, where the claims are chosen, rather than in
+    # two builders that would drift.
+    #
+    # `email_harvest.entity_for` is the question already asked and answered
+    # carefully: distinctive name tokens only, generic tableware words worth
+    # nothing, and a TIE RESOLVES TO NOTHING because "Zodiac Vibe cup" scores
+    # the same for all twelve signs. So a withhold needs the evidence to name
+    # one catalogue product unambiguously, and the failure direction is
+    # "evidence we could have withheld", never "proof withheld over a
+    # coincidence". The CLAIM still stands; only its evidence sits out this
+    # run, and the run says which stranger it named.
+    def _own_evidence(c: dict) -> dict:
+        from . import email_harvest as _harv
+        ev = str(c.get("evidence") or "").strip()
+        if not ev:
+            return c
+        whose = _harv.entity_for(ctx.tenant, ev)
+        if not whose or whose in set(_scopes) or whose == entity_key:
+            return c
+        # BY THE NAME THE OWNER KNOWS IT BY. `entity_for` answers with a key,
+        # and a note reading "names joke-melamine-18" asks them to translate
+        # a slug before they can act on it.
+        _nm = next((e.name for e in kb_mod.entities(ctx.tenant, available_only=False)
+                    if e.key == whose), whose)
+        ctx.note(
+            f"claim {str(c.get('claim_id') or '')[:12]}'s evidence names "
+            f"{_nm}, which this ad is not about — so the evidence was kept "
+            f"from the writer and the reviewers. The claim still stands. "
+            f"Scope the claim to {_nm}, or edit its evidence, on Knowledge.")
+        return {**c, "evidence": ""}
+
+    _own = [_own_evidence(c) for c in ctx.claims[:want]]
+    _lead = sorted(_own,
                    key=lambda c: 0 if (c.get("scope") or "brand-wide") != "brand-wide" else 1)
     if entity_key and _lead and all((c.get("scope") or "brand-wide") == "brand-wide"
                                     for c in _lead):
@@ -1601,7 +1642,9 @@ def _run_ad_copy(ctx: Context) -> dict:
         ctx.note(f"the panel did not sit — {_panel_why}; the variants were "
                  f"drafted on the ruleset's brief alone")
 
-    for i, claim in enumerate(ctx.claims[:want]):
+    # `_own`, not `ctx.claims`: the drafter reads the same claim dicts the
+    # panel was shown, so evidence withheld from one is withheld from both.
+    for i, claim in enumerate(_own):
         angle = angles[i % len(angles)]
         _panel_row = (panel.get("variants") or {}).get(i + 1, {}) if panel else {}
         _bundle_i = {**ctx.bundle, "panel": _panel_row}

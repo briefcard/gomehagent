@@ -604,7 +604,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`bucket_for`**(alias, thread_id, inbound) → `str`  ·  **from nothing**
 - **`cursor`**(tenant) → `dict`  ·  from `test_email_harvest.py`, `web.py`, `worker.py`
-- **`entity_for`**(tenant, text) → `str`  ·  from `test_a_claim_knows_what_it_is_about.py`
+- **`entity_for`**(tenant, text) → `str`  ·  from `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`
 - **`mine`**(tenant, days?, limit?, apply?, direction?, want?) → `dict`  ·  from `sources.py`, `test_email_harvest.py`, `web.py`, `worker.py`
 - **`reset_cursor`**(tenant) → `str`  ·  from `test_email_harvest.py`, `web.py`
 - **`save_cursor`**(tenant, **fields) → `dict`  ·  **from nothing**

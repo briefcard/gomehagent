@@ -204,6 +204,41 @@ def main() -> int:
        r3.get("status") == "produced" and not (fp3.bundles[0].get("entities") or []),
        str([e.get("key") for e in (fp3.bundles[0].get("entities") or [])]))
 
+    print("\n— PROOF: a claim's EVIDENCE may not carry a stranger either —")
+    # The zodiac batch's third failure, and the one entry could not close:
+    # a brand-wide claim approved long ago, whose evidence is a support reply
+    # about a DIFFERENT product. `evidence` is printed verbatim in both
+    # prompts, so this is checked in both.
+    kb.add_claim("baci", "Every piece survives the dishwasher.",
+                 "Support reply about the Joke Melamine 18-piece set — forty "
+                 "cycles, no fading.", [], origin="human", status="active")
+    fp4, fd4 = FakePanel(), FakeDraft([A_REAL_AD])
+    skill_pack.panel_ad, skill_pack.draft_ad = fp4, fd4
+    r4 = skill.run("ad_copy", "baci", entity_key="sagrada-head",
+                   audience_key="hosts", variants=4)
+
+    def _evidence_lines(text: str) -> list:
+        return [ln for ln in text.split("\n")
+                if ln.lstrip().startswith(("evidence:", "(evidence:"))]
+
+    panel4 = "\n".join(ad_craft.panel_prompt(fp4.bundles[0], fp4.concepts[0]))
+    drafts4 = "\n".join("\n".join(skill_pack.ad_prompt(b, c, a, o))
+                        for b, c, a, o in fd4.calls)
+    for _who, _text in (("the panel", panel4), ("the drafter", drafts4)):
+        ck(f"  {_who} is never shown evidence about a product this ad is not about",
+           not any("Joke" in ln or "forty cycles" in ln
+                   for ln in _evidence_lines(_text)),
+           str(_evidence_lines(_text))[:200])
+    ck("  the run names the claim AND the stranger, by the name it is filed under",
+       any("Joke Melamine 18-piece set" in n and "evidence" in n
+           for n in (r4.get("notes") or [])),
+       str([n for n in (r4.get("notes") or []) if "evidence" in n])[:200])
+    # AND THE OTHER DIRECTION, which is what stops this being a shredder:
+    # evidence that names nobody keeps its proof.
+    ck("  …while evidence that names no product rides untouched",
+       any("lab report" in ln for ln in _evidence_lines(drafts4)),
+       str(_evidence_lines(drafts4))[:200])
+
     print("\n— DECLINE: a reply that speaks to the operator is not filed as copy —")
     ck("the pasted refusal is read as a decline, with what it asked",
        "confirm" in ad_craft.declined(THE_REFUSAL).lower()
