@@ -697,6 +697,37 @@ def _recreation_of(output_id: str) -> dict:
     return rec if isinstance(rec, dict) else {}
 
 
+def _learn_from_approved(ap, output_id: str) -> None:
+    """An approved artifact raises the brand's standard: it becomes the
+    exemplar of its kind, and an article approved in the DEFAULT pattern
+    files that pattern as the brand's own. Never on a refusal, never on a
+    proposal — only where an approval is executed. Swallows its own failures:
+    learning must not fail a publish."""
+    try:
+        from . import articles as _ar, exemplars as _ex
+        tenant = str(ap.tenant or "")
+        if not (tenant and output_id):
+            return
+        with db.SessionLocal() as s:
+            art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id == output_id)
+                   .order_by(db.ArtifactBody.created_at.desc()).first())
+            if art is None:
+                return
+            body, meta = art.body or "", dict(art.meta or {})
+        kind = _ex.EMAIL if meta.get("recreation") or meta.get("html") else _ex.ARTICLE
+        html = str(meta.get("html") or body) if kind == _ex.EMAIL else body
+        by = "you" if str((ap.payload or {}).get("decided_by") or "") != "auto" else "the system, unattended"
+        _ex.file_approved(tenant, kind, html=html, title=str(meta.get("title") or ""),
+                          output_id=output_id, why=f"approved by {by}")
+        if kind == _ex.ARTICLE and (meta.get("article") or {}).get("pattern_default"):
+            got = _ar.pattern(tenant)
+            if got.get("default"):
+                _ar.file_pattern(tenant, got, by="approved article")
+    except Exception:                                            # noqa: BLE001
+        pass
+
+
 def _article_of(output_id: str) -> dict:
     """What the article maker decided for this output, off its artifact's meta
     — `{}` for an article written before the maker existed."""
@@ -983,6 +1014,11 @@ def _execute(ap: db.Approval) -> None:
         # `may_publish`, so the featured image it joins is the one they saw.
         _approve_generated_media(p.get("output_id") or "",
                                  via="article's approval")
+        # WHAT THE OWNER APPROVED IS THE STANDARD (Phase 4). This article
+        # becomes the brand's exemplar — the next article is written against
+        # it, not against the hand-made one — and the layout it was approved
+        # in becomes the brand's pattern when the brand has not filed one.
+        _learn_from_approved(ap, p.get("output_id") or "")
         _fields = _fields_from_artifact(p.get("output_id") or "", p["fields"])
         # PUBLISHED IS A DECISION, NOT A DEFAULT (§5). On the `auto` rung an
         # article the maker finished clean and the JUDGE would publish goes

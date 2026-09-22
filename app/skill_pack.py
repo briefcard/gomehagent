@@ -4240,6 +4240,22 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
                                 destination="campaign_email draft")
         except Exception:                                        # noqa: BLE001
             pass
+    # WHAT THE OWNER APPROVED IS THE STANDARD (Phase 4). The email that went
+    # to the ESP is the brand's exemplar from now on: the next campaign's
+    # maker is shown it beside — and instead of — the hand-made one.
+    try:
+        from . import db as _dbm, exemplars as _ex
+        with _dbm.SessionLocal() as _s:
+            _art = (_s.query(_dbm.ArtifactBody)
+                    .filter(_dbm.ArtifactBody.output_id == output_id)
+                    .order_by(_dbm.ArtifactBody.created_at.desc()).first())
+            _meta = dict(_art.meta or {}) if _art is not None else {}
+        if _meta.get("html"):
+            _ex.file_approved(tenant, _ex.EMAIL, html=str(_meta["html"]),
+                              title=str(_meta.get("subject") or ""), output_id=output_id,
+                              why="pushed to the ESP")
+    except Exception:                                            # noqa: BLE001
+        pass
     got = {"ok": True, "provider": prov,
            "campaign_id": esp_draft.get("campaign_id", "")}
     if landed_note:

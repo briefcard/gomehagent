@@ -596,10 +596,10 @@ ground under it; on a light ground set the name in type instead.
 
 THE MESSAGE this email carries%(message)s
 %(story)s
-THE STANDARD — an email made by hand from another reference for another brand. Copy its
-CRAFT (a headline that fills the column; the page in the photograph's own tone; a device
-drawn faithfully; real product names and links; tight copy that turns), NOT its design, not
-one of its words, and none of its pictures or links — they are another email's:
+%(notes)sTHE STANDARD — %(standard_is)s. Copy its CRAFT (a headline that fills the column; the
+page in the photograph's own tone; a device drawn faithfully; real product names and links;
+tight copy that turns), NOT its design, not one of its words, and none of its pictures or
+links — they are another email's:
 %(exemplar)s
 
 THE SYSTEM FIRST — the way a designer at a good studio works: before the first section,
@@ -698,6 +698,7 @@ voice: %(voice)s
 %(rules_brand)s
 THE MATERIAL — the only facts available (a product's own text, the approved claims):
 %(material)s
+%(notes)s
 
 THE MESSAGE this email carries%(message)s
 
@@ -743,6 +744,7 @@ def decide_story(brief_: dict, kit_: dict, message: dict | None, *, tenant: str 
         "name": kit_.get("name") or theme.get("name") or "the brand",
         "positioning": kit_.get("positioning") or "", "voice": ", ".join(map(str, voice.get("tone") or [])) or "as the material reads",
         "rules_brand": rules_brand, "material": (_material(kit_, entity_key) or "(nothing beyond the product's name)")[:3000],
+        "notes": kit_.get("_notes") or "",
         "argument": json.dumps(arg, ensure_ascii=False, indent=1)[:5000], "message": _message_text(message)}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=2500)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
@@ -823,6 +825,8 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "html": html,
             "story": ("THE STORY this email tells — an edit never changes a beat's meaning or drops its frame:\n"
                       + _story_text(story_) + "\n") if story_ else ""}
+        if kit_.get("_notes"):
+            prompt = kit_["_notes"] + "\n" + prompt
         if png:
             from . import pictures as ed
             try:
@@ -879,7 +883,10 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
                       "below, with one idea, one big picture, type at scale, the page in the picture's own tone, "
                       "a real device or two, one ask)"),
             "pictures": "\n".join(pics) or "(none)", "cut": cut,
-            "message": _message_text(message), "exemplar": exemplar()[:14000],
+            "message": _message_text(message),
+            "exemplar": (kit_.get("_standard") or exemplar())[:14000],
+            "standard_is": kit_.get("_standard_is") or "an email made by hand from another reference for another brand",
+            "notes": kit_.get("_notes") or "",
             "story": ("\nTHE STORY — the argument this email makes, decided first; every line of copy belongs to a\n"
                       "beat and says what its beat says (its words may be tightened, never its meaning changed; a\n"
                       "beat marked \"the category\" keeps its frame so it never reads as ours).\n"
@@ -1414,7 +1421,7 @@ say — a fault, fixed by setting the failing as type alone and moving the pictu
 answer; does the close earn its ask from what
 came before; is there a line that says nothing ("set the table like you mean it" is a mood,
 not a claim — allowed once, as a closer, never as the argument).
-DRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
+%(notes)sDRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
 to this brand and EARNS its place: re-authored from this brand's world — its products, its
 place, its voice — it is correct however much it differs from the reference's; a generic
 stand-in (a random exclamation, an emoji, a doodle that means nothing) or the reference's own
@@ -1544,7 +1551,8 @@ def _confused(got: dict, brief_: dict) -> str:
     return f"it read the reference's words ({hit[0][:30]!r}) as ours" if hit else ""
 
 
-def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "", material: str = "") -> dict:
+def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "", material: str = "",
+          notes: str = "") -> dict:
     """`{ok, findings, verdict, why, calls}` — ours beside the reference, or
     ours alone when there is no reference. The pictures are stamped and
     labelled, the judge must say what it read in ours, and a judgement that
@@ -1565,7 +1573,7 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {
-        "concept": brief_.get("concept"), "devices": _devices_text(brief_)[:1500]})
+        "concept": brief_.get("concept"), "devices": _devices_text(brief_)[:1500], "notes": notes or ""})
         if reference_png else _JUDGE_ALONE})
     calls = 0
     got, mixed = None, ""
@@ -1682,6 +1690,15 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     # the kit and the cast
     say("gathering the brand's material and casting its pictures")
     kit_ = kit(tenant)
+    # WHAT THE OWNER APPROVED IS THE STANDARD, AND WHAT THEY SAID IS REMEMBERED
+    # (Phase 4). The bar rises with the brand's own best work instead of
+    # staying at the hand-made email of 2026-09-12.
+    from . import exemplars as _ex
+    _std, _std_is = _ex.standard(tenant, _ex.EMAIL, fallback=exemplar())
+    kit_["_standard"], kit_["_standard_is"] = _std, _std_is
+    kit_["_notes"] = _ex.notes_text(tenant, _ex.EMAIL)
+    if _ex.notes(tenant, _ex.EMAIL):
+        story.append(f"Held to what you have said about this brand's emails ({len(_ex.notes(tenant, _ex.EMAIL))} note(s)).")
     if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
         # THE SUBJECT MUST EXIST. The owner's run asked for a key that was not
         # on file and the maker quietly sold a different product (2026-09-17).
@@ -1777,7 +1794,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         if shot.get("ok"):
             put = media.put(tenant, shot["png"], mime="image/png", origin="generated")
             png_id = put.get("id", "") if put.get("ok") else ""
-        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant, material=material_) if shot.get("ok")
+        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant, material=material_, notes=kit_.get("_notes") or "") if shot.get("ok")
                   else {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0})
         # THE JUDGE IS NOT A LEAK: a finding that carries the reference's own
         # words ("add CRUNCHYYY!!!", "a wire basket like the reference's") would

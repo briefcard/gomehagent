@@ -589,6 +589,23 @@ def main() -> int:
     ck("a run with no reference in the rotation still gets an email — designed by the maker",
        "designs this one itself" in es.pick("nothing")["why"])
 
+    print("— 8b. what you approved is the standard, and what you said is remembered —")
+    from app import exemplars as ex
+    ex.remember("baci", ex.EMAIL, "Never put the logo above the headline.")
+    ex.file_approved("baci", ex.EMAIL, html="<p>THE APPROVED EMAIL</p>", title="Set the scene", output_id="o1")
+    compose_seen.clear()
+    judged.clear()
+    answers["email_compose"] = _compose
+    answers["email_judge"] = _judge
+    got_x = rc.run(sid, "baci", "portofino", seed="x2", message={"subject": "Set the scene"})
+    ck("the next email is made against what you approved and hears what you said — the run says so",
+       any("THE APPROVED EMAIL" in p for p in compose_seen)
+       and any("the last email you approved" in p for p in compose_seen)
+       and any("Never put the logo above the headline" in p for p in compose_seen)
+       and "Held to what you have said" in got_x["note"], got_x.get("note"))
+    ck("an article's notes never reach an email", ex.notes("baci", ex.ARTICLE) == [])
+    ex.forget("baci", ex.EMAIL, "Never put the logo above the headline.")
+
     print("— 9. the room —")
     bg: list = []
     web._run_bg = lambda label, fn, *a, **k: bg.append((label, a, k))

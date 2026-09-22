@@ -34,7 +34,7 @@ os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ.pop("SHOTS_WS", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import articles as ar, brand_theme, db, kb, llm, pictures as pics, shots, tenants  # noqa: E402
+from app import articles as ar, brand_theme, db, kb, llm, pictures as pics, shots, tenants, web  # noqa: E402
 
 CDN = "https://cdn.shopify.com/s/files/1/0002/"
 _fail: list[str] = []
@@ -331,6 +331,51 @@ def main() -> int:
     nj_live, why_nj = approvals.article_may_go_live(out.id)
     ck("one the judge would not publish stays a draft", nj_live is False and "judge" in why_nj, why_nj)
     ck("an article written before the maker existed stays a draft", approvals.article_may_go_live("no-such-output")[0] is False)
+
+    print("— 9. what you approved is the standard, and what you said is remembered —")
+    from app import exemplars as ex
+    ck("with nothing approved, the standard is the hand-made one",
+       ex.standard("baci", ex.ARTICLE, fallback="HAND")[1] == "the hand-made standard" and ex.standard("baci", ex.ARTICLE, fallback="HAND")[0] == "HAND")
+    ck("a note is remembered in the owner's own words, and reaches the maker and the judge",
+       ex.remember("baci", ex.ARTICLE, "Never open with a definition — answer the question.") == ""
+       and "Never open with a definition" in ex.notes_text("baci", ex.ARTICLE)
+       and "outrank" in ex.notes_text("baci", ex.ARTICLE))
+    ck("the same note twice is kept once, newest first",
+       ex.remember("baci", ex.ARTICLE, "Never open with a definition — answer the question.") == ""
+       and len(ex.notes("baci", ex.ARTICLE)) == 1)
+    ck("a note can be withdrawn — a standing instruction that cannot be is a rule",
+       ex.forget("baci", ex.ARTICLE, "Never open with a definition — answer the question.") == ""
+       and ex.notes("baci", ex.ARTICLE) == [] and ex.forget("baci", ex.ARTICLE, "never said") == "no note said that")
+    ck("an email's notes and an article's are apart",
+       ex.remember("baci", ex.EMAIL, "Keep the logo off the page top.") == ""
+       and ex.notes("baci", ex.ARTICLE) == [] and len(ex.notes("baci", ex.EMAIL)) == 1)
+    ck("an approved article becomes the brand's standard, named as theirs",
+       ex.file_approved("baci", ex.ARTICLE, html="<p>THE APPROVED ONE</p>", title="Melamine vs porcelain", output_id="o1") == ""
+       and ex.standard("baci", ex.ARTICLE, fallback="HAND")[0] == "<p>THE APPROVED ONE</p>"
+       and "the last article you approved" in ex.standard("baci", ex.ARTICLE, fallback="HAND")[1])
+    ex.remember("baci", ex.ARTICLE, "Never open with a definition — answer the question.")
+    seen["email_compose"].clear()
+    jn["n"] = 1
+    answers["email_compose"] = _compose
+    answers["email_judge"] = _judge
+    got_x = ar.run("baci", KW, entity_key="portofino-melamine", rival_urls=["https://rival.test/a"], collections=COLL)
+    ck("the next article is written against what you approved and hears what you said — and the run says so",
+       any("THE APPROVED ONE" in p for p in seen["email_compose"] if isinstance(p, str))
+       and any("the last article you approved" in p for p in seen["email_compose"] if isinstance(p, str))
+       and any("Never open with a definition" in p for p in seen["email_compose"] if isinstance(p, str))
+       and "Held to what you have said" in got_x["note"], got_x.get("note"))
+    ck("the judge hears it too", any(isinstance(p, list) and "Never open with a definition" in p[-1]["text"] for p in seen["email_judge"]))
+    from fastapi.testclient import TestClient
+    c = TestClient(web.app)
+    r = c.post("/admin/creative_note?key=s3cret", data={"key": "s3cret", "tenant": "baci", "kind": "article",
+                                                        "said": "Put the table above the definitions.", "back": "/admin/ui?tab=systems"}, follow_redirects=False)
+    ck("the note posts from the console, comes back where it was typed, and is kept",
+       r.status_code == 303 and "tab=systems" in r.headers.get("location", "")
+       and any("Put the table above" in n["said"] for n in ex.notes("baci", ex.ARTICLE)))
+    r = c.post("/admin/creative_note?key=s3cret", data={"key": "s3cret", "tenant": "baci", "kind": "article",
+                                                        "drop": "Put the table above the definitions."}, follow_redirects=False)
+    ck("and can be withdrawn from the same door",
+       r.status_code == 303 and not any("Put the table above" in n["said"] for n in ex.notes("baci", ex.ARTICLE)))
 
     print()
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))

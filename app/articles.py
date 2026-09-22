@@ -302,7 +302,8 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
                      + json.dumps(approach_, ensure_ascii=False)[:2000] + "\n") if approach_ else "",
         "questions": (("\nQUESTIONS PEOPLE SEARCH, to answer:\n" + "\n".join(f"- {q}" for q in (questions or [])[:8]) + "\n") if questions else "")
         + (f"\nTHE ANGLE this piece takes — the way in, chosen on the plan: {angle}\n" if angle else "")
-        + (f"\nWHAT THE OWNER ASKED FOR — these outrank the angle and the brief:\n{notes[:1500]}\n" if notes else ""),
+        + (f"\nWHAT THE OWNER ASKED FOR ON THIS PIECE — outranks the angle and the brief:\n{notes[:1500]}\n" if notes else "")
+        + ("\n" + (kit_.get("_notes") or "") if kit_.get("_notes") else ""),
         "length": brief_.get("length_words") or 1400}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=8000)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
@@ -394,9 +395,9 @@ THE PRODUCTS — name · price · url, the only links allowed besides the collec
 collection pages you may link: %(collections)s
 %(internal)s
 
-THE STANDARD — an article written by hand for this brand on another subject. Copy its CRAFT (a
-direct answer first, a table that is really a table, real prices, a decision by the reader's
-situation, a question answered per FAQ item), NOT its subject and not its sentences:
+%(notes)sTHE STANDARD — %(standard_is)s. Copy its CRAFT (a direct answer first, a table that is
+really a table, real prices, a decision by the reader's situation, a question answered per FAQ
+item), NOT its subject and not its sentences:
 %(exemplar)s
 
 RULES
@@ -476,6 +477,8 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
             "html": f"Title: {kit_.get('_title', '')}\nMeta: {kit_.get('_meta', '')}\n{html}",
             "story": ("THE STORY this article tells — an edit never changes a beat's meaning or drops its frame:\n"
                       + _story_text(story_) + "\n") if story_ else ""}
+        if kit_.get("_notes"):
+            prompt = kit_["_notes"] + "\n" + prompt
         if png:
             from . import pictures as ed
             try:
@@ -501,7 +504,10 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
             "story": _story_text(story_), "heading_face": (theme.get("font") or {}).get("heading") or "(the theme's)",
             "body_face": (theme.get("font") or {}).get("body") or "(the theme's)", "accent": (theme.get("colors") or {}).get("accent") or "(the theme's)",
             "rules_brand": rules_brand, "pictures": "\n".join(pics) or "(none on file)", "products": "\n".join(prods) or "(none named)",
-            "collections": ", ".join(collections or []) or "(none)", "exemplar": exemplar()[:12000],
+            "collections": ", ".join(collections or []) or "(none)",
+            "exemplar": (kit_.get("_standard") or exemplar())[:12000],
+            "standard_is": kit_.get("_standard_is") or "an article written by hand for this brand on another subject",
+            "notes": kit_.get("_notes") or "",
             "internal": ("THE BRAND'S OWN ARTICLES you may link, once each, where it genuinely helps "
                          "(anchor · url):\n" + "\n".join(f"- {L.get('anchor', '')} · {L.get('url', '')}" for L in (links or [])[:6]))
                         if links else "",
@@ -667,7 +673,7 @@ Judge OURS as an editor and an SEO judge a page before it goes live, and answer 
                "severity": "blocks" if you would not publish without it, else "cosmetic"}]}
 Never ask for the rival's words or pictures. Never ask for a photograph that does not exist —
 name one in the article or say cut. A category fact framed as the category's is not a claim.
-NEVER ASK FOR A NUMBER THE MATERIAL DOES NOT GIVE — no price band, temperature, percentage,
+%(notes)sNEVER ASK FOR A NUMBER THE MATERIAL DOES NOT GIVE — no price band, temperature, percentage,
 lifespan, approval or study; "real prices" means the brand's own, listed below, or none. An
 edit that would add such a number is not an edit.
 THE MATERIAL the article may state:
@@ -699,7 +705,8 @@ def _top(png: bytes, height: int) -> bytes:
     return buf.getvalue()
 
 
-def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword: str, *, tenant: str = "", material: str = "") -> dict:
+def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword: str, *, tenant: str = "",
+          material: str = "", notes: str = "") -> dict:
     from . import pictures as ed
     from .recreate import _confused, _stamp
     if not ours_png:
@@ -718,7 +725,8 @@ def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": _JUDGE_PROMPT % {"keyword": keyword, "story": _story_text(story_)[:2500], "beat": brief_.get("beat") or "",
-                                                            "material": (material or "(nothing beyond the product names)")[:3000]}})
+                                                            "material": (material or "(nothing beyond the product names)")[:3000],
+                                                            "notes": notes or ""}})
     calls, got, mixed = 0, None, ""
     for _ in range(2):
         reply = _ask("email_judge", blocks, tenant=tenant, max_tokens=2500)
@@ -762,6 +770,12 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
     if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
         return {"ok": False, "status": FAILED, "note": f"no product with the key {entity_key!r} on file", "rounds": []}
     pat = pattern(tenant)
+    from . import exemplars as _ex
+    _std, _std_is = _ex.standard(tenant, _ex.ARTICLE, fallback=exemplar())
+    kit_["_standard"], kit_["_standard_is"] = _std, _std_is
+    kit_["_notes"] = _ex.notes_text(tenant, _ex.ARTICLE)
+    if _ex.notes(tenant, _ex.ARTICLE):
+        story.append(f"Held to what you have said about this brand's articles ({len(_ex.notes(tenant, _ex.ARTICLE))} note(s)).")
     say("reading what ranks")
     reads = rivals(tenant, keyword, urls=rival_urls)
     material_ = article_material(kit_, entity_key, keyword)
@@ -827,7 +841,8 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
         calls += told.get("calls", 0)
         checks += told["findings"]
         shot = shoot(html, title, kit_)
-        judged = judge(shot.get("png") or b"", rival_png, story_, brief_, keyword, tenant=tenant, material=material_) if shot.get("ok") else \
+        judged = judge(shot.get("png") or b"", rival_png, story_, brief_, keyword, tenant=tenant, material=material_,
+                       notes=kit_.get("_notes") or "") if shot.get("ok") else \
             {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0}
         calls += judged.get("calls", 0)
         kept, dropped = [], []

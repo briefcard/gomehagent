@@ -38,6 +38,22 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'the_owners_notes_never_reach_the_maker',
+        "file": 'app/articles.py',
+        "find": '    kit_["_notes"] = _ex.notes_text(tenant, _ex.ARTICLE)\n',
+        "replace": '    kit_["_notes"] = ""\n',
+        "suites": ['test_the_model_writes_the_article.py'],
+        "why": "what the owner said about this brand's articles is remembered and never used — the loop that is supposed to make it better with every note does nothing",
+    },
+    {
+        "name": 'an_approved_email_stops_being_the_standard',
+        "file": 'app/recreate.py',
+        "find": '    kit_["_standard"], kit_["_standard_is"] = _std, _std_is\n',
+        "replace": '    kit_["_standard"], kit_["_standard_is"] = exemplar(), "the hand-made standard"\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "the bar stops rising with the brand's own approved work and stays at the hand-made email of September forever",
+    },
+    {
         "name": 'an_article_goes_live_without_a_judgement',
         "file": 'app/approvals.py',
         "find": '    if a.get("would_publish") is not True:\n',

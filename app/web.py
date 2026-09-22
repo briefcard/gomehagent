@@ -1175,6 +1175,42 @@ async def email_recreate(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
 
+@app.post("/admin/creative_note")
+async def creative_note(request: Request, key: str = Depends(admin_key)):
+    """WHAT THE OWNER SAYS IS REMEMBERED — one door for both kinds (Phase 4
+    of INITIATIVE-blog-quality, §7 of the email plan). The note reaches every
+    later email or article for this brand, in the owner's own words, and can
+    be withdrawn; taste enters here and never as a rule of ours."""
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse
+    from . import exemplars
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    kind = str(form.get("kind", "")) or exemplars.EMAIL
+    said = str(form.get("said", "")).strip()
+    drop = str(form.get("drop", "")).strip()
+    back = str(form.get("back", "")) or ""
+    if not tenant or kind not in (exemplars.EMAIL, exemplars.ARTICLE):
+        arg = ("err", "a brand and a kind are needed")
+    elif drop:
+        why = exemplars.forget(tenant, kind, drop)
+        arg = ("err", why) if why else ("ok", "forgotten — later work will not hear it")
+    elif not said:
+        arg = ("err", "nothing was said")
+    else:
+        why = exemplars.remember(tenant, kind, said, output_id=str(form.get("output_id") or ""))
+        arg = ("err", why) if why else ("ok", f"remembered — every {kind} for this brand will hear it")
+    if back.startswith("/admin/"):
+        sep = "&" if "?" in back else "?"
+        url = f"{back}{sep}{arg[0]}={quote(arg[1])}"
+        if form.get("key"):
+            url += f"&key={quote(str(form.get('key')))}"
+        return RedirectResponse(url, 303)
+    return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
+
+
 def _designs_back(tenant: str, key: str, arg: tuple) -> str:
     """Back to the Designs room of this brand's campaign email system — the
     one page the reference flow lives on."""
