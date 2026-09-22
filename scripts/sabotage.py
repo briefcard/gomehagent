@@ -1076,6 +1076,17 @@ SABOTAGES = [
                "ad for the pitcher proved by a claim about the platter",
     },
     {
+        "name": "an_offline_ad_never_names_its_product",
+        "file": "app/skill_pack.py",
+        "find": '    said = f"{name} — {proof}." if name else f"{proof}."',
+        "replace": '    said = f"{proof}."  # SABOTAGE',
+        "suites": ["test_ad_board.py"],
+        "why": "with no API key every variant is blocked for losing its "
+               "subject and NO variant board is written at all — the one "
+               "surface an offline run has, and the one the preview ritual "
+               "is clicked through on before every push",
+    },
+    {
         "name": "evidence_carries_a_stranger_into_the_ad",
         "file": "app/skill_pack.py",
         "find": "    _own = [_own_evidence(c) for c in ctx.claims[:want]]",

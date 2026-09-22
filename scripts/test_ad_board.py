@@ -482,6 +482,30 @@ def main():
        "no ad-platform write is wired" in page.lower(),
        "approving marks the batch ready — that is its whole declared ship")
 
+    print("\n--- 8 · with NO MODEL there is still a board to look at ---")
+    # Found by seeding the demo console rather than by a suite: every ad in
+    # the preview database was blocked, no ad_batch artifact existed, and the
+    # board the seed printed a link to was a bare "No artifact kept for this
+    # id." `_compose_ad` — the no-key fallback — never named the product, so
+    # `coherence:subject_absent` blocked all three (correctly, since
+    # `2cac211`), and a blocked variant never reaches `board_rows`.
+    contract(systems.find("baci", "ad_creative"), autonomy="approve_all")
+    skill_pack.draft_ad = lambda b, cl, a, o: ("", "ANTHROPIC_API_KEY is not set")
+    r8 = skill.run("ad_copy", "baci", entity_key="aqua-plate",
+                   audience_key="hosts", variants=2)
+    ck("every variant admits it was composed, not written",
+       r8.get("status") == "produced" and r8["items"]
+       and all(i["meta"]["basis"].startswith("composed") for i in r8["items"]),
+       str([i["meta"]["basis"] for i in (r8.get("items") or [])]))
+    ck("  and the placeholder NAMES the product it is for",
+       all("Aqua Plate" in (i.get("body") or "") for i in (r8.get("items") or [])),
+       str([(i.get("body") or "")[:48] for i in (r8.get("items") or [])]))
+    ck("  so nothing is blocked and the offline run has a board",
+       all(i.get("ok") for i in (r8.get("items") or []))
+       and board(r8["items"][0]["output_id"])[0] is not None,
+       str([i.get("failures") for i in (r8.get("items") or [])])[:200])
+    skill_pack.draft_ad = fake
+
     print()
     if _fail:
         print(f"FAILED: {len(_fail)} — " + "; ".join(_fail[:8]))

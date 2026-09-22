@@ -1110,20 +1110,33 @@ def _angle_brief(angle: str, *, superseded: bool = False) -> str:
     return body
 
 
-def _compose_ad(claim: dict, angle: str, objections: list, entity_key: str) -> str:
+def _compose_ad(claim: dict, angle: str, objections: list, entity_key: str,
+                label: str = "") -> str:
     """The deterministic fallback. Dull on purpose, and honest about being it.
 
     This is what runs with no API key. It is not "ad copy" in any sense worth
     paying for — it is a grounded placeholder that keeps the pipeline provable
     offline, and `basis` says so on every variant it produces.
+
+    IT NAMES THE PRODUCT. It took `entity_key` and used it as a BOOLEAN for
+    one angle, so a placeholder for the Aqua Plate read "Dishwasher safe at 65
+    degrees." and nothing else. That was survivable while
+    `coherence:subject_absent` advised on short copy; since `2cac211` it
+    blocks, correctly — and the whole offline path then filed three blocked
+    rows and wrote NO variant board, which is the only surface an offline run
+    has. The placeholder was the thing that was wrong: an ad that does not say
+    which product it is for is a worse placeholder as well as an incoherent
+    one, and the label was already in scope at the call site.
     """
     proof = claim["claim"].rstrip(". ")
+    name = str(label or "").strip()
+    said = f"{name} — {proof}." if name else f"{proof}."
     if angle == "objection" and objections:
-        body = f"{objections[0]['objection'].rstrip('? ')}?\n\n{proof}."
+        body = f"{objections[0]['objection'].rstrip('? ')}?\n\n{said}"
     elif angle == "occasion" and entity_key:
-        body = f"{proof}.\n\nBuilt for the table you actually set."
+        body = f"{said}\n\nBuilt for the table you actually set."
     else:
-        body = f"{proof}."
+        body = said
     if claim.get("evidence"):
         body += f"\n\n({claim['evidence']})"
     return body
@@ -1734,7 +1747,7 @@ def _run_ad_copy(ctx: Context) -> dict:
             # this codebase already met in the extractor: a path measured at
             # zero recall looked exactly like a working one, and only the
             # `extractor` field told the truth. `basis` is that field here.
-            text = _compose_ad(claim, angle, objections, entity_key)
+            text = _compose_ad(claim, angle, objections, entity_key, _label)
             basis = f"composed ({why_not})"
             degraded_note = why_not
 

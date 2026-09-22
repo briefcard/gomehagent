@@ -94,8 +94,27 @@ def seed_ad_batch() -> str:
         tenants.capabilities = _orig
     if r.get("status") != "produced":
         return f"ad batch: run came back {r.get('status')}"
-    return (f"ad batch: {len(r.get('items') or [])} variant(s) on the board "
-            f"(anchor {r['items'][0]['output_id'][:8]}…)")
+    # READ THE BOARD IT CLAIMS. This counted `r["items"]` — the rows the run
+    # FILED, blocked ones included — and named an anchor without asking
+    # whether an `ad_batch` artifact had been written at all. A run whose
+    # every variant is blocked files three rows, writes no board, and this
+    # printed "3 variant(s) on the board (anchor …)" pointing at a page that
+    # does not exist. The preview ritual is what gets clicked through before
+    # `ship.sh`; a ritual that reports what it did not do is worse than none.
+    _blocked = [i for i in (r.get("items") or []) if not i.get("ok")]
+    with db.SessionLocal() as s:
+        board = (s.query(db.ArtifactBody)
+                 .filter(db.ArtifactBody.format == "ad_batch").first())
+        anchor = getattr(board, "output_id", "") if board else ""
+        s.expunge_all()
+    if not anchor:
+        why = "; ".join(
+            f["rule"] for i in _blocked for f in (i.get("failures") or []))[:120]
+        return (f"ad batch: NO BOARD — all {len(r.get('items') or [])} "
+                f"variant(s) were blocked" + (f" ({why})" if why else ""))
+    return (f"ad batch: {(board.meta or {}).get('variants', 0)} variant(s) on "
+            f"the board (anchor {anchor[:8]}…)"
+            + (f" · {len(_blocked)} blocked before it" if _blocked else ""))
 
 
 def seed_data_layer() -> str:
