@@ -1940,6 +1940,83 @@ sees them present and in order. An article may be created LIVE only when the
 maker finished clean, the judge would publish it, and it is in the pattern —
 and nothing is enabled until the owner says so.
 
+### The writer's inputs, and the console's dead ends — 2026-09-22 (`2cac211`..`9518278`, six ships)
+
+The three correctness ships §6 had been carrying to the line, plus three
+defects that only turned up by running the app. Every one of the six shipped
+with a sabotage guard reporting `[ caught ]`, gated on the full 218 suites.
+
+**What landed.** `2cac211` — `coherence.subject_absent` blocks at any length,
+and the ad's HEADLINE reaches the check at all for the first time.
+`00f05ee` — `bundle.stateable` separates a product's facts from the store's
+plumbing and our own bookkeeping, before either prompt prints them.
+`7593477` — a claim's evidence naming a product the ad is not about is
+withheld from the drafter AND the panel, and the run says which stranger it
+named. `9ae3553` — the offline placeholder names its product, so an offline
+run has a variant board again, and the demo seed reads the board it claims.
+`9518278` — a dead work id lands on the console with a sentence; the Plan
+tab offers Install instead of printing `/admin/system_add`. `b5370cd` — a
+catalogue row shows its facts as facts and its ban-list flag as a flag.
+
+**The standing rules these paid for:**
+
+- **A threshold that relaxes a check on short copy switches it off on the
+  commonest artifact you make.** `subject_absent` advised below forty words
+  because a stem match "needs enough text to be trustworthy". Ads are two
+  sentences; the rule was off exactly where the owner's own complaint lived
+  ("designed in Milan with no cup in it"). What makes a miss trustworthy is
+  not length. It is (1) having looked everywhere the subject could be named
+  and (2) having had something distinctive to look for. Build those, and the
+  threshold is not needed.
+- **A prompt heading is a promise.** "its own catalogue facts, which you may
+  state as they are" was printed above the whole `attributes` bag, so the
+  writer was handed `status: active`, a CDN url, and `_compliance:
+  storefront copy uses: hand-decorated` — our own record of a BANNED phrase,
+  offered as a fact to state. Anything `_`-prefixed is the system's note to
+  itself and never leaves the row.
+- **Narrow at the point of USE, not at the source — the mirror of the rule
+  above it.** Sanitising `resolve._entity_dict` was the first instinct and
+  would have taken the photographs out of every product card:
+  `attributes["image"]` is where `_product_items` reads them, and
+  `fitness._val` reads arbitrary attribute names off the same dict. §5's rule
+  is "after narrowing a writer, ask what else it was the only writer of";
+  this is the same question asked before narrowing.
+- **A question already answered carefully is not worth re-answering.**
+  "Does this text name a catalogue product?" is `email_harvest.entity_for`:
+  distinctive tokens only, generic tableware words worth nothing, and a tie
+  resolves to NOTHING because "Zodiac Vibe cup" scores the same for all
+  twelve signs. Reusing it made the evidence withhold precise for free.
+- **Tightening a gate can remove a SURFACE, and the suite will not say so.**
+  Ship 1 was green across 218 suites and had quietly cost the offline path
+  its whole variant board: the composed placeholder never named its product,
+  so every variant blocked, and `board_rows` — which only collects variants
+  that PASSED — stayed empty. Found in ten seconds on the demo console,
+  invisible to every test. **After changing a gate, run the thing and look at
+  it.**
+- **The console never hands you an address.** If a sentence on a surface
+  names a route, the control is missing from that surface. Both offenders
+  had the rule written in a comment directly above the line that broke it.
+- **A script's report is computed from what it did.** `seed_demo` printed "3
+  variant(s) on the board (anchor …)" from the rows the run FILED, blocked
+  ones included, while asserting nothing about the board — so the
+  preview-before-push ritual printed a link to a page that did not exist.
+
+**A correction to §6 itself.** Its remaining item says `claim_trace` needs "an
+`about_entity` category checked against `KbEntity.attributes`". The premise
+does not hold: a synced product's attributes are `vendor`, `product_type`,
+`tags`, `variants`, `status`, `published`, `image` and `_compliance`
+(`catalog_sync.py`) — Shopify plumbing, not specifications. Specs only reach
+that bag through the question-backlog answer path, which Ironside uses and
+Baci does not. A detector built on it today would catch nothing. Reshape it
+before building it, and ask the owner whether specifications belong in
+`attributes` at all.
+
+**The trap this thread fell into.** A guard whose target line is REWRITTEN by
+a later ship goes stale, and `test_sabotage_anchors.py` refuses the push for
+it — which is correct and cost one gate run. `the_panel_sees_the_products_own_facts`
+anchored on the exact `panel_prompt` line ship 2 rewrote. Re-anchor in the
+same change that moves the line.
+
 ---
 
 ## 6. Next thread — paste this (the creative centre is rebuilt; two owner decisions are open)
@@ -2293,21 +2370,37 @@ and nothing is enabled until the owner says so.
 > reproduced end to end; it is the test that any change to claims, scoping,
 > rotation or the ad run must keep green.
 >
-> **The next three correctness ships, read to the line, before any craft work:**
-> coherence's `subject_absent` (coherence.py ~312) NUDGES below
-> SUBJECT_MATCH_MIN_WORDS, so a two-sentence ad committed to an entity that
-> never names it passes — it needs a matcher reliable enough on short copy to
-> block; `claim_trace` files every sentence that is not `about_us`/`off_catalogue`
-> as "world" (431/451), so "18 pieces" about a single cup needed no approval —
-> it needs an `about_entity` category checked against `KbEntity.attributes`;
-> and `panel_prompt` (ad_craft.py:532) still injects a brand-scope claim's
-> evidence, mostly closed for new claims and open for already-approved rows.
-> Then the swipe file.
+> **Two of the three correctness ships are DONE (2026-09-22, `2cac211` and
+> `7593477`); the third needs reshaping before it is built.** `subject_absent`
+> blocks at any length now and the ad's headline reaches the check at all; a
+> claim's evidence naming another product is withheld from the drafter AND the
+> panel, not only the panel §6 named. §5's section "The writer's inputs, and
+> the console's dead ends" has the rules they paid for — read it before
+> touching a gate.
 >
-> **2. UX polish — the other open stream, and it needs the owner.** They walk the
-> console and give you the surface; take each as given, one ship each, act where
-> you report. There is no list to work from: asking them to open the console and
-> name what is wrong IS the first move of this stream.
+> **The one still open, and its premise is wrong.** `claim_trace` files every
+> sentence that is not `about_us`/`off_catalogue` as "world", so "18 pieces"
+> about a single cup needs no approval. The fix was written down as "an
+> `about_entity` category checked against `KbEntity.attributes`" — but a
+> synced product's attributes are `vendor`, `product_type`, `tags`,
+> `variants`, `status`, `published`, `image` and `_compliance`
+> (`catalog_sync.py`): Shopify plumbing, not specifications. Specifications
+> only reach that bag through the question-backlog answer path, which Ironside
+> uses and Baci does not, so a detector built on it today catches nothing.
+> **Ask the owner whether product specifications belong in `attributes` at
+> all before building on them.** Then the swipe file.
+>
+> **2. UX polish — and there IS a way to start without the owner.** Their
+> walk is still the best input, and asking them to open the console and name
+> what is wrong is still the first move. But `preview_start` on the
+> `gomehagent-demo` entry in `.claude/launch.json` seeds a throwaway database
+> and serves the whole console on :8098, and walking it yourself found three
+> real defects in one pass on 2026-09-22 (`9518278`, `b5370cd`) — a bare white
+> page where the ad board should be, a card printing `/admin/system_add` at
+> the reader, and a catalogue row showing the store's plumbing and a
+> ban-list violation in the same neutral grey. **Use it after any gate
+> change too**: ship 1 that morning was green across 218 suites and had
+> silently taken the variant board away from every offline run.
 >
 > **3. If the owner gives you an issue instead, do that and only that.**
 >

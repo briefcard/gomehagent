@@ -16,10 +16,39 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live: ask `/health`** — it reported `9d26f24` as this was written (2026-09-22);
-the code this section describes landed at `061d4f5`. The line below about
+**Live: ask `/health`** — head is `b5370cd` (2026-09-22, later that day); the
+creative-centre section below landed at `061d4f5`. The line further down about
 `ea420b7` is the state of 2026-08-30 and everything after it in this file is
-older still.
+older still. **This pass rewrote only the two blocks that follow; everything
+below "Where the build is now" was not touched.**
+
+### SIX SHIPS ON THE WRITER'S INPUTS AND THE CONSOLE (2026-09-22, `2cac211`..`b5370cd`)
+
+The three correctness items WALKTHROUGH §6 had been carrying, plus three
+defects found by running the demo console rather than reading code. Full
+record, with the rules they paid for, in WALKTHROUGH §5 "The writer's inputs,
+and the console's dead ends".
+
+- `2cac211` `coherence.subject_absent` blocks at any length — it advised below
+  forty words, so a two-sentence ad committed to a product it never named
+  shipped — and the ad's HEADLINE reaches the check for the first time.
+- `00f05ee` `bundle.stateable` keeps the store's plumbing and our own
+  `_`-prefixed notes out of both ad prompts. `_compliance` — the record that a
+  page breaks the BAN LIST — was being offered to the writer under "facts you
+  may state as they are".
+- `7593477` a claim's evidence naming a product the ad is not about is
+  withheld from the drafter and the panel, through `email_harvest.entity_for`.
+- `9ae3553` the offline placeholder names its product (ship 1 had otherwise
+  cost every offline run its whole variant board), and `seed_demo` reads the
+  board it claims.
+- `9518278` a dead work id lands on the console with a sentence; the Plan tab
+  offers Install instead of printing `/admin/system_add`.
+- `b5370cd` a catalogue row shows its facts as facts and its ban-list flag as
+  a flag.
+
+**Still open and NOT to be built as written:** §6's `about_entity` item. Its
+premise — that `KbEntity.attributes` holds specifications — is false for
+synced products; see §6, which now says so.
 
 ### READ THIS BEFORE THE REST OF THIS FILE (2026-09-22)
 
