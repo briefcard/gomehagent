@@ -16,7 +16,46 @@ not.** A stale handoff costs more than no handoff, because it is trusted.
 is no longer maintained. Parts of it are actively wrong. Read it for background,
 never for state.
 
-**Live:** `ea420b7`, confirmed on `/health` (which reports the commit — use it, never infer what is running). 128 suites green, 281 sabotage anchors, 3 known-stale carried. See the section directly below for what the last two threads added; the dated sections further down are HISTORY and were not rewritten by this pass.
+**Live: ask `/health`** — it reported `9d26f24` as this was written (2026-09-22);
+the code this section describes landed at `061d4f5`. The line below about
+`ea420b7` is the state of 2026-08-30 and everything after it in this file is
+older still.
+
+### READ THIS BEFORE THE REST OF THIS FILE (2026-09-22)
+
+**The centre of both creative systems was replaced between 2026-09-12 and
+2026-09-22, and this file's older sections describe modules that no longer
+exist.** `app/email_design.py` and `app/email_render.py` are DELETED, with
+nine suites, 91 guards and the twelve-role palette; anything below that
+describes a "branded renderer", a design vocabulary or a house design is
+history. What replaced them:
+
+- **`app/recreate.py`** — the email, made whole by one model call from a
+  reference read in words, with the brand's pictures cut to fit, display type
+  baked to pictures, invariants checked, a browser screenshot, and a judge
+  with eyes. `skill_pack._build` has ONE path: it fails the run rather than
+  degrade. Plan: `INITIATIVE-email-recreation.md`.
+- **`app/articles.py`** — the article, the same shape: the pages that rank
+  read into a brief, the story decided before the prose, the brand's standing
+  layout, the checks, the render, a judge beside the top rival.
+  `skill_pack._run_blog_article` writes through it. Plan:
+  `INITIATIVE-blog-quality.md` (Phases 0–5 built).
+- **`app/exemplars.py`** — what the owner approves becomes the brand's
+  standard for the next make; what they say is remembered per brand and per
+  kind, in their words, and can be withdrawn.
+- **`app/pictures.py`, `app/palette.py`, `app/brand_theme.py`** — the
+  survivors of the deletion: picture readings and contact sheets, colour
+  maths, and the theme as `DEFAULT`/`filled`/`missing_to_send`.
+- **`scripts/recreate_once.py`, `scripts/article_once.py`** — the looking
+  loops, run on a laptop against a public store with a real key in
+  `.env.keys` (never `.env`). Output lands in `runs/`, git-ignored.
+
+**Not enabled, and the owner's to decide:** an article going live unattended
+(the condition exists; every article lands as a Shopify draft today), and a
+deploy run of the blog against a plan keyword where the rivals come from
+Semrush rather than hand-typed URLs.
+
+**Live (2026-08-30):** `ea420b7`, confirmed on `/health` (which reports the commit — use it, never infer what is running). 128 suites green, 281 sabotage anchors, 3 known-stale carried. See the section directly below for what the last two threads added; the dated sections further down are HISTORY and were not rewritten by this pass.
 `/health` reports `commit` and `routes` — use it, never infer what is running.
 `/health/connections` is unauthenticated and live-tests Shopify and Google.
 

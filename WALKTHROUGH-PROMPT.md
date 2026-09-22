@@ -1863,19 +1863,110 @@ creative systems (ads, blog, GBP) inherit this next.
 the owner's move is to add it and run `recreate_once.py` for Baci on the
 Ayoh link — or press *Add this reference* under Designs on the deploy.
 
+### Ten live runs taught the email everything the code could not — 2026-09-15..18 (`3c54b29`..`87b57ce`)
+
+**How it was found.** Every defect below came from opening the picture
+beside the reference, not from reading `recreate.py`. The owner ran
+`scripts/recreate_once.py` against Baci's real store and pasted what came
+out; I read the run's own files (`brief.json`, `findings.json`, the
+`Usage` rows, the captured replies) before diagnosing anything.
+
+**What the model's picture contract really is.** The edge (1,568 px) is not
+the limit; TOTAL PIXELS are (≈1.18 M, tokens = w·h/750). A 1546×1034 cast
+sheet was refused, so every live cast failed while the suites passed. The
+sheet, the strips and the stamped judge pictures are all measured with
+`llm.resized_size` now. The label band that marks REFERENCE/OURS pushed a
+sheet cut to exactly 1,568 to 1,596 — it shrinks first.
+
+**The judge was the leak, twice.** First it asked for the reference's own
+things ("a wire basket", "CRUNCHYYY!!!") and the maker obeyed; then, given
+the pictures unstamped, it described the REFERENCE as ours and the maker
+shrank its hero to 55% of the column on that advice. Now: both pictures
+carry their label in the pixels, the judge must echo the first words it
+read in OURS, a confused answer is asked again and refused after twice, and
+any finding sharing a 3-gram — or a whole short line — with the reference's
+text is dropped before the edit. For the article, the same shape: no
+finding may ask for a number the material does not give.
+
+**The rules the owner set, verbatim in the memory notes.** Dressing is
+re-authored from the brand's world, never dropped and never generic. A
+failing of the category is never set beside a photograph of the brand's
+product. The maker declares its faces, scale, spacing and inset FIRST and
+is held to its own declaration. Truth is its own pass, and it catches what
+a line IMPLIES ("the plastic is gone" about melamine). What the owner
+approves becomes the standard; what they say is remembered in their words
+and can be withdrawn.
+
+**Traps.** A key in `.env` reaches every suite through
+`config.load_dotenv()`: five keyless suites made live calls for 41 minutes
+and failed on real answers. Keys live in `.env.keys`, read only by the two
+runners; `test_all.sh` blanks every provider key. Never edit the tree while
+`ship.sh` runs — the register check caught it twice. A clean round with no
+findings must STOP, not "edit to the findings": handed none, the writer
+rewrites from scratch and the rewrite is worse.
+
+### The model writes the article too — 2026-09-18..22 (`5568a7e`, `a0e3612`, `9aa94d3`, `525973d`, `061d4f5`)
+
+**The owner's ask.** On the day an email recreation finally came out right:
+*"similar quality results in blogs that can be pushed automatically to
+Shopify while keeping the plan keywords etc. in mind, based on the system
+we have today."* Then, on references: *"we don't necessarily want to always
+have a reference but it would be nice to have one; with blogs there is
+usually a certain layout that stays consistent between blogs."*
+
+**What that splits into, and it is the transferable idea.** For an email the
+reference is one thing and gives the whole design. For a series it is three:
+the PATTERN (the brand's standing layout, once per brand, on the Brand tab),
+the SERP BRIEF (what ranks for this keyword, per article), and an optional
+APPROACH reference (a way in, never a layout). A brand with none still gets a
+well-laid-out piece, because the pattern has a default and the first approval
+files the brand's own.
+
+**The blog's token chain.** `_ARTICLE_SYSTEM` had told the drafter for months
+to "answer a search query better than anything already ranking for it", and
+the drafter had never been shown what ranks — while the top ten URLs per
+keyword sat on file from Semrush, refreshed, unread. Whenever a prompt tells a
+model to beat something, check that the something reaches it.
+
+**What is built.** `app/articles.py` (pattern, rivals→brief, story, writer,
+checks, render in the store's faces, judge beside the top rival, ≤2 edits,
+best kept), the skill seam (no second path; a failed maker fails the run),
+§5's go-live condition, `app/exemplars.py` (shared with the email), and both
+cards. `scripts/article_once.py` is the looking loop.
+
+**Rules it adds.** A blog's layout belongs to the brand, not to the piece.
+Consistency is a CHECK, not a hope: the maker marks its blocks and the code
+sees them present and in order. An article may be created LIVE only when the
+maker finished clean, the judge would publish it, and it is in the pattern —
+and nothing is enabled until the owner says so.
+
 ---
 
-## 6. Next thread — paste this (UX polish, then whatever the owner brings)
+## 6. Next thread — paste this (the creative centre is rebuilt; two owner decisions are open)
 
 > You are continuing the gomehagent build at `/Users/gomehsaias/Documents/gomehagent-build`
 > (deployed at https://assistant-web-zm2d.onrender.com). Read the memory notes
-> `gomehagent-systems-effectiveness` (its LAST section first) and
-> `gomehagent-walkthrough-handoff`, then `WALKTHROUGH-PROMPT.md` §4 (the protocol,
-> unchanged) and §5 (the owner's standing rules and the traps) BEFORE touching
-> anything.
+> `gomehagent-systems-effectiveness` (its LAST section first),
+> `gomehagent-walkthrough-handoff`, and — before touching EMAIL or BLOG —
+> `gomehagent-email-structures`, `gomehagent-blog-quality` and
+> `dressing-is-re-authored-not-dropped`, whose centres were replaced in
+> 2026-09-12..22. Then `WALKTHROUGH-PROMPT.md` §4 (the protocol, unchanged) and
+> §5 (the owner's standing rules and the traps) BEFORE touching anything.
 >
 > **First move:** `python3 scripts/test_rehearse.py` — read its artifacts, not the
 > pass line.
+>
+> **If the work is email or blog, the first move is to LOOK at one, not to read
+> code.** `python3 scripts/recreate_once.py --tenant baci --store
+> https://bacimilanousa.com --url <a reallygoodemails.com link> --entity
+> 18-piece-set-portofino-melamine` writes `runs/once-baci-<stamp>/` with
+> `email.html`, `email.png`, `brief.json` and `findings.json`;
+> `python3 scripts/article_once.py --tenant baci --store
+> https://bacimilanousa.com --keyword "<a phrase>" --rivals "<url>,<url>"
+> --collections melamine,porcelain` writes the article's equivalent. Both need
+> `ANTHROPIC_API_KEY` in `.env.keys` (NEVER `.env` — see the traps). Every
+> defect worth fixing in this area was found by opening the picture beside the
+> reference, and none of them by reading the module.
 >
 > Under §4 unchanged: reproduce first; every fix ships a sabotage guard that
 > prints `[ caught ]` (run it — and re-run it after any LATER edit to the same
@@ -2093,6 +2184,80 @@ Ayoh link — or press *Add this reference* under Designs on the deploy.
 > by the compliance sweep on every public page still showing it.
 > **Owner's move:** run the catalogue sync, then "both" on the same product,
 > and read the count in the note.
+>
+> **SHIPPED 2026-09-12..22, THE CENTRE OF BOTH CREATIVE SYSTEMS WAS REPLACED.**
+> This is the largest change since the boards, and it is the thing to read
+> before touching email or blog. The rule the owner set on 2026-09-12, after a
+> hand-made recreation beat everything the app had produced:
+>
+> > **The model makes the thing, whole, with everything in view. The code
+> > inspects INVARIANTS only. A judge with eyes says whether it would ship.
+> > The owner's approvals and notes are the standard, not rules of ours.**
+>
+> **THE EMAIL** (`INITIATIVE-email-recreation.md`, memory
+> `gomehagent-email-structures` — read its LAST sections first). The token
+> chain is DELETED: `email_design.py` (1,700 lines), `email_render.py`
+> (1,557), nine suites, 91 guards, the twelve-role palette, the house design
+> and every fallback. `app/recreate.py` is the whole chain — brief, kit, cast,
+> fit, compose (ONE call: subject + preheader + HTML), bake (display type
+> photographed on glass), check, shoot, judge, edit, best round kept. The
+> campaign seam has ONE path: `skill_pack._build` calls `recreate.run` and a
+> maker that fails FAILS THE RUN with its reason. Ten live runs against Baci's
+> real store found, in order: the model's PIXEL budget (not only its edge);
+> the sheet, the strips and the stamped judge pictures all measured against
+> it; the reader describing the reference's own props instead of a picture's
+> ROLE; the judge mistaking the REFERENCE for ours and the maker obeying it
+> (now stamped REFERENCE/OURS in the pixels, made to echo what it read, asked
+> again, refused when confused twice); a clean unjudged round being REWRITTEN
+> from scratch; a silent truth pass; and the maker writing prose before the
+> email until it ran out of room. The owner's rules that came out of it, in
+> `dressing-is-re-authored-not-dropped`: dressing is kept and RE-AUTHORED from
+> the brand's world, never dropped and never generic; the judge asks "would
+> you send this", never "what differs"; truth is its own pass; a failing of
+> the category is never set beside a photograph of the brand's product; the
+> maker declares its type scale, spacing and inset FIRST and is held to its
+> own declaration.
+>
+> **THE BLOG** (`INITIATIVE-blog-quality.md`, memory `gomehagent-blog-quality`).
+> The same shape, Phases 0–5 built 2026-09-18..22 (`5568a7e`, `a0e3612`,
+> `9aa94d3`, `525973d`, `061d4f5`). The blog's version of the token chain was
+> this: the drafter had been told for months to "answer better than anything
+> already ranking for it" and had NEVER BEEN SHOWN what ranks, while the top
+> ten URLs per keyword sat on file from Semrush. `app/articles.py` now reads
+> the rivals into a brief, decides the story before the prose, lays the piece
+> out in the brand's STANDING PATTERN (a blog is a series; its layout is the
+> brand's and lives on the Brand tab, not per piece), checks the invariants,
+> renders it in the store's own faces and judges it beside the top rival.
+> `scripts/article_once.py` is the looking loop;
+> `docs/recreations/baci-melamine-vs-porcelain.html` is the hand-made standard
+> AND the default pattern.
+>
+> **BOTH NOW LEARN** (`app/exemplars.py`): the article's publish arm and the
+> email's ESP push file what the owner approved as the brand's exemplar, so
+> the next make is written against their own best work; `POST
+> /admin/creative_note` keeps what they SAID, per brand and per kind, in their
+> words, marked as outranking the brief — and it can be withdrawn, because an
+> instruction that cannot be is a rule.
+>
+> **THE TWO THINGS THAT NEED THE OWNER, and nothing is enabled without them:**
+> (a) the unattended live push for the blog — `approvals.article_may_go_live`
+> permits LIVE only when the maker finished clean AND the judge would publish
+> AND it is in the pattern, but today every article still lands as a Shopify
+> DRAFT; (b) a DEPLOY run of the blog against a real plan keyword, where the
+> rivals come from Semrush instead of URLs typed by hand. Everything before
+> that was proven locally with `scripts/recreate_once.py` and
+> `scripts/article_once.py` against Baci's public store.
+>
+> **Traps this work leaves you:** `.env.keys`, never `.env` — a key in `.env`
+> reaches every suite through `config.load_dotenv()` and five keyless suites
+> then make live calls (41 minutes, real answers, real money); `test_all.sh`
+> blanks every provider key besides. Nine older blog suites stub
+> `_draft_article_live`, which the skill no longer calls —
+> `scripts/_article_stub.py` and `scripts/_maker_stub.py` keep their fixtures
+> meaning what they meant; install one at the top of `main()` rather than
+> rewriting a suite. A fixed date in a fixture ROTS: `test_strategy` pinned a
+> send to 2026-08-23 and fell out of a 30-day window a month later, failing a
+> suite that has nothing to do with dates.
 >
 > **THE OWNER'S REMAINING ASK, 2026-09-07 (answered, not built):** (3) a
 > BOARD AXIS — one board per variation in one run, each frame tagged with
