@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import re
 
+from .bundle import stateable as _stateable
 from .email_craft import PLATITUDES, URGENCY, _find, _words
 
 #: What Meta shows in a feed before "… more". Copy past this is not read by
@@ -530,12 +531,16 @@ def panel_prompt(bundle: dict, concepts: list[dict]) -> list[str]:
         # wrote a brief demanding "one confirmed product detail" for a piece
         # whose row carried five, because only 160 characters of description
         # and none of the attributes reached them (2026-09-07).
+        # …THE ONES THAT ARE FACTS. `bundle.stateable` drops the store's
+        # plumbing and the system's own notes: until 2026-09-22 the whole bag
+        # came through, so the reviewers were shown `_compliance: storefront
+        # copy uses: hand-decorated` — the record of a BANNED phrase — as one
+        # of the product's facts.
         parts.append("ADVERTISED: " + "; ".join(
             f"{e.get('name', '')} — {str(e.get('description') or '')[:400]}"
             + ((" (" + "; ".join(f"{k}: {v}" for k, v in
-                                 list((e.get("attributes") or {}).items())[:8]
-                                 if str(v).strip()) + ")")
-               if e.get("attributes") else "")
+                                 list(_stateable(e.get("attributes")).items())[:8])
+                + ")") if _stateable(e.get("attributes")) else "")
             for e in ents[:3]))
     for c in concepts:
         a = ANGLES.get(c.get("angle", ""), {})

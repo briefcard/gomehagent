@@ -74,6 +74,46 @@ import pathlib
 #: key `run` never wrote.
 OWNER_INPUT = ("offer", "deadline", "revision_notes")
 
+#: KEYS IN AN ENTITY'S `attributes` THAT ARE NOT FACTS ABOUT THE PRODUCT.
+#:
+#: The bag holds two different kinds of thing and they had never been told
+#: apart. `catalog_sync` fills it from the store — `vendor`, `product_type`,
+#: `tags` are things a person reads on the page, while `status`, `published`
+#: and `image` are how the row is PLUMBED and mean nothing to a reader; the
+#: question backlog then adds real specifications to the same bag (`kb.py`,
+#: the `attrs[row.attribute] = value` write). Anything beginning with `_` is
+#: the system's own note to itself.
+#:
+#: Found 2026-09-22, and it was not cosmetic. `ad_prompt` and `panel_prompt`
+#: both rendered the WHOLE bag under "its own catalogue facts, which you may
+#: state as they are" — so for any product whose storefront copy still carries
+#: a banned phrase, `catalog_sync`'s own violation record
+#: (`_compliance: storefront copy uses: hand-decorated`) was handed to the
+#: writer as a fact it was invited to state, along with the photograph's CDN
+#: URL. The ban list still blocked the output, so nothing shipped; what it
+#: cost was a repair cycle per draft on a phrase the system supplied itself.
+#:
+#: Declared here because `bundle` imports nothing from the app, so `ad_craft`
+#: — which is deliberately database-free — can read it without reaching for
+#: `kb`.
+NOT_A_FACT = ("status", "published", "image")
+
+
+def stateable(attrs: dict | None) -> dict:
+    """The attributes a writer may state as they are.
+
+    Drops the system's own notes (any `_`-prefixed key) and the store's
+    plumbing. Everything else rides: a fact nobody classified is a fact, so a
+    new specification arriving from the question backlog reaches the writer
+    without anybody remembering to add it here — the failure direction this
+    chooses is "too much true detail", never "the writer was handed our
+    bookkeeping".
+    """
+    return {k: v for k, v in (attrs or {}).items()
+            if not str(k).startswith("_") and k not in NOT_A_FACT
+            and str(v).strip()}
+
+
 #: `absent` vocabulary — what it MEANS that a part is not here.
 THINS = "thins"          # the work is worse, and worth doing anyway
 UNVERIFIED = "unverified"  # output cannot be checked; this is the one veto

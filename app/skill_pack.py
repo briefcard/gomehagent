@@ -51,6 +51,7 @@ import html as _htmllib
 import re
 
 from . import ad_craft, funnel
+from . import bundle as _pkg
 from . import coherence, compliance, responder, sites, systems
 from . import kb as kb_mod
 from .skill import Context, Skill, register
@@ -1202,12 +1203,17 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
         # — a store-synced row is approved data — and until 2026-09-07 the
         # attributes never reached it, so a drafter with "sold as a set of 6"
         # in front of it and nothing else declined to write.
+        # WHICH MAKES IT MATTER WHAT IS IN THAT BAG. `bundle.stateable` is
+        # the difference between a fact and our own bookkeeping: this heading
+        # invites the writer to state what follows, and until 2026-09-22 what
+        # followed included `status`, `published`, the photograph's CDN URL
+        # and `_compliance` — `catalog_sync`'s record that the storefront copy
+        # still uses a BANNED phrase, offered as a fact to state as it is.
         parts.append("\n## What is being advertised — its own catalogue facts, "
                      "which you may state as they are")
         for e in ents[:3]:
             facts = "; ".join(f"{k}: {v}" for k, v in
-                              list((e.get("attributes") or {}).items())[:10]
-                              if str(v).strip())
+                              list(_pkg.stateable(e.get("attributes")).items())[:10])
             parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"[:600]
                          + (f" ({facts})" if facts else ""))
     aud = bundle.get("audiences") or []

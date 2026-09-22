@@ -329,6 +329,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`audit`**(root?) → `dict`  ·  from `skill_pack.py`, `test_bundle_contract.py`, `test_gbp_listing.py`
 - **`promised`**(tier) → `tuple`  ·  **from nothing**
+- **`stateable`**(attrs) → `dict`  ·  from `skill_pack.py`
 - **`verify`**(b) → `list[str]`  ·  from `resolve.py`, `test_bundle_contract.py`, `test_grounding.py`, `triage.py`, `web.py`
 
 ### `canva.py`

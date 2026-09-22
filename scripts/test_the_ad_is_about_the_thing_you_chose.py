@@ -136,10 +136,17 @@ def main() -> int:
     kb.add_entity("baci", "product", "joke-melamine-18", "Joke Melamine 18-piece set",
                   description="An 18-piece set in white melamine — durable and dishwasher-safe.",
                   attributes={"material": "melamine", "pieces": "18"}, origin="human")
+    # ITS BAG AS A REAL SYNC LEAVES IT: three facts a person could read on the
+    # page, beside the store's plumbing and `catalog_sync`'s own record that
+    # the storefront copy still carries a BANNED phrase (`app/catalog_sync.py`
+    # writes `_compliance` exactly so, and the Baci catalogue had ~96 of them).
     kb.add_entity("baci", "product", "sagrada-head", "Sagrada Família head",
                   description="A ceramic head inspired by Gaudí's Sagrada Família, "
                               "glazed by hand, 24 cm tall. Sold as a set of 6.",
-                  attributes={"material": "ceramic", "height_cm": "24", "set": "6"},
+                  attributes={"material": "ceramic", "height_cm": "24", "set": "6",
+                              "status": "active", "published": True,
+                              "image": "https://cdn.shopify.com/s/f/sagrada.jpg",
+                              "_compliance": "storefront copy uses: hand-decorated"},
                   origin="human")
     row = systems.find("baci", "ad_creative") or systems.create("baci", "ad_creative")
     contract(row, autonomy="approve_all")
@@ -170,6 +177,18 @@ def main() -> int:
        "Sagrada" in sect and "Joke" not in sect and "Baroque" not in sect, sect[:200])
     ck("  and carries the product's OWN catalogue facts as the confirmed details",
        "material: ceramic" in sect and "set: 6" in sect, sect[:240])
+    # …AND NOTHING THAT IS NOT A FACT. This heading tells the writer it may
+    # state what follows, so what follows must not be the store's plumbing or
+    # our own note that the page breaks the ban list. Both prompts, because
+    # both built the line separately and both printed the whole bag.
+    for _who, _text in (("the drafter", sect),
+                        ("the panel", shown[shown.find("ADVERTISED"):][:400])):
+        ck(f"  {_who} is not handed our own bookkeeping as a fact to state",
+           "hand-decorated" not in _text and "_compliance" not in _text,
+           _text[:240])
+        ck(f"  …nor the store's plumbing — no status, no CDN url",
+           "cdn.shopify.com" not in _text and "status: active" not in _text,
+           _text[:240])
     fp2, fd2 = FakePanel(), FakeDraft([A_REAL_AD])
     skill_pack.panel_ad, skill_pack.draft_ad = fp2, fd2
     r2 = skill.run("ad_copy", "baci", entity_key="sagrada-head",

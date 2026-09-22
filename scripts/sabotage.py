@@ -1076,6 +1076,17 @@ SABOTAGES = [
                "ad for the pitcher proved by a claim about the platter",
     },
     {
+        "name": "our_bookkeeping_is_offered_as_a_product_fact",
+        "file": "app/bundle.py",
+        "find": '            if not str(k).startswith("_") and k not in NOT_A_FACT',
+        "replace": "            if True  # SABOTAGE",
+        "suites": ["test_the_ad_is_about_the_thing_you_chose.py"],
+        "why": "the drafter and the reviewers are handed the whole attribute "
+               "bag under 'facts you may state as they are' — including "
+               "`_compliance`, which is our record that the page uses a "
+               "BANNED phrase, and the photograph's CDN url",
+    },
+    {
         "name": "a_short_ad_may_lose_its_subject",
         "file": "app/coherence.py",
         "find": '        if _lost_subject(whole, label, a.get("items")):',
@@ -8019,7 +8030,7 @@ SABOTAGES = [
     {
         'name': 'the_panel_sees_the_products_own_facts',
         'file': 'app/ad_craft.py',
-        'find': '            + ((" (" + "; ".join(f"{k}: {v}" for k, v in\n                                 list((e.get("attributes") or {}).items())[:8]\n                                 if str(v).strip()) + ")")\n               if e.get("attributes") else "")',
+        'find': '            + ((" (" + "; ".join(f"{k}: {v}" for k, v in\n                                 list(_stateable(e.get("attributes")).items())[:8])\n                + ")") if _stateable(e.get("attributes")) else "")',
         'replace': '            + ""  # SABOTAGE',
         'suites': ['test_the_ad_is_about_the_thing_you_chose.py'],
         'why': "the reviewers write a brief demanding 'one confirmed product detail' for a product whose row carries five, and the drafter obeys the brief",
