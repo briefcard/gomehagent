@@ -1076,6 +1076,17 @@ SABOTAGES = [
                "ad for the pitcher proved by a claim about the platter",
     },
     {
+        "name": "a_catalogue_row_shows_our_plumbing",
+        "file": "app/admin_ui.py",
+        "find": "    facts = _pkg.stateable(d)",
+        "replace": "    facts = dict(d or {})  # SABOTAGE",
+        "suites": ["test_kb_ui.py"],
+        "why": "every catalogue row shows `status`, `published` and the "
+               "photograph's CDN url as chips beside its facts, and the "
+               "ban-list record renders in the same neutral grey as the rest "
+               "with nothing to press",
+    },
+    {
         "name": "a_dead_work_id_is_a_bare_page",
         "file": "app/web.py",
         "find": '        return RedirectResponse("/admin/ui?" + urlencode(\n'

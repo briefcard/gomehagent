@@ -3877,11 +3877,37 @@ def _words(items, empty: str = "not set") -> str:
 
 
 def _attr_chips(d: dict) -> str:
-    if not d:
-        return ""
-    return '<div class="chips">' + "".join(
-        f'<span class="chip nb">{_esc(str(k).replace("_", " "))} '
-        f'<b>{_esc(v)}</b></span>' for k, v in d.items()) + "</div>"
+    """A row's own facts as chips — and its flag as a flag.
+
+    The attribute bag holds three different things and this rendered all three
+    the same way. On a real synced product that is three facts (vendor,
+    product type, tags), then the store's plumbing (`status`, `published`, and
+    the photograph's CDN url, which wrapped the card across two lines and told
+    the reader nothing they could act on), and then `catalog_sync`'s record
+    that the storefront copy still breaks the ban list — in the same neutral
+    grey as the rest, labelled " compliance" because the underscore was
+    stripped for display, with nothing to press. The surface that explains
+    that flag is on another tab.
+
+    `bundle.stateable` is the same separation `00f05ee` made for the drafter's
+    prompt, because it is the same question: which of these is a fact about
+    the product. The flag is rendered as one, in the sentence the Review tab
+    already uses, so the two surfaces agree.
+    """
+    from . import bundle as _pkg
+    facts = _pkg.stateable(d)
+    out = ""
+    if facts:
+        out += '<div class="chips">' + "".join(
+            f'<span class="chip nb">{_esc(str(k).replace("_", " "))} '
+            f'<b>{_esc(v)}</b></span>' for k, v in facts.items()) + "</div>"
+    flag = str((d or {}).get("_compliance") or "").strip()
+    if flag:
+        out += (f'<div class="chips"><span class="chip off">{_esc(flag)}'
+                f'</span></div><div class="when">Its storefront copy uses a '
+                f'banned phrase, so it was not imported. Fix the product page '
+                f'and sync again to clear the flag.</div>')
+    return out
 
 
 def _date(v) -> str:

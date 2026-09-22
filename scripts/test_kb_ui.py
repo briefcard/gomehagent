@@ -457,6 +457,35 @@ def main() -> int:
     ck("…and the objections card carries the editor",
        'name="response"' in admin_ui.render_kb(KEY, "baci"))
 
+    print("\n— a catalogue row shows its facts, and its flag as a flag —")
+    # The bag a real `catalog_sync` leaves on a product whose storefront copy
+    # still carries a banned phrase. All seven used to render as identical
+    # neutral chips: three facts, three pieces of plumbing, and the ban-list
+    # record labelled " compliance" with nothing to press.
+    kb.add_entity("baci", "product", "zodiac-libra", "Zodiac Vibe cup · Libra",
+                  description="Porcelain cup, 300 ml.", origin="human",
+                  attributes={"vendor": "Baci Milano",
+                              "product_type": "Drinkware",
+                              "tags": "zodiac, porcelain, gift",
+                              "status": "active", "published": True,
+                              "image": "https://cdn.shopify.com/s/f/lib.jpg",
+                              "_compliance": "storefront copy uses: "
+                                             "hand-decorated"})
+    cat = admin_ui.render_kb(KEY, "baci", sub="catalogue")
+    ck("the product's own facts are on the row",
+       "Baci Milano" in cat and "Drinkware" in cat and "zodiac, porcelain" in cat,
+       "vendor, product type and tags are things a person reads on the page")
+    ck("  and the store's plumbing is not",
+       "status" not in cat.split("Zodiac Vibe")[1][:600]
+       and "cdn.shopify.com" not in cat,
+       "a CDN url wrapped the card across two lines and said nothing actionable")
+    ck("  while the ban-list record reads as a WARNING, with its sentence",
+       "chip off" in cat.split("Zodiac Vibe")[1][:900]
+       and "hand-decorated" in cat
+       and "so it was not imported" in cat,
+       "it rendered in the same grey as the facts, on a tab that never "
+       "explained it")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
