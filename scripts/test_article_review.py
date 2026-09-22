@@ -27,6 +27,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'ar.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ["SEO_SITES_JSON"] = "{}"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in article maker
+from _article_stub import install as _install_articles  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -72,6 +74,7 @@ def _setup(key, domain, cms, with_cred):
 
 
 def main() -> int:
+    _install_articles()   # the maker is model calls; this suite has none
     db.init_db()
     skill_pack._draft_article_live = lambda *a, **k: (DRAFT, "")
     _setup("acme", "acme.example",

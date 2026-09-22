@@ -403,6 +403,14 @@ def ship_unattended(tenant: str, output_id: str, why: str = "") -> dict:
                         + "; ".join(f"{f.get('where', '')} — {f.get('what', '')}"
                                     for f in (rec.get("findings") or [])
                                     if f.get("severity") == "blocks")[:400])}
+    # MARKED BEFORE THE EXECUTOR RUNS, not after: the publish arm reads this to
+    # decide whether an article may be created LIVE (§5 of the blog plan), and
+    # `apply_decision` executes inside itself.
+    with db.SessionLocal() as s:
+        ap_ = s.get(db.Approval, ids[0])
+        if ap_ is not None:
+            ap_.payload = {**dict(ap_.payload or {}), "decided_by": "auto", "auto_why": why}
+            s.commit()
     said = apply_decision(ids[0], "approved")
     with db.SessionLocal() as s:
         run = s.get(db.SystemRun, runs[ids[0]]) if runs[ids[0]] else None
@@ -689,6 +697,44 @@ def _recreation_of(output_id: str) -> dict:
     return rec if isinstance(rec, dict) else {}
 
 
+def _article_of(output_id: str) -> dict:
+    """What the article maker decided for this output, off its artifact's meta
+    — `{}` for an article written before the maker existed."""
+    if not output_id:
+        return {}
+    try:
+        with db.SessionLocal() as s:
+            art = (s.query(db.ArtifactBody)
+                   .filter(db.ArtifactBody.output_id == output_id).first())
+            meta = dict(art.meta or {}) if art is not None else {}
+    except Exception:                                            # noqa: BLE001
+        return {}
+    got = meta.get("article") or {}
+    return got if isinstance(got, dict) else {}
+
+
+def article_may_go_live(output_id: str) -> tuple[bool, str]:
+    """May this article be created LIVE rather than as a draft?
+    (INITIATIVE-blog-quality §5.) Only when the maker finished with nothing
+    blocking, the JUDGE looked and would publish, and it is laid out in the
+    brand's pattern. Anything less lands as a Shopify draft with the approval
+    pending, as every article did before. An article written before the maker
+    existed has no record and stays a draft."""
+    a = _article_of(output_id)
+    if not a:
+        return False, "no article record — it was written before the maker, so it lands as a draft"
+    if a.get("status") != "publishable":
+        n = len(a.get("blocking") or [])
+        return False, (f"the maker kept it as {a.get('status')}"
+                       + (f" with {n} blocking finding(s): " + "; ".join(
+                           f"{f.get('where', '')} — {f.get('what', '')}" for f in (a.get("blocking") or [])[:3])[:300] if n else ""))
+    if a.get("would_publish") is not True:
+        return False, "the judge did not say it would publish"
+    if a.get("one_pattern") is False:
+        return False, "the judge says it is not laid out in the brand's pattern"
+    return True, f"the maker finished clean and the judge would publish it ({a.get('words', '?')} words)"
+
+
 def _fields_from_artifact(output_id: str, payload_fields: dict) -> dict:
     """The payload's fields, with the artifact's current text laid over them.
 
@@ -937,9 +983,20 @@ def _execute(ap: db.Approval) -> None:
         # `may_publish`, so the featured image it joins is the one they saw.
         _approve_generated_media(p.get("output_id") or "",
                                  via="article's approval")
-        res = sites.backend(profile).create_article(
-            profile, _blog_id,
-            _fields_from_artifact(p.get("output_id") or "", p["fields"]))
+        _fields = _fields_from_artifact(p.get("output_id") or "", p["fields"])
+        # PUBLISHED IS A DECISION, NOT A DEFAULT (§5). On the `auto` rung an
+        # article the maker finished clean and the JUDGE would publish goes
+        # live; everything else is created as a draft, as every article was
+        # before. A person's approval keeps whatever the payload asked for.
+        if not _fields.get("published") and str((ap.payload or {}).get("decided_by") or "") == "auto":
+            _live, _why_live = article_may_go_live(p.get("output_id") or "")
+            _fields = {**_fields, "published": _live}
+            _note_live = ("published live unattended — " if _live else "left as a draft — ") + _why_live
+        else:
+            _note_live = ""
+        res = sites.backend(profile).create_article(profile, _blog_id, _fields)
+        if _note_live:
+            res = f"{res} ({_note_live})" if res else res
         if _published(res):
             # CLOSE THE LOOP, which this arm never did: the 2026-08-26 audit
             # found create_article's return — which BEGINS with the live URL —

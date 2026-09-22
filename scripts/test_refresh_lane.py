@@ -36,6 +36,8 @@ import tempfile
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'rl.db')}"
 os.environ["APPROVAL_SECRET"] = "s3cret"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in article maker
+from _article_stub import install as _install_articles  # noqa: E402
 
 from app import (db, kb, keywords, planner, skill, skill_pack,  # noqa: E402
                  systems, tenants)
@@ -86,6 +88,7 @@ def _plans(sysrow, prefix):
 
 
 def main() -> int:
+    _install_articles()   # the maker is model calls; this suite has none
     db.init_db()
     tenants.seed()
     kb.ensure_brand("baci", "Baci")

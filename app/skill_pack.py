@@ -5332,27 +5332,49 @@ def _run_blog_article(ctx: Context) -> dict:
     if not angle:
         angle, angle_why = _pick_angle(
             (row.intent if row is not None else "") or "", avoid, cluster_key)
-    body, why_not = _draft_article_live(
-        ctx.bundle, keyword, role, angle, questions, links, entity, avoid)
+    # THE ARTICLE IS WRITTEN THE WAY THE EMAIL IS MADE (INITIATIVE-blog-quality,
+    # Phase 3): the pages that rank are read into a brief, the story is decided
+    # before the prose, the article is laid out in the brand's standing pattern,
+    # the invariants are checked, it is rendered and JUDGED beside the top
+    # rival, and the best of up to three rounds is kept. `_draft_article_live`
+    # wrote BLIND — told to beat "anything already ranking for it" and never
+    # shown what ranks. No second path: a maker that fails fails the run with
+    # its reason, as the campaign's does.
+    from . import articles as _ar
+    _made = _ar.run(
+        ctx.tenant, keyword, role=role, entity_key=entity_key, questions=questions,
+        approach_url=str(ctx.params.get("approach") or "").strip(),
+        # THE ANGLE (the plan's, or `_pick_angle`'s) is the way in; the
+        # keyword map's published siblings are the internal links; the owner's
+        # revision notes outrank both — all three reached the old drafter and
+        # must reach the maker.
+        angle=angle, angle_brief=str(ARTICLE_ANGLES.get(angle, {}).get("brief") or ""),
+        links=links[:6],
+        notes=str(ctx.bundle.get("revision_notes") or ctx.params.get("revision_notes") or "").strip(),
+        # the brand's own collection pages come from the KB inside the maker;
+        # these are the keyword map's published siblings that happen to be
+        # collection pages, added to them
+        collections=[str(L.get("url") or "") for L in links if "/collections/" in str(L.get("url") or "")][:4])
+    body = _made.get("html") or ""
     if not body:
+        why_not = _made.get("note") or "the article could not be written"
         # NO COMPOSED FALLBACK, unlike `ad_copy`. A three-line ad assembled
         # from a claim is a usable placeholder; a template article is a thin
         # page, and thin pages are actively harmful to the thing this system
         # exists to improve. Refusing is the better output.
         ctx.note(f"not drafted — {why_not}. Nothing was filed: a templated "
                  f"article would rank worse than no article.")
-        return {"summary": f"not drafted ({why_not})", "keyword": keyword}
-
-    # THE MODEL'S OWN H1 IS THE TITLE. This line used to be
-    # `title = keyword[:1].upper() + keyword[1:]` — the article's Title was
-    # set to the capitalised SEARCH QUERY and the H1 the drafter had been
-    # explicitly asked for ("an H1 that is the article's title",
-    # `_ARTICLE_SYSTEM`) was written into the body and never read. `_seo_title`
-    # then saw the keyword already "in" the title, returned it unchanged, and
-    # both fields shipped as the raw query. Owner, 2026-08-29: "you just put
-    # in the keyword instead of optimizing with a human-facing name that
-    # incorporates the optimized keywords."
-    title = _h1_of(body)
+        return {"summary": f"not drafted ({str(why_not)[:80]})", "keyword": keyword}
+    for _line in str(_made.get("note") or "").split(". "):
+        if _line.strip():
+            ctx.note(_line.strip().rstrip(".") + ".")
+    _story = _made.get("story") or {}
+    _verdict = _made.get("verdict") or {}
+    if _made.get("status") != _ar.PUBLISHABLE:
+        ctx.note("NOT publishable as it stands — "
+                 + "; ".join(f"{f.get('where', '')}: {f.get('what', '')}"[:150]
+                             for f in (_made.get("findings") or [])[:4]))
+    title = _made.get("title") or _h1_of(body)
     if not title:
         # No H1 came back. Say so rather than silently falling back to the
         # query, which is how this stayed invisible: a title tag that IS the
@@ -5594,10 +5616,23 @@ def _run_blog_article(ctx: Context) -> dict:
                  a for a in _body_made if a != _hero_id],
              meta={"title": title,
                    "seo_title": _seo_title(keyword, title),
-                   "seo_description": _meta_description(keyword, body),
+                   "seo_description": _made.get("meta") or _meta_description(keyword, body),
                    "keyword": keyword, "role": role, "cluster": cluster_key,
                    "questions": questions, "internal_links": len(links),
-                   "angle_why": angle_why})
+                   "angle_why": angle_why,
+                   # WHAT THE MAKER DECIDED AND WHAT THE JUDGE SAID, so the
+                   # card, the ship and the report read the same run
+                   "article": {"status": _made.get("status"), "words": _made.get("words"),
+                               "rounds": len(_made.get("rounds") or []), "best": _made.get("best"),
+                               "would_publish": _verdict.get("would_publish"),
+                               "one_pattern": _verdict.get("one_pattern"),
+                               "blocking": [f for f in (_made.get("findings") or []) if f.get("severity") == "blocks"][:8],
+                               "hook": _story.get("hook", ""), "beats": len(_story.get("beats") or []),
+                               "turned": _story.get("turned") or [],
+                               "pattern": (_made.get("pattern") or {}).get("name", ""),
+                               "pattern_default": bool((_made.get("pattern") or {}).get("default")),
+                               "beat": (_made.get("brief") or {}).get("beat", ""),
+                               "rivals": [(r or {}).get("url", "") for r in ((_made.get("brief") or {}).get("rivals") or [])][:4]}})
 
     # --- queue the publish, through the ONE path that queues articles ------
     #
@@ -5834,9 +5869,11 @@ register(Skill(
     key="blog_article",
     name="Blog article",
     does="Write one answer-first article against one keyword from the map — "
-         "grounded in approved claims, answering the questions people actually "
-         "searched, with FAQ structured data and only internal links that "
-         "resolve. Queues the publish for approval; never publishes itself.",
+         "the pages that rank read into a brief, the story decided before the "
+         "prose, laid out in the brand's standing pattern, grounded in "
+         "approved claims, rendered and judged beside the top rival, the best "
+         "of three rounds kept. Queues the publish for approval; never "
+         "publishes itself.",
     system_key="blog",
     tier=3,
     needs=("rules.voice_tone", "rules.positioning"),
@@ -5846,6 +5883,10 @@ register(Skill(
     # ban list is not a thinner article, it is an unchecked one.
     constitutive=("banned_claims",),
     params=("keyword", "role", "cluster", "angle", "entity_key",
+            # AN APPROACH REFERENCE — an article whose WAY IN the owner likes,
+            # read for its concept and argument, never its layout
+            # (INITIATIVE-blog-quality §0a). Blank is the usual case.
+            "approach",
             # THE REST OF WHAT THE PIECE IS ABOUT. `entity_key` is the hero;
             # this is everything else it may cite, for the article whose
             # subject is a place rather than a thing.

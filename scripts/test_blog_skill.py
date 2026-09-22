@@ -27,6 +27,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'bs.d
 os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ["SEO_SITES_JSON"] = "{}"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in article maker
+from _article_stub import install as _install_articles  # noqa: E402
 
 from app import db, kb, keywords, planner, shopify_seo, skill, skill_pack, systems, tenants  # noqa: E402
 
@@ -64,6 +66,7 @@ def ck(label, cond, detail=""):
 
 
 def main() -> int:
+    _install_articles()   # the maker is model calls; this suite has none
     db.init_db()
     with db.SessionLocal() as s:
         s.add(db.Tenant(key="acme", name="Acme Tableware", kind="client",

@@ -21,6 +21,8 @@ os.environ.setdefault("APPROVAL_SECRET", "s3cret")
 os.environ.setdefault("SEO_SITES_JSON", "{}")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in article maker
+from _article_stub import install as _install_articles  # noqa: E402
 
 import httpx  # noqa: E402
 
@@ -210,6 +212,7 @@ def rehearse_surfaces(accounts) -> list[dict]:
 
 
 def main() -> int:
+    _install_articles()   # the maker is model calls; this suite has none
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="", help="skills|pages|decisions|jobs|surfaces")
     ap.add_argument("--accounts", default="", help="comma-separated tenant keys (default: every seeded)")

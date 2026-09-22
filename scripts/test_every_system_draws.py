@@ -23,6 +23,8 @@ os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'draw
 os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ["PUBLIC_BASE_URL"] = "https://example.test"
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in article maker
+from _article_stub import install as _install_articles  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in maker
 from _maker_stub import install as _install_maker  # noqa: E402
 
@@ -72,6 +74,7 @@ def _fake_esp():
 
 
 def main() -> int:  # noqa: PLR0915
+    _install_articles()   # the maker is model calls; this suite has none
     _install_maker()      # the maker is a model call; this suite has no model
     db.init_db()
     tenants.seed()

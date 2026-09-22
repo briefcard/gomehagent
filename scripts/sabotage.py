@@ -38,6 +38,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'an_article_goes_live_without_a_judgement',
+        "file": 'app/approvals.py',
+        "find": '    if a.get("would_publish") is not True:\n',
+        "replace": '    if False:\n',
+        "suites": ['test_the_model_writes_the_article.py'],
+        "why": "an article nobody looked at is created LIVE on the client's own domain — the one condition the unattended push rests on",
+    },
+    {
         "name": 'an_article_may_open_without_its_keyword',
         "file": 'app/articles.py',
         "find": '    if want and not want <= set(_kw.tokens(first)):\n',
@@ -3270,8 +3278,8 @@ SABOTAGES = [
     {
         "name": "the_push_uses_what_was_reviewed",
         "file": "app/approvals.py",
-        "find": "            _fields_from_artifact(p.get(\"output_id\") or \"\", p[\"fields\"]))",
-        "replace": "            p[\"fields\"])  # SABOTAGE",
+        "find": "        _fields = _fields_from_artifact(p.get(\"output_id\") or \"\", p[\"fields\"])\n",
+        "replace": "        _fields = dict(p[\"fields\"])  # SABOTAGE\n",
         "suites": ["test_article_review.py"],
         "why": "the CMS write goes back to publishing the approval payload's "
                "copy of the text rather than the artifact the owner actually "
@@ -3600,8 +3608,8 @@ SABOTAGES = [
     {
         "name": "the_title_is_a_title_not_the_query",
         "file": "app/skill_pack.py",
-        "find": "    title = _h1_of(body)",
-        "replace": "    title = keyword[:1].upper() + keyword[1:]  # SABOTAGE",
+        "find": "    title = _made.get(\"title\") or _h1_of(body)\n",
+        "replace": "    title = keyword[:1].upper() + keyword[1:]  # SABOTAGE\n",
         "suites": ["test_seo_head.py"],
         "why": "the article's Title and <title> tag go back to being the "
                "capitalised SEARCH QUERY — 'Buy acrylic dinnerware' — while "

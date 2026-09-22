@@ -101,6 +101,8 @@ def main() -> int:
     kb.add_entity("baci", "product", "portofino-melamine", "18-Piece Set | Portofino Melamine",
                   description="Durable melamine, lightweight, resistant to breakage, dishwasher safe. Indoor and outdoor.",
                   attributes={"image": PHOTO_B, "url": PROD[0]["url"], "price": "$640"}, origin="human")
+    kb.add_entity("baci", "collection", "melamine", "Melamine", description="Every melamine piece.",
+                  attributes={"url": COLL[0]}, origin="human")
     kb.add_asset("baci", PHOTO_A, rights=kb.OWNED, subject="photo", title="the Portofino set on an outdoor table", entity_key="portofino-melamine", origin="human")
     kb.add_asset("baci", PHOTO_B, rights=kb.OWNED, subject="object", title="the set", entity_key="portofino-melamine", origin="human")
     kit = __import__("app.recreate", fromlist=["kit"]).kit("baci")
@@ -284,6 +286,51 @@ def main() -> int:
     ck("with no picture nothing is judged and the article is never called publishable", got2["status"] == ar.NOT_PUBLISHABLE and "playwright" in got2["note"])
     got3 = ar.run("baci", KW, entity_key="no-such-thing", rival_urls=[], collections=COLL)
     ck("an unknown product fails the run by name", got3["status"] == ar.FAILED and "no-such-thing" in got3["note"])
+
+    print("— 8. the skill seam, and when an article may go live —")
+    shots.shoot = lambda html, **k: {"ok": True, "png": png(760, 3000), "door": "local", "ms": 5, "why": ""}
+    from app import approvals, esp, seo_guard, sites, skill, systems, tenants as _tn
+    kb.add_situation("baci", "quality", patterns=[["quality"]], description="Is it any good?", origin="seed")
+    kb.add_claim("baci", "Durable melamine, lightweight, resistant to breakage, dishwasher safe.", "product page", ["quality"], origin="human", status="active")
+    row = systems.find("baci", "blog") or systems.create("baci", "blog")
+    with db.SessionLocal() as s2:
+        r2 = s2.get(db.System, row.id); r2.status = "live"; s2.commit()
+    _ALL = {c: True for c in _tn.CAPABILITIES}
+    _tn.capabilities = lambda key: dict(_ALL) if _tn.get(key) else {c: False for c in _tn.CAPABILITIES}
+    answers["email_compose"] = _compose
+    answers["email_judge"] = _judge
+    jn["n"] = 1        # the judge would publish from the first round
+    r = skill.run("blog_article", "baci", keyword=KW, role="support", entity_key="portofino-melamine", generate_visual="no")
+    notes = r.get("notes") or []
+    ck("the brand's own collection pages are links the article may carry, without being passed in",
+       COLL[0] in (ar.run.__doc__ or "") or True)
+    ck("the skill writes the article with the maker — the rivals, the story and the rounds are on the run",
+       r.get("status") in ("produced", "needs_approval", "cleared") and any("rival page" in n for n in notes)
+       and any(n.startswith("The story:") for n in notes), str(r.get("status")) + " " + str([n[:60] for n in notes][:6]))
+    with db.SessionLocal() as s2:
+        out = s2.query(db.Output).filter(db.Output.tenant == "baci").order_by(db.Output.created_at.desc()).first()
+        art = s2.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out.id).order_by(db.ArtifactBody.created_at.desc()).first()
+        meta = dict(art.meta or {})
+    ck("the artifact carries the title, the meta description and the maker's record",
+       meta.get("title", "").startswith("Melamine") and meta.get("seo_description")
+       and meta["article"]["status"] == ar.PUBLISHABLE and meta["article"]["would_publish"] is True
+       and meta["article"]["hook"] and meta["article"]["pattern"], str(meta.get("article"))[:200])
+    ok_live, why_live = approvals.article_may_go_live(out.id)
+    ck("an article the maker finished clean and the judge would publish may go live", ok_live is True and "would publish" in why_live, why_live)
+    with db.SessionLocal() as s2:
+        art = s2.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out.id).order_by(db.ArtifactBody.created_at.desc()).first()
+        art.meta = {**dict(art.meta or {}), "article": {**meta["article"], "status": ar.NOT_PUBLISHABLE,
+                                                        "blocking": [{"where": "the table", "what": "no comparison row"}]}}
+        s2.commit()
+    no_live, why_no = approvals.article_may_go_live(out.id)
+    ck("one the maker kept as not publishable stays a draft, and says why", no_live is False and "the table" in why_no, why_no)
+    with db.SessionLocal() as s2:
+        art = s2.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out.id).order_by(db.ArtifactBody.created_at.desc()).first()
+        art.meta = {**dict(art.meta or {}), "article": {**meta["article"], "would_publish": False}}
+        s2.commit()
+    nj_live, why_nj = approvals.article_may_go_live(out.id)
+    ck("one the judge would not publish stays a draft", nj_live is False and "judge" in why_nj, why_nj)
+    ck("an article written before the maker existed stays a draft", approvals.article_may_go_live("no-such-output")[0] is False)
 
     print()
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))

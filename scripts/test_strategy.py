@@ -209,7 +209,11 @@ def main() -> int:
             state = {"camp_A": "sent", "camp_B": "paused",
                      "camp_C": "canceled"}[cid]
             return {"ok": True, "campaign_id": cid, "status": state,
-                    "sent_at": "2026-08-23T10:00:00Z"}
+                    # A FIXED DATE ROTS. This was "2026-08-23T10:00:00Z", and
+                    # on 2026-09-22 it fell out of `used_recently`'s 30-day
+                    # window and failed a suite that had nothing to do with
+                    # dates. The platform's send time is relative to the run.
+                    "sent_at": (db.utcnow() - dt.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}
 
         @staticmethod
         def campaign_metrics(tenant, *, days=30):
@@ -233,7 +237,7 @@ def main() -> int:
     ck("it is published at last — the first campaign row ever to be",
        a.status == "published" and a.published_at is not None, a.status)
     ck("the platform's own send time is used, not the moment we asked",
-       db.as_utc(a.published_at).date().isoformat() == "2026-08-23",
+       db.as_utc(a.published_at).date() == (db.utcnow() - dt.timedelta(days=2)).date(),
        str(a.published_at))
     ck("and the numbers are on the row",
        (a.outcome or {}).get("openRate") == 32.0

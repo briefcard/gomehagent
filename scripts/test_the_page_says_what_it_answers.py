@@ -39,6 +39,8 @@ os.environ["SEO_SITES_JSON"] = (
     '{"baci": {"domain": "bacimilanousa.com", "platform": "shopify",'
     ' "creds_key": "baci", "database": "us"}}')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in article maker
+from _article_stub import install as _install_articles  # noqa: E402
 
 from app import db, kb, seo_tools, sites, skill, skill_pack, systems, tenants  # noqa: E402
 
@@ -82,6 +84,7 @@ def _setup(tenant: str) -> None:
 
 
 def main() -> int:
+    _install_articles()   # the maker is model calls; this suite has none
     db.init_db()
     tenants.seed()
 

@@ -285,7 +285,8 @@ plan for about %(length)s words. Answer with the JSON only, nothing before it.""
 
 
 def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = "", questions: list | None = None,
-                 approach_: dict | None = None, tenant: str = "", material: str = "") -> dict:
+                 approach_: dict | None = None, tenant: str = "", material: str = "", angle: str = "",
+                 notes: str = "") -> dict:
     from .recreate import kb_ban
     voice = kit_.get("voice") or {}
     never = list(voice.get("never_say") or []) + list((kb_ban(kit_.get("tenant", "")) or [])[:30])
@@ -299,7 +300,9 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
                             ensure_ascii=False, indent=1)[:4000],
         "approach": ("\nTHE APPROACH the owner likes — its concept and argument, not its layout or facts:\n"
                      + json.dumps(approach_, ensure_ascii=False)[:2000] + "\n") if approach_ else "",
-        "questions": ("\nQUESTIONS PEOPLE SEARCH, to answer:\n" + "\n".join(f"- {q}" for q in (questions or [])[:8]) + "\n") if questions else "",
+        "questions": (("\nQUESTIONS PEOPLE SEARCH, to answer:\n" + "\n".join(f"- {q}" for q in (questions or [])[:8]) + "\n") if questions else "")
+        + (f"\nTHE ANGLE this piece takes — the way in, chosen on the plan: {angle}\n" if angle else "")
+        + (f"\nWHAT THE OWNER ASKED FOR — these outrank the angle and the brief:\n{notes[:1500]}\n" if notes else ""),
         "length": brief_.get("length_words") or 1400}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=8000)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
@@ -389,6 +392,7 @@ a card), alt text that says what is in it, width set:
 THE PRODUCTS — name · price · url, the only links allowed besides the collection pages:
 %(products)s
 collection pages you may link: %(collections)s
+%(internal)s
 
 THE STANDARD — an article written by hand for this brand on another subject. Copy its CRAFT (a
 direct answer first, a table that is really a table, real prices, a decision by the reader's
@@ -457,8 +461,8 @@ def _parse_article(text: str) -> tuple[str, str, str]:
 
 
 def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str, *, tenant: str = "",
-            products: list | None = None, collections: list | None = None, html: str = "", findings=(),
-            png: bytes = b"") -> dict:
+            products: list | None = None, collections: list | None = None, links: list | None = None,
+            html: str = "", findings=(), png: bytes = b"") -> dict:
     """`{ok, title, meta, html, why, edited}` — the article written whole, or
     edited to findings while LOOKING at its own render."""
     from .recreate import kb_ban
@@ -498,6 +502,9 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
             "body_face": (theme.get("font") or {}).get("body") or "(the theme's)", "accent": (theme.get("colors") or {}).get("accent") or "(the theme's)",
             "rules_brand": rules_brand, "pictures": "\n".join(pics) or "(none on file)", "products": "\n".join(prods) or "(none named)",
             "collections": ", ".join(collections or []) or "(none)", "exemplar": exemplar()[:12000],
+            "internal": ("THE BRAND'S OWN ARTICLES you may link, once each, where it genuinely helps "
+                         "(anchor · url):\n" + "\n".join(f"- {L.get('anchor', '')} · {L.get('url', '')}" for L in (links or [])[:6]))
+                        if links else "",
             "length": brief_.get("length_words") or 1400}
     asked = seen_blocks + [{"type": "text", "text": prompt}] if seen_blocks else prompt
     reply = _ask("email_compose", asked, tenant=tenant, max_tokens=16000)
@@ -523,7 +530,8 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
 # ---------------------------------------------------------------------------
 
 def check(html: str, title: str, meta: str, keyword: str, pattern_: dict, kit_: dict, *,
-          products: list | None = None, collections: list | None = None, links: bool = False) -> list[dict]:
+          products: list | None = None, collections: list | None = None, internal: list | None = None,
+          links: bool = False) -> list[dict]:
     """`{code, severity, where, what}` — each an invariant, never a taste."""
     from . import keywords as _kw
     out: list[dict] = []
@@ -560,7 +568,9 @@ def check(html: str, title: str, meta: str, keyword: str, pattern_: dict, kit_: 
             continue
         if stem(src) not in allowed_pics and not any(a.startswith(stem(src).rsplit(".", 1)[0]) for a in allowed_pics):
             add("picture", "blocks", src[:90], "not one of the brand's own pictures on file")
-    ok_links = {str(p.get("url") or "").split("?")[0].rstrip("/") for p in (products or [])} | {c.split("?")[0].rstrip("/") for c in (collections or [])}
+    ok_links = ({str(p.get("url") or "").split("?")[0].rstrip("/") for p in (products or [])}
+                | {c.split("?")[0].rstrip("/") for c in (collections or [])}
+                | {str(L.get("url") or "").split("?")[0].rstrip("/") for L in (internal or [])})
     for href in re.findall(r'href="([^"]+)"', html, re.I):
         h = href.split("?")[0].rstrip("/")
         if href.startswith("#"):
@@ -739,7 +749,8 @@ def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword
 
 def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "", questions: list | None = None,
         rival_urls: list | None = None, approach_url: str = "", products: list | None = None,
-        collections: list | None = None, progress=None) -> dict:
+        collections: list | None = None, links: list | None = None, angle: str = "",
+        angle_brief: str = "", notes: str = "", progress=None) -> dict:
     """Brief → story → write → check → shoot → judge → edit, best kept.
     Returns everything the card and the runner need; stores nothing but the
     pattern (a Phase 3 seam wires this into `blog_article` and the ledger)."""
@@ -767,17 +778,31 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
         app_ = got_a.get("approach") if got_a.get("ok") else None
         story.append(("Read the approach: " + str((app_ or {}).get("concept") or "")[:120]) if app_ else "The approach could not be read: " + str(got_a.get("why")))
     say("deciding the story")
-    got_s = decide_story(brief_, kit_, keyword, entity_key=entity_key, questions=questions, approach_=app_, tenant=tenant)
+    got_s = decide_story(brief_, kit_, keyword, entity_key=entity_key, questions=questions, approach_=app_,
+                         angle=(f"{angle} — {angle_brief}" if angle_brief else angle), notes=notes,
+                         tenant=tenant, material=material_)
     calls += got_s.get("calls", 0)
     if not got_s.get("ok"):
         return {"ok": False, "status": FAILED, "note": " ".join(story) + " " + str(got_s.get("why")), "rounds": [], "brief": brief_}
     story_ = got_s["story"]
     story.append(f"The story: {str(story_.get('hook') or '')[:100]} — {len(story_.get('beats') or [])} beats"
                  + ("; turned: " + "; ".join(map(str, story_["turned"]))[:200] if story_.get("turned") else "") + ".")
+    words = set(re.findall(r"[a-z]{4,}", keyword.lower()))
+    ents = kit_.get("entities") or []
     if not products:
-        products = [{"name": e.get("name"), "price": e.get("price", ""), "url": e.get("url")} for e in (kit_.get("entities") or [])
-                    if e.get("url") and (not entity_key or e.get("key") == entity_key or any(
-                        w in (e.get("name") or "").lower() for w in re.findall(r"[a-z]{4,}", keyword.lower())))][:12]
+        products = [{"name": e.get("name"), "price": e.get("price", ""), "url": e.get("url")} for e in ents
+                    if e.get("url") and str(e.get("type") or "") != "collection"
+                    and (not entity_key or e.get("key") == entity_key
+                         or any(w in (e.get("name") or "").lower() for w in words))][:12]
+    # THE BRAND'S OWN COLLECTION PAGES are links an article may carry — the
+    # closing CTA goes to one. Without them the maker wrote a collection URL
+    # from the store's shape and the link check blocked it (2026-09-22).
+    coll = list(collections or [])
+    coll += [e["url"] for e in ents
+             if e.get("url") and (str(e.get("type") or "") == "collection" or "/collections/" in str(e.get("url")))
+             and e["url"] not in coll
+             and (not words or any(w in ((e.get("name") or "") + " " + e["url"]).lower() for w in words))]
+    collections = coll[:6]
     kit_["_length"] = brief_.get("length_words") or 1400
     rival_png = b""
     if reads:
@@ -790,13 +815,14 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
         say(f"round {n}: " + ("writing the article" if n == 0 else "editing to the findings"))
         kit_["_title"], kit_["_meta"] = title, meta
         made = compose(kit_, pat, brief_, story_, keyword, tenant=tenant, products=products, collections=collections,
-                       html=html, findings=findings_prev, png=prev_png)
+                       links=links, html=html, findings=findings_prev, png=prev_png)
         calls += 1
         if not made.get("ok"):
             story.append(f"Round {n}: {made.get('why')}.")
             break
         html, title, meta = made["html"], made["title"], made["meta"]
-        checks = check(html, title, meta, keyword, pat, kit_, products=products, collections=collections, links=True)
+        checks = check(html, title, meta, keyword, pat, kit_, products=products, collections=collections,
+                       internal=links, links=True)
         told = truth(_Walk_words(html), material_, tenant=tenant)
         calls += told.get("calls", 0)
         checks += told["findings"]

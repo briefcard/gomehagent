@@ -42,6 +42,8 @@ os.environ["SEO_SITES_JSON"] = (
     '{"baci": {"key": "baci", "domain": "bacimilanousa.com",'
     ' "platform": "shopify", "creds_key": "baci"}}')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the suite's stand-in article maker
+from _article_stub import install as _install_articles  # noqa: E402
 
 from app import (approvals, db, kb, seo_tools, shopify_seo, skill,  # noqa: E402
                  skill_pack, systems, tenants)
@@ -81,6 +83,7 @@ def _seo(tenant="baci"):
 
 
 def main() -> int:
+    _install_articles()   # the maker is model calls; this suite has none
     db.init_db()
     tenants.seed()
     kb.add_claim("baci", "Baci jugs are dishwasher safe.", "lab report", [])
