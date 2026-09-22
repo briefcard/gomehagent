@@ -34,7 +34,7 @@ os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ.pop("SHOTS_WS", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import articles as ar, brand_theme, db, kb, llm, pictures as pics, shots, tenants, web  # noqa: E402
+from app import admin_ui, articles as ar, brand_theme, db, kb, llm, pictures as pics, shots, tenants, web  # noqa: E402
 
 CDN = "https://cdn.shopify.com/s/files/1/0002/"
 _fail: list[str] = []
@@ -376,6 +376,44 @@ def main() -> int:
                                                         "drop": "Put the table above the definitions."}, follow_redirects=False)
     ck("and can be withdrawn from the same door",
        r.status_code == 303 and not any("Put the table above" in n["said"] for n in ex.notes("baci", ex.ARTICLE)))
+
+    print("— 10. the cards —")
+    ex.remember("baci", ex.ARTICLE, "Never open with a definition — answer the question.")
+    card = admin_ui._article_made_card("s3cret", "baci", types.SimpleNamespace(
+        meta={"article": {"status": ar.PUBLISHABLE, "words": 1800, "rounds": 2, "best": 1, "would_publish": True,
+                          "one_pattern": True, "hook": "Which table is it for?", "beat": "a real price",
+                          "pattern": "answer, takeaways…", "pattern_default": True,
+                          "rivals": ["https://rival.test/a"], "turned": ["no prices in the material"],
+                          "blocking": []}}, format="cms_article", tenant="baci"), "o9")
+    ck("the article's page says how it was made: the judge, the rivals, the turn, what it was written against",
+       "the judge would publish it" in card and "rival.test/a" in card and "no prices in the material" in card
+       and "1800 words" in card and "round 2 of 2 kept" in card)
+    ck("…whether it would go live unattended, and why", "it would go LIVE" in card and "would publish" in card)
+    ck("…and the one box where what you say becomes the standard",
+       'action="/admin/creative_note"' in card and "every article for this brand will hear it" in card
+       and "Never open with a definition" in card and "forget this" in card)
+    blocked = admin_ui._article_made_card("s3cret", "baci", types.SimpleNamespace(
+        meta={"article": {"status": ar.NOT_PUBLISHABLE, "words": 900, "rounds": 3, "best": 0, "would_publish": False,
+                          "one_pattern": False, "hook": "", "blocking": [{"where": "the table", "what": "no rows", "do": "add them"}]}},
+        format="cms_article", tenant="baci"), "o9")
+    ck("a blocked one says so, names the finding and its edit, and says it would land as a draft",
+       "the judge would not publish it" in blocked and "no rows" in blocked and "add them" in blocked
+       and "it would land as a draft" in blocked and "not in the brand" in blocked)
+    lay = admin_ui._article_layout_card("s3cret", "baci")
+    ck("the Brand tab shows the standing layout, where it came from, and the standard it is written against",
+       "Article layout" in lay and "takeaways" in lay and 'action="/admin/article_layout"' in lay
+       and ("the default" in lay or "read from" in lay or "filed by" in lay)
+       and ("approved " in lay or "Nothing approved yet" in lay), lay[:160])
+    answers["email_brief"] = {"name": "guide", "blocks": [{"name": "answer", "what": "the answer", "required": True},
+                                                           {"name": "steps", "what": "numbered steps", "required": True}],
+                              "devices": ["a numbered list"], "voice_of_layout": "tight"}
+    r = c.post("/admin/article_layout?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "https://rival.test/a"}, follow_redirects=False)
+    ck("pasting an article's address reads its layout once and files it for the brand",
+       r.status_code == 303 and "tab=brand" in r.headers.get("location", "")
+       and not ar.pattern("baci").get("default") and ar.pattern("baci")["source_url"] == "https://rival.test/a")
+    r = c.post("/admin/article_layout?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "not a url"}, follow_redirects=False)
+    ck("a bad address is refused with a sentence", r.status_code == 303 and "err=" in r.headers.get("location", ""))
+    ar.file_pattern("baci", ar.PATTERN_DEFAULT)
 
     print()
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))

@@ -1175,6 +1175,34 @@ async def email_recreate(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
 
+@app.post("/admin/article_layout")
+async def article_layout(request: Request, key: str = Depends(admin_key)):
+    """READ AN ARTICLE'S LAYOUT ONCE, AND KEEP IT — the brand's standing
+    pattern (INITIATIVE-blog-quality §0a). Its words and its subject are
+    never read; only the blocks it is built from."""
+    from urllib.parse import quote
+    from fastapi.responses import RedirectResponse
+    from . import articles
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    url = str(form.get("url", "")).strip()
+    if not (tenant and url.startswith("http")):
+        arg = ("err", "a brand and an article's address are needed")
+    else:
+        got = articles.read_pattern(url, tenant=tenant)
+        if not got.get("ok"):
+            arg = ("err", f"that layout could not be read — {got.get('why')}")
+        else:
+            why = articles.file_pattern(tenant, got["pattern"], source_url=url)
+            arg = ("err", why) if why else ("ok", f"every article for this brand is laid out like that now — {got['pattern'].get('name', '')}")
+    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&{arg[0]}={quote(arg[1])}"
+    if form.get("key"):
+        back += f"&key={quote(str(form.get('key')))}"
+    return RedirectResponse(back, 303)
+
+
 @app.post("/admin/creative_note")
 async def creative_note(request: Request, key: str = Depends(admin_key)):
     """WHAT THE OWNER SAYS IS REMEMBERED — one door for both kinds (Phase 4

@@ -14,7 +14,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ## Coverage
 
-- HTTP routes: **243** (243 reached)
+- HTTP routes: **244** (244 reached)
 - Approval kinds: **14** (11 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
@@ -232,7 +232,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `approvals.py`
 
 - **`apply_decision`**(ap_id, decision) → `str`  ·  from `test_blog_destination.py`, `test_campaign_variety.py`, `test_draft_sync.py`, `test_every_system_draws.py`, `test_gbp_listing.py`, `test_gbp_post.py`, `test_learning.py`, `test_rehearse.py`, `test_reports_skill.py`, `test_systems.py`, `web.py`
-- **`article_may_go_live`**(output_id) → `tuple[bool, str]`  ·  from `test_the_model_writes_the_article.py`
+- **`article_may_go_live`**(output_id, record?) → `tuple[bool, str]`  ·  from `admin_ui.py`, `test_the_model_writes_the_article.py`
 - **`attach_esp_push`**(run_id, push) → `int`  ·  from `skill_pack.py`
 - **`attach_gbp_post`**(run_id, post) → `int`  ·  from `skill_pack.py`
 - **`attach_send`**(run_id, send) → `int`  ·  from `skill_pack.py`
@@ -270,12 +270,12 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`compose`**(kit_, pattern_, brief_, story_, keyword, tenant?, products?, collections?, links?, html?, findings?, png?) → `dict`  ·  from `skill_pack.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`decide_story`**(brief_, kit_, keyword, entity_key?, questions?, approach_?, tenant?, material?, angle?, notes?) → `dict`  ·  from `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`exemplar`**() → `str`  ·  **from nothing**
-- **`file_pattern`**(tenant, pattern_, source_url?, by?) → `str`  ·  from `approvals.py`, `test_the_model_writes_the_article.py`
+- **`file_pattern`**(tenant, pattern_, source_url?, by?) → `str`  ·  from `approvals.py`, `test_the_model_writes_the_article.py`, `web.py`
 - **`judge`**(ours_png, rival_png, story_, brief_, keyword, tenant?, material?, notes?) → `dict`  ·  from `test_the_model_writes_the_article.py`
 - **`numbers_not_in`**(text, material) → `list[str]`  ·  from `test_the_model_writes_the_article.py`
 - **`page`**(html, title, kit_) → `str`  ·  from `article_once.py`
-- **`pattern`**(tenant) → `dict`  ·  from `approvals.py`, `test_the_model_writes_the_article.py`
-- **`read_pattern`**(url, tenant?) → `dict`  ·  from `test_the_model_writes_the_article.py`
+- **`pattern`**(tenant) → `dict`  ·  from `admin_ui.py`, `approvals.py`, `test_the_model_writes_the_article.py`
+- **`read_pattern`**(url, tenant?) → `dict`  ·  from `test_the_model_writes_the_article.py`, `web.py`
 - **`rivals`**(tenant, keyword, urls?) → `list[dict]`  ·  from `test_the_model_writes_the_article.py`
 - **`run`**(tenant, keyword, role?, entity_key?, questions?, rival_urls?, approach_url?, products?, collections?, links?, angle?, angle_brief?, notes?, progress?) → `dict`  ·  from `article_once.py`, `command_agent.py`, `sabotage.py`, `seed_demo.py`, `skill.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_board.py`, `test_ad_panel.py`, `test_approval_gate.py`, `test_article_repair.py`, `test_article_review.py`, `test_audience_entities.py`, `test_auto_ships.py`, `test_blog_skill.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_catalog_vocabulary.py`, `test_coherence.py`, `test_entity_scope.py`, `test_every_system_draws.py`, `test_funnel.py`, `test_gbp_listing.py`, `test_gbp_post.py`, `test_offers.py`, `test_plans.py`, `test_refresh_lands.py`, `test_refresh_lane.py`, `test_register.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_reorder_skill.py`, `test_replies.py`, `test_reports_skill.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_the_ad_is_about_the_thing_you_chose.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `test_the_page_says_what_it_answers.py`, `test_workroom_email.py`, `web.py`, `worker.py`
 - **`shoot`**(html, title, kit_) → `dict`  ·  from `recreate.py`
@@ -670,13 +670,13 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `exemplars.py`
 
-- **`approved`**(tenant, kind) → `dict`  ·  **from nothing**
+- **`approved`**(tenant, kind) → `dict`  ·  from `admin_ui.py`
 - **`file_approved`**(tenant, kind, html?, title?, output_id?, why?) → `str`  ·  from `approvals.py`, `skill_pack.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`forget`**(tenant, kind, said) → `str`  ·  from `command_agent.py`, `credentials.py`, `kb.py`, `seo_tools.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `web.py`
 - **`notes`**(tenant, kind, limit?) → `list[dict]`  ·  from `admin_ui.py`, `articles.py`, `learning.py`, `recreate.py`, `test_learning.py`, `test_systems.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`notes_text`**(tenant, kind) → `str`  ·  from `articles.py`, `recreate.py`, `test_the_model_writes_the_article.py`
 - **`remember`**(tenant, kind, said, output_id?, by?) → `str`  ·  from `command_agent.py`, `ops_jobs.py`, `seo_tools.py`, `test_allclear.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `web.py`
-- **`standard`**(tenant, kind, fallback?) → `tuple[str, str]`  ·  from `articles.py`, `recreate.py`, `test_the_model_writes_the_article.py`
+- **`standard`**(tenant, kind, fallback?) → `tuple[str, str]`  ·  from `admin_ui.py`, `articles.py`, `recreate.py`, `test_the_model_writes_the_article.py`
 
 ### `extract.py`
 
@@ -1753,6 +1753,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`archive_fetch`**(key?, tenant?, limit?) → `dict`  ·  route `GET /admin/archive_fetch`  ·  **from nothing**
 - **`archive_index`**(key?, tenant?, kind?, limit?) → `dict`  ·  route `GET /admin/archive_index`  ·  **from nothing**
 - **`archive_search`**(request, auth?, tenant?, q?, limit?) → `dict`  ·  route `GET /archive_search`  ·  **from nothing**
+- **`article_layout`**(request, key?) → `—`  ·  route `POST /admin/article_layout`  ·  **from nothing**
 - **`article_picture`**(request, key?) → `error`  ·  route `POST /admin/article_picture`  ·  **from nothing**
 - **`ask`**(key?, q?, role?, thread?) → `str`  ·  route `GET /admin/ask`  ·  from `brief.py`, `channel.py`, `creative.py`, `learning.py`, `ops_jobs.py`, `pictures.py`, `recreate.py`, `skill_pack.py`, `skills.py`, `test_llm.py`, `triage.py`, `voice_learn.py`
 - **`asset_add`**(request, key?) → `—`  ·  route `POST /admin/asset_add`  ·  **from nothing**

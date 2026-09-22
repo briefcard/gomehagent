@@ -4656,6 +4656,7 @@ and hand-set fields survive future re-derives.</p>
   </div>
   {_pictures_card(key, tenant)}
   {_board_card(key, tenant)}
+  {_article_layout_card(key, tenant)}
   {sources_card}
   {_image_model_card(key, tenant)}
   {_blog_destination_card(key, tenant, pick)}
@@ -6923,6 +6924,50 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
 <div class="card"><div class="head"><h2>Designs — the references, recreated for {_esc(tenant)}</h2>
   <span class="mut">shared across every account — a design, never a client's words or pictures</span></div>
   {body}
+</div>"""
+
+
+def _article_layout_card(key: str, tenant: str) -> str:
+    """ARTICLE LAYOUT — the brand's standing pattern, where it came from, the
+    last article they approved, and what they have said about their articles
+    (INITIATIVE-blog-quality §0a). A blog is a series: its layout is the
+    brand's and stays put while the content changes, so it lives here rather
+    than being decided per piece."""
+    from . import articles as _ar, exemplars as _ex
+    if not tenant:
+        return ""
+    pat = _ar.pattern(tenant)
+    blocks = "".join(f'<li><b>{_esc(str(b.get("name") or ""))}</b>'
+                     + ('<span class="chip nb">required</span>' if b.get("required") else "")
+                     + f' — {_esc(str(b.get("what") or ""))}</li>' for b in (pat.get("blocks") or [])[:12])
+    src = str(pat.get("source_url") or "")
+    std = _ex.approved(tenant, _ex.ARTICLE)
+    notes = _ex.notes(tenant, _ex.ARTICLE)
+    note_rows = "".join(f'<li>{_esc(str(n.get("said") or ""))}</li>' for n in notes)
+    where = ("the default, from the article written by hand — the first article you approve files this brand's own"
+             if pat.get("default") else
+             (f'read from <a href="{_esc(src)}" target="_blank" rel="noopener">{_esc(src[:70])}</a>' if src
+              else f'filed by {_esc(str(pat.get("filed_by") or "an approval"))}'))
+    return f"""
+<div class="card"><div class="head"><h2>Article layout — how every blog of theirs is built</h2></div>
+  <p class="mut">One layout, kept across articles; the SEO brief and the story change per
+  piece. This is {where}.</p>
+  <p><b>{_esc(str(pat.get("name") or ""))}</b></p>
+  <ul class="mut">{blocks}</ul>
+  {f'<p class="mut">Layout voice: {_esc(str(pat.get("voice_of_layout")))}</p>' if pat.get("voice_of_layout") else ""}
+  <form class="row" method="post" action="/admin/article_layout">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input name="url" placeholder="Paste an article whose LAYOUT you like — read once, never its words"
+           style="flex:1;min-width:300px">
+    <button type="submit">Use this layout</button>
+  </form>
+  <p class="mut">{"The standard their next article is written against: <b>"
+                 + _esc(str(std.get("title") or "the last one you approved")) + "</b>, approved "
+                 + _esc(str(std.get("at") or "")[:10]) + "."
+                 if std.get("html") else
+                 "Nothing approved yet, so their next article is written against the hand-made standard."}</p>
+  {f'<p class="mut">What you have said about their articles:</p><ul class="mut">{note_rows}</ul>' if note_rows else ""}
 </div>"""
 
 
@@ -13819,6 +13864,74 @@ def _decide_form(key: str, tenant: str, ap_id: str, output_id: str,
     </form>"""
 
 
+def _article_made_card(key: str, tenant: str, art, output_id: str) -> str:
+    """HOW THIS ARTICLE WAS MADE, on the page where it is decided: what
+    ranks and how ours beats it, the story it tells, what the judge said,
+    whether it may go live unattended — and the one box where the owner's
+    words become the standard for every article after it
+    (INITIATIVE-blog-quality Phase 5)."""
+    from . import approvals, articles as _ar, exemplars as _ex
+    meta = dict(getattr(art, "meta", None) or {})
+    a = meta.get("article") or {}
+    if not a:
+        return ""
+    live_ok, live_why = approvals.article_may_go_live(output_id, a)
+    chips = [f'<span class="chip nb">{_esc(str(a.get("status") or ""))}</span>',
+             f'<span class="chip nb">{_esc(str(a.get("words") or "?"))} words</span>',
+             f'<span class="chip nb">round {_esc(str((a.get("best") or 0) + 1))} of {_esc(str(a.get("rounds") or 1))} kept</span>']
+    if a.get("would_publish") is True:
+        chips.append('<span class="chip on">the judge would publish it</span>')
+    elif a.get("would_publish") is False:
+        chips.append('<span class="chip off">the judge would not publish it</span>')
+    else:
+        chips.append('<span class="chip nb">not judged</span>')
+    if a.get("one_pattern") is False:
+        chips.append('<span class="chip off">not in the brand\'s layout</span>')
+    rivals = "".join(f'<li><a href="{_esc(u)}" target="_blank" rel="noopener">{_esc(u[:90])}</a></li>'
+                     for u in (a.get("rivals") or [])[:4])
+    blocking = "".join(f'<li><b>{_esc(str(f.get("where") or ""))}</b> — {_esc(str(f.get("what") or ""))}'
+                       + (f' <span class="mut">→ {_esc(str(f.get("do")))}</span>' if f.get("do") else "")
+                       + "</li>" for f in (a.get("blocking") or [])[:8])
+    turned = "".join(f"<li>{_esc(str(t)[:300])}</li>" for t in (a.get("turned") or [])[:4])
+    notes = _ex.notes(tenant, _ex.ARTICLE)
+    note_rows = "".join(
+        f'<li>{_esc(str(n.get("said") or ""))} '
+        f'<form method="post" action="/admin/creative_note" style="display:inline">'
+        f'<input type="hidden" name="key" value="{_esc(key)}">'
+        f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+        f'<input type="hidden" name="kind" value="article">'
+        f'<input type="hidden" name="back" value="/admin/work/{_esc(output_id)}">'
+        f'<input type="hidden" name="drop" value="{_esc(str(n.get("said") or ""))}">'
+        f'<button class="sec" type="submit">forget this</button></form></li>' for n in notes)
+    std_html, std_is = _ex.standard(tenant, _ex.ARTICLE, fallback="x")
+    return f"""
+<div class="card">
+  <h3>How this article was made</h3>
+  <div class="row">{"".join(chips)}</div>
+  <p class="mut">Laid out in {_esc(str(a.get("pattern") or "the default"))}
+  {"(the default — approving this article makes it this brand&rsquo;s)" if a.get("pattern_default") else ""}
+  · written against {_esc(std_is)}.</p>
+  <p><b>The hook:</b> {_esc(str(a.get("hook") or "—"))}<br>
+  <b>How ours wins:</b> {_esc(str(a.get("beat") or "—"))}</p>
+  {f'<p><b>What ranks for this search:</b></p><ul class="mut">{rivals}</ul>' if rivals else
+   '<p class="mut">No rival page was on file for this keyword, so it was written without one.</p>'}
+  {f'<p><b>What the maker turned, and why:</b></p><ul class="mut">{turned}</ul>' if turned else ""}
+  {f'<p><b>Open findings — it is not publishable as it stands:</b></p><ul>{blocking}</ul>' if blocking else ""}
+  <p class="{"ok" if live_ok else "mut"}">Unattended: {"it would go LIVE" if live_ok else "it would land as a draft"} — {_esc(live_why)}</p>
+  <form method="post" action="/admin/creative_note" class="row" style="margin-top:10px">
+    <input type="hidden" name="key" value="{_esc(key)}">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="kind" value="article">
+    <input type="hidden" name="output_id" value="{_esc(output_id)}">
+    <input type="hidden" name="back" value="/admin/work/{_esc(output_id)}">
+    <input name="said" placeholder="Say what you want different — every article for this brand will hear it"
+           style="flex:1;min-width:280px">
+    <button type="submit">Remember this</button>
+  </form>
+  {f'<p class="mut">You have said:</p><ul class="mut">{note_rows}</ul>' if note_rows else ""}
+</div>"""
+
+
 def render_workroom(key: str, output_id: str, art, kw, ap,
                     ok: str = "", err: str = "") -> str:
     """One artifact's home: preview, edit, feedback, history — the work loop.
@@ -14566,7 +14679,9 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
         # renders the REAL HTML now, so it is the preview, and a second copy
         # of the same words is just a second copy.
         preview_card = (_gbp_post_card(key, tenant, art, out, run, ap)
-                        if (art.format or "") == "gbp_post" else "")
+                        if (art.format or "") == "gbp_post" else
+                        _article_made_card(key, tenant, art, output_id)
+                        if (art.format or "") == "cms_article" else "")
         edit_card = f"""
 <div class="card">
   <h3>Edit</h3>

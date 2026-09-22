@@ -744,14 +744,14 @@ def _article_of(output_id: str) -> dict:
     return got if isinstance(got, dict) else {}
 
 
-def article_may_go_live(output_id: str) -> tuple[bool, str]:
+def article_may_go_live(output_id: str, record: dict | None = None) -> tuple[bool, str]:
     """May this article be created LIVE rather than as a draft?
     (INITIATIVE-blog-quality §5.) Only when the maker finished with nothing
     blocking, the JUDGE looked and would publish, and it is laid out in the
     brand's pattern. Anything less lands as a Shopify draft with the approval
     pending, as every article did before. An article written before the maker
     existed has no record and stays a draft."""
-    a = _article_of(output_id)
+    a = record if isinstance(record, dict) and record else _article_of(output_id)
     if not a:
         return False, "no article record — it was written before the maker, so it lands as a draft"
     if a.get("status") != "publishable":

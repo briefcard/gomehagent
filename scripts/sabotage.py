@@ -38,6 +38,14 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'the_article_card_hides_the_judgement',
+        "file": 'app/admin_ui.py',
+        "find": '    live_ok, live_why = approvals.article_may_go_live(output_id, a)\n',
+        "replace": '    live_ok, live_why = True, "fine"  # SABOTAGE\n',
+        "suites": ['test_the_model_writes_the_article.py'],
+        "why": "the page where an article is approved says it would go live when it would not — the owner decides on a false reading of the one condition",
+    },
+    {
         "name": 'the_owners_notes_never_reach_the_maker',
         "file": 'app/articles.py',
         "find": '    kit_["_notes"] = _ex.notes_text(tenant, _ex.ARTICLE)\n',
