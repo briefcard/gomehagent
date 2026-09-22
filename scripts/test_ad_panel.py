@@ -86,8 +86,14 @@ class FakeDraft:
         # blocked and redrafted once, which doubled the calls and made the
         # brief assertion read as a failure when nothing about the panel had
         # changed.
+        # …AND IT NAMES THE PRODUCT, for the same reason: an ad committed to
+        # one and naming it nowhere is blocked by `coherence:subject_absent`
+        # since 2026-09-22, which would make the panel's own assertions read
+        # as failures when nothing about the panel had changed.
+        sub = str(((bundle.get("entities") or [{}])[0]).get("name") or "")
         return (f"HEADLINE: Which host are you\nLEVERS: dream_outcome, effort\n---\n"
-                f"Ad line {self.n}: {str(claim.get('claim') or '')[:40]}\n\n"
+                f"Ad line {self.n}: the {sub} — "
+                f"{str(claim.get('claim') or '')[:40]}\n\n"
                 f"Tap to shop it.", "")
 
 
@@ -241,9 +247,9 @@ def main() -> int:
             rules = str((bundle.get("rules") or {}).get("block") or "")
             if "DID NOT FOLLOW THE BRIEF" in rules:
                 redrafts.append(rules)
-                return ("HEADLINE: The bowl that survived\nLEVERS: effort, dream_outcome\n---\n"
+                return ("HEADLINE: The Aqua Plate that survived\nLEVERS: effort, dream_outcome\n---\n"
                         "FIXED DRAFT: no quiz, leads with effort.\n\nTap to shop.", "")
-            return ("HEADLINE: Which host are you\nLEVERS: effort, dream_outcome\n---\n"
+            return ("HEADLINE: Which Aqua Plate host are you\nLEVERS: effort, dream_outcome\n---\n"
                     "IGNORED THE BRIEF: which one are you?\n\nTap to shop.", "")
 
     def _check(bundle, drafts):
@@ -303,8 +309,9 @@ def main() -> int:
                 # Obeys the brief, and opens on an adjective with no ask:
                 # `hook_is_vague` plus `no_call_to_action`.
                 return ("HEADLINE: Elegant\nLEVERS: effort, dream_outcome\n---\n"
-                        "Elegant acrylic that follows the brief exactly.", "")
-            return ("HEADLINE: The bowl that survived\nLEVERS: effort, dream_outcome\n---\n"
+                        "Elegant Aqua Plate acrylic that follows the brief "
+                        "exactly.", "")
+            return ("HEADLINE: The Aqua Plate that survived\nLEVERS: effort, dream_outcome\n---\n"
                     "A first draft that reads fine.\n\nTap to shop.", "")
 
     skill_pack.draft_ad = _WorseDrafter()

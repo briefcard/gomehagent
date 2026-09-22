@@ -71,9 +71,10 @@ KINDS = {
 #: profile wearing a product email's clothes.
 BACKGROUND_BUDGET = 1
 
-#: Below this many words, `subject_absent` advises rather than blocks — a stem
-#: match over a label needs enough text to be trustworthy.
-SUBJECT_MATCH_MIN_WORDS = 40
+#: `subject_absent` used to advise rather than block below 40 words, on the
+#: reasoning that a stem match needs a lot of text to be trustworthy. That was
+#: right about reliability and wrong about where it comes from — see
+#: `_lost_subject`, which is what replaced the threshold.
 
 _STOP = {
     "the", "and", "for", "with", "from", "this", "that", "they", "their",
@@ -226,6 +227,19 @@ def _count(text: str, phrase: str) -> int:
                           text, flags=re.IGNORECASE))
 
 
+def _label_tokens(label: str) -> list[str]:
+    """The words of a name worth looking for — long enough, and not furniture.
+
+    Separated from `_mentions` because the two questions are different and the
+    answers must not be confused: "is it here" and "was there anything to look
+    for". A label whose every word is a stop word gives the first question no
+    honest answer, and `_lost_subject` needs to know that rather than be told
+    the subject is present.
+    """
+    return [w for w in re.findall(r"[A-Za-z]{4,}", str(label or ""))
+            if w.lower() not in _STOP]
+
+
 def _mentions(text: str, label: str) -> bool:
     """Is this label spoken about anywhere in the text?
 
@@ -237,8 +251,7 @@ def _mentions(text: str, label: str) -> bool:
     the plan and the page; the precise checks — the picture, the cards, the
     proof — are the ones that carry the weight, and they match on keys.
     """
-    toks = [w for w in re.findall(r"[A-Za-z]{4,}", str(label or ""))
-            if w.lower() not in _STOP]
+    toks = _label_tokens(label)
     if not toks:
         return True                     # nothing to look for is not an absence
     for t in toks:
@@ -247,6 +260,37 @@ def _mentions(text: str, label: str) -> bool:
                      flags=re.IGNORECASE):
             return True
     return False
+
+
+def _lost_subject(text: str, label: str, items: list | None = None) -> bool:
+    """We looked for the subject everywhere the reader sees, and it is not here.
+
+    THIS IS WHAT MAKES A MISS EVIDENCE, and it replaced a length threshold.
+    Severity used to follow the COPY's length — below forty words the finding
+    advised instead of blocking — because a stem match over a label was held to
+    need a lot of text to be trustworthy. But length is not what makes a miss
+    trustworthy. Two things are:
+
+    1. **Having looked everywhere the subject could be named.** An ad names its
+       product in the HEADLINE far more often than in the body, and the caller
+       passes the headline as `prominent`, so the search reads both. A featured
+       item's own name counts too — copy that says "the Portofino set" has
+       named its subject even when the catalogue row is called "18 Piece Set
+       Portofino Melamine". `prominent_off_subject` has always read it that
+       way; the subject check now agrees with it.
+    2. **Having had something distinctive to look for.** A label whose every
+       word is furniture gives nothing to find, so its absence means nothing —
+       and this returns False rather than a weak finding, because "we could not
+       look" must never be filed as "it is missing".
+
+    With both, a two-sentence ad can be blocked without destroying one. The old
+    threshold protected exactly the case it should have caught: an ad committed
+    to a product, naming it nowhere, shipped as a nudge (found 2026-09-22).
+    """
+    named = [n for n in [str(label or "")]
+             + [str(i.get("name") or "") for i in (items or [])]
+             if _label_tokens(n)]
+    return bool(named) and not any(_mentions(text, n) for n in named)
 
 
 def review(commitment: dict, artifact: dict, *,
@@ -310,18 +354,15 @@ def review(commitment: dict, artifact: dict, *,
     # subject somewhere between the plan and the page.
     label = str(c.get("label") or "")
     if label and kind in ("entity", "topic"):
-        if not _mentions(whole, label):
-            # SEVERITY FOLLOWS HOW RELIABLE THE MATCH CAN BE. This is a coarse
-            # stem match over the label, and its false-positive rate scales
-            # inversely with length: across an email it is near-certain to find
-            # the subject if the subject is there, but an ad is two sentences
-            # and may name the thing only by what it does. Destroying a short
-            # artifact on a weak signal reproduces the exact failure of
-            # withholding a draft "for its own good" (DEFECTS §2.79), so below
-            # the threshold it advises instead.
-            add("block" if len(_words(whole)) >= SUBJECT_MATCH_MIN_WORDS
-                else "nudge", "subject_absent",
-                f"this was committed to {label!r} and the copy never mentions it",
+        if _lost_subject(whole, label, a.get("items")):
+            # BLOCKS AT ANY LENGTH — see `_lost_subject` for why that is safe
+            # now and was not before. DEFECTS §2.79's rule still holds: a
+            # blocked draft is filed with its reason and shown, never
+            # withheld "for its own good", and on the unattended rung it is
+            # repaired rather than dropped.
+            add("block", "subject_absent",
+                f"this was committed to {label!r} and neither the headline "
+                f"nor the copy ever mentions it",
                 "write about the committed subject, or commit to what was "
                 "actually written")
 

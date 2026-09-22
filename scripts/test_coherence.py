@@ -367,15 +367,43 @@ def ads():
        "proof_off_subject" not in rules(coherence.review(c, inherited)),
        str(sorted(rules(coherence.review(c, inherited)))))
 
-    print("\n— a two-sentence ad is not destroyed by a weak word match —")
+    print("\n— a two-sentence ad that never names its subject is stopped —")
+    # This used to ADVISE below forty words, so an ad committed to a product
+    # and naming it nowhere shipped. Length was the wrong reliability test:
+    # what makes a miss evidence is having looked everywhere the subject could
+    # be named, and having had something distinctive to look for.
     short = coherence.parts(text="It does not shatter. Ever.")
     sev = {f["rule"]: f["severity"] for f in coherence.review(c, short)}
-    ck("a short artifact that never names its subject ADVISES",
-       sev.get("subject_absent") == "nudge", str(sev))
+    ck("a short artifact that never names its subject BLOCKS",
+       sev.get("subject_absent") == "block", str(sev))
     long_miss = coherence.parts(text=("It does not shatter. " * 30))
     sev2 = {f["rule"]: f["severity"] for f in coherence.review(c, long_miss)}
-    ck("…while a long one that never names it BLOCKS",
+    ck("…as a long one always did",
        sev2.get("subject_absent") == "block", str(sev2))
+
+    # AND THE THREE THINGS THAT MAKE BLOCKING SAFE ON TWO SENTENCES.
+    headlined = coherence.parts(text="It does not shatter. Ever.",
+                                prominent="The Aqua pitcher that never drips")
+    ck("…but an ad whose HEADLINE names it is not touched",
+       "subject_absent" not in rules(coherence.review(c, headlined)),
+       str(sorted(rules(coherence.review(c, headlined)))))
+
+    _c_row = coherence.commit("entity", "portofino-18", action="buy it",
+                              label="18 Piece Dinnerware Bundle",
+                              also=["portofino-plate"])
+    by_item = coherence.parts(
+        text="Portofino lands on the table and stays there.",
+        items=[{"key": "portofino-plate", "name": "Portofino dinner plate"}])
+    ck("…nor one that names the FEATURED ITEM rather than the catalogue row",
+       "subject_absent" not in rules(coherence.review(_c_row, by_item)),
+       str(sorted(rules(coherence.review(_c_row, by_item)))))
+
+    _c_dull = coherence.commit("entity", "the-set", label="The Set",
+                               action="buy it")
+    ck("…and a label with nothing distinctive in it says nothing at all — "
+       "'we could not look' is never filed as 'it is missing'",
+       "subject_absent" not in rules(coherence.review(_c_dull, short)),
+       str(sorted(rules(coherence.review(_c_dull, short)))))
 
     print("\n— the live ad skill —")
     _ad = systems.find("baci", "ad_creative") or systems.create("baci", "ad_creative")
@@ -394,6 +422,35 @@ def ads():
        (it.get("commitment") or {}).get("key") == "aqua-pitcher",
        str(it.get("commitment")))
     ck("…and a clean one passes", it.get("ok") is True, str(it.get("failures")))
+
+    print("\n— the ad's HEADLINE is part of the ad —")
+    # Until 2026-09-22 `parts` was given the body alone, so the part of an ad
+    # most likely to name the product reached no check at all. That was
+    # survivable only while `subject_absent` advised on short copy; now that it
+    # blocks, an ad that names its subject in the headline must pass, or the
+    # commonest shape of a real ad is the one this refuses.
+    skill_pack.draft_ad = lambda b, c, a, o: (
+        "HEADLINE: The Aqua pitcher that never drips\n"
+        "---\n"
+        "Pour a full carafe over ice and it lands where you aimed it. "
+        "It pours without dripping.", "")
+    rh = skill.run("ad_copy", "baci", entity_key="aqua-pitcher", variants=1)
+    ih = (rh.get("items") or [{}])[0]
+    ck("an ad that names its subject only in the headline is not refused",
+       ih.get("ok") is True,
+       str([f["rule"] for f in (ih.get("failures") or [])]))
+
+    skill_pack.draft_ad = lambda b, c, a, o: (
+        "HEADLINE: It never drips\n"
+        "---\n"
+        "Pour a full carafe over ice and it lands where you aimed it.", "")
+    rn = skill.run("ad_copy", "baci", entity_key="aqua-pitcher", variants=1)
+    inn = (rn.get("items") or [{}])[0]
+    ck("…while one that names it in neither is BLOCKED, not advised",
+       inn.get("ok") is False
+       and "coherence:subject_absent" in {f["rule"]
+                                          for f in (inn.get("failures") or [])},
+       str([f["rule"] for f in (inn.get("failures") or [])]))
 
     print("\n— an ad that spends its one proof twice —")
     skill_pack.draft_ad = lambda b, c, a, o: (

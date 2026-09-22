@@ -259,8 +259,14 @@ def main() -> int:  # noqa: PLR0915
     okt = brand_theme.approve("baci", {"footer.address": "2875 NE 191st St, Aventura, FL 33180"})
     assert okt.get("ok") and okt["gaps"] == [], okt
     skill_pack.draft_campaign = lambda bundle, seg, goal, craft=None: (
-        {"subject": "Back in stock", "preheader": "the cup returns",
-         "body_html": "<p>Hi {{FIRST_NAME}}, Designed in Milan and used in leading hotels.</p>",
+        # NAMES THE CUP, because an email committed to the Zodiac Cup and
+        # never mentioning it is the owner's own 2026-09-07 complaint —
+        # "designed in Milan with no cup in it" — and `subject_absent` blocks
+        # it at any length since 2026-09-22.
+        {"subject": "The Zodiac Cup is back in stock",
+         "preheader": "the cup returns",
+         "body_html": "<p>Hi {{FIRST_NAME}}, the Zodiac Cup is designed in "
+                      "Milan and used in leading hotels.</p>",
          "claim_ids": [], "cta_label": "Shop", "cta_url": "https://x/s"}, "model", "")
     verdicts[:] = []
     r = skill.run("campaign_email", "baci", segment="reorder_due", entity_key="zodiac-cup",

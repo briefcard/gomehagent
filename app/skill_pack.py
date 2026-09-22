@@ -1795,8 +1795,15 @@ def _run_ad_copy(ctx: Context) -> dict:
             # question worth asking of it.
             positioning=positioning, funnel_stage=stage,
             commitment=_h["commit"],
-            parts=lambda _t, _c=_h["claim"]: coherence.parts(
-                text=_t,
+            # THE HEADLINE IS PART OF THE AD, and until 2026-09-22 it reached
+            # no check at all: `parts` was given the body alone, so an ad
+            # whose headline said "The Aqua pitcher that doesn't drip" and
+            # whose body sold the pour was read as having lost its subject.
+            # It is passed as `prominent` — the same field an email's subject
+            # line uses — which is what makes `subject_absent` safe to block
+            # on two sentences.
+            parts=lambda _t, _c=_h["claim"], _hl=_h["headline"]: coherence.parts(
+                text=_t, prominent=_hl,
                 claims=[{"claim_id": _c.get("claim_id", ""),
                          "text": _c.get("claim", ""),
                          "scope": _c.get("scope", "brand-wide")}]),

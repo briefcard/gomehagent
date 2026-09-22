@@ -1076,6 +1076,26 @@ SABOTAGES = [
                "ad for the pitcher proved by a claim about the platter",
     },
     {
+        "name": "a_short_ad_may_lose_its_subject",
+        "file": "app/coherence.py",
+        "find": '        if _lost_subject(whole, label, a.get("items")):',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_coherence.py"],
+        "why": "an ad committed to a product, naming it in neither the "
+               "headline nor the copy, ships — the two-sentence case the old "
+               "length threshold let through",
+    },
+    {
+        "name": "the_ads_headline_reaches_no_check",
+        "file": "app/skill_pack.py",
+        "find": "                text=_t, prominent=_hl,",
+        "replace": "                text=_t,  # SABOTAGE",
+        "suites": ["test_coherence.py"],
+        "why": "the part of an ad most likely to name the product reaches no "
+               "check, so the ad whose headline says 'The Aqua pitcher that "
+               "never drips' is refused for having lost its subject",
+    },
+    {
         "name": "coherence_gate",
         "file": "app/skill.py",
         "find": "            found = _coherence(text)",

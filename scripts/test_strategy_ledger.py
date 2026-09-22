@@ -108,8 +108,14 @@ def _designed(cited, with_hero=True):
     def _d(bundle, seg, goal, craft=None):
         claims = bundle.get("claims") or []
         cid = claims[0]["claim_id"] if claims else ""
+        # THE COPY NAMES THE PITCHER. A product CARD is not the copy —
+        # `_blocks_text` reads drafted strings and never the catalogue's
+        # names — so an email committed to the pitcher and never writing it
+        # is `coherence:subject_absent`, which blocks at any length since
+        # 2026-09-22 and used to be a nudge on a stub this short.
         blocks = ([{"type": "hero"}] if with_hero else []) + [
-            {"type": "heading", "text": "Back on the shelf", "level": 1},
+            {"type": "heading", "text": "The Aqua pitcher is back on the shelf",
+             "level": 1},
             {"type": "text", "html": "<p>Designed in Milan.</p>"},
             {"type": "products", "keys": ["aqua-pitcher"]},
             {"type": "cta", "label": "Reorder", "url": "https://x/reorder"}]

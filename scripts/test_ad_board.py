@@ -67,7 +67,14 @@ class FakeModel:
     def __call__(self, bundle, claim, angle, objections):
         self.bundles.append(bundle)
         self.n += 1
-        return (f"Ad line {self.n}: {str(claim.get('claim') or '')[:40]}", "")
+        # NAMES THE ADVERTISED PRODUCT, as a real drafter does — the entity
+        # and its own catalogue facts are in the brief it is given. An ad
+        # committed to a product and naming it in neither the headline nor
+        # the copy is blocked by `coherence:subject_absent` at any length
+        # since 2026-09-22; before that it shipped with a nudge.
+        sub = str(((bundle.get("entities") or [{}])[0]).get("name") or "")
+        return (f"Ad line {self.n}: the {sub} — "
+                f"{str(claim.get('claim') or '')[:40]}", "")
 
 
 def contract(row, autonomy):

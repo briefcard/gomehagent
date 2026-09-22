@@ -398,7 +398,12 @@ def main():
        any("not ad copy" in n for n in r["notes"]), str(r["notes"]))
 
     # -- the model path
-    skill_pack.draft_ad = _fake_model("Set a table people photograph.\n\n"
+    # NAMES THE PLATE: an ad committed to one and naming it in neither the
+    # headline nor the copy is blocked by `coherence:subject_absent` at any
+    # length since 2026-09-22 — the owner's own "designed in Milan with no
+    # cup in it" complaint, which used to ship on a nudge.
+    skill_pack.draft_ad = _fake_model("Set a table people photograph with "
+                                      "the Aqua Plate.\n\n"
                                       "Designed in Milan, made to be used.")
     r = skill.run("ad_copy", "baci", audience_key="hosts",
                   entity_key="aqua-plate", variants=2)
@@ -457,8 +462,9 @@ def main():
     def _self_correcting(bundle, claim, angle, objections):
         _tries["n"] += 1
         if "previous attempt was rejected" in str(bundle.get("rules", {})):
-            return "Designed in Milan, made to be used every day.", ""
-        return "Every piece is hand-decorated by our artisans.", ""
+            return ("The Aqua Plate is designed in Milan, made to be used "
+                    "every day."), ""
+        return "Every Aqua Plate is hand-decorated by our artisans.", ""
 
     skill_pack.draft_ad = _self_correcting
     r = skill.run("ad_copy", "baci", audience_key="hosts", entity_key="aqua-plate", variants=1)
