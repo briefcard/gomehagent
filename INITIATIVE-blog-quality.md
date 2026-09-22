@@ -9,6 +9,16 @@
 > plan, the claims, the pictures, the Shopify publish arm. §1 is the facts with
 > `file:line`; if they hold, the plan holds. §3 is the phases. §5 is the one
 > decision that is the owner's: when an article goes live with nobody looking.
+>
+> **BUILT 2026-09-18..22. Phases 0–5 are done** (`5568a7e`, `a0e3612`,
+> `9aa94d3`, `525973d`, `061d4f5`): the hand-made standard, `app/articles.py`
+> (pattern + SERP brief + story + writer + checks + render + judge + loop),
+> `scripts/article_once.py`, the skill seam, §5's go-live condition,
+> `app/exemplars.py` (approvals raise the standard, the owner's notes are
+> remembered), and both cards. **Open, and the owner's:** turning the
+> unattended live push on for a tenant (the condition and the wiring exist;
+> nothing is enabled), and a deploy run against a plan keyword where the SERP
+> comes from Semrush rather than a URL typed by hand.
 
 ---
 
