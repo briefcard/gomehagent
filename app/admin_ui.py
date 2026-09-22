@@ -15006,6 +15006,21 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
                      f'&amp;id={_esc(got["system_id"])}&amp;status=live'
                      f'&amp;back=plan&amp;tenant={_esc(tenant)}">'
                      f'<button type="button">Turn it on</button></a></p>')
+        elif part == "switch" and not ok:
+            # …AND WHERE THERE IS NO ROW TO SWITCH, the button that makes one.
+            # The branch above only fires when a system row already exists, so
+            # the state a NEW account is in — nothing installed — rendered the
+            # route as prose: "install it — /admin/system_add, or the Systems
+            # tab", beside two lines that both carried working buttons. The
+            # rule it broke is written directly above that string in
+            # `keywords.readiness`. `/admin/system_add` is already an Install
+            # button on the Systems tab; this is the same one, with `back=plan`
+            # so it returns here instead of the all-accounts Systems list.
+            extra = (f'<p><a href="/admin/system_add?key={_esc(key)}'
+                     f'&amp;tenant={_esc(tenant)}&amp;system=blog'
+                     f'&amp;back=plan">'
+                     f'<button type="button">Install the blog system</button>'
+                     f'</a></p>')
         chips += (
             f'<div class="card {"" if ok else "warn"}">'
             f'<div class="lbl">{"✓" if ok else ("?" if unknown else "!")} '

@@ -1743,7 +1743,12 @@ def readiness(tenant: str, *, probe: bool = True) -> dict:
             # the same defect as naming a missing blog_id and sending them to
             # a URL bar — the owner met both in the same afternoon.
             "system_id": getattr(sysrow, "id", ""),
-            "fix": ("install it — /admin/system_add, or the Systems tab"
+            # NO ROUTE IN THE PROSE. This read "install it —
+            # /admin/system_add, or the Systems tab": an address typed at a
+            # reader, which is the defect the comment above this block names.
+            # The card offers the Install button itself now, so the sentence
+            # says the STATE and the control says what to do about it.
+            "fix": ("it is not installed for this account"
                     if not sysrow else
                     f"the system is {out['status']}; turn it on to run")}
     else:

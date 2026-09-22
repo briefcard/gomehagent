@@ -33,6 +33,7 @@ import os
 import re
 import sys
 import tempfile
+from urllib.parse import unquote_plus
 
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'aa.db')}"
 os.environ["APPROVAL_SECRET"] = "s3cret"
@@ -129,6 +130,39 @@ def main() -> int:
        not offenders, "; ".join(offenders[:3]))
     ck("and there are POST routes for this to protect",
        sum(1 for b in bodies if b.startswith('@app.post("/admin/')) >= 20)
+
+    print("\n— and a work id with nothing behind it is not a wall either —")
+    # The same family, found on the demo console 2026-09-22: /admin/work/<id>
+    # redirects a variant's id to its batch board and hands an unauthenticated
+    # visit the sign-in door, then fell through to a bare
+    # `<h3>No artifact kept for this id.</h3>` — no shell, no nav, no way back.
+    KEY = os.environ["APPROVAL_SECRET"]
+    r4 = c.get(f"/admin/work/nothing-was-ever-filed?key={KEY}")
+    ck("an unknown id lands on the console, not on a bare page",
+       r4.status_code == 303 and "/admin/ui" in r4.headers.get("location", ""),
+       f"{r4.status_code} {r4.headers.get('location', '')[:70]}")
+    ck("  and says nothing is filed under it",
+       "nothing+is+filed" in r4.headers.get("location", "").replace("%20", "+")
+       or "nothing is filed" in unquote_plus(r4.headers.get("location", "")),
+       unquote_plus(r4.headers.get("location", ""))[:140])
+
+    # A ROW THAT KEPT NO ARTIFACT IS A DIFFERENT STATE, and the reader is told
+    # which — a variant blocked at the gate never reaches a board, which is
+    # how the demo's own ad board became a white page.
+    with db.SessionLocal() as s:
+        _row = db.Output(tenant="baci", system_key="ad_creative",
+                         format="ad_copy", status="blocked",
+                         body="a variant the gate stopped")
+        s.add(_row)
+        s.commit()
+        _oid = _row.id
+    r5 = c.get(f"/admin/work/{_oid}?key={KEY}")
+    loc5 = unquote_plus(r5.headers.get("location", ""))
+    ck("a filed row that kept no artifact says so, and names its kind",
+       r5.status_code == 303 and "kept no reviewable artifact" in loc5
+       and "ad_copy" in loc5, loc5[:150])
+    ck("  and lands the reader on that row's OWN account",
+       "tenant=baci" in loc5, loc5[:150])
 
     print("\n" + ("ALL PASSED" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0

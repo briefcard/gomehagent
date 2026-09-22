@@ -231,6 +231,40 @@ def main() -> int:
     ck("Progress's moves table is wrapped", "tblwrap" in prog)
     ck("  and so is the Schedule", "tblwrap" in sched)
 
+    # ---- 7. the Switch card offers a control, never a route --------------
+    print("\n— the Switch card hands you the button, not the address —")
+    # `keywords.readiness` carries a comment saying exactly this rule, and the
+    # card obeyed it only where a system ROW already exists. The state a new
+    # account is in — nothing installed — rendered "/admin/system_add" as
+    # prose beside two lines that both had working buttons.
+    _no_blog = "nosys"
+    with db.SessionLocal() as _s:
+        _s.add(db.Tenant(key=_no_blog, name="No Systems Co", kind="client",
+                         domain="nosys.example", business_model="ecom_inventory",
+                         cms={}, systems=[]))
+        _s.commit()
+    card = admin_ui.render_plan("s3cret", _no_blog)
+    ck("an account with no blog system is offered Install",
+       "/admin/system_add" in card and "Install the blog system" in card,
+       card[card.find("Switch"):card.find("Switch") + 300])
+    ck("  and no route is printed at the reader",
+       "install it — /admin/system_add" not in card
+       and "or the Systems tab" not in card,
+       "an address in a sentence is an instruction; a button is a control")
+    from fastapi.testclient import TestClient
+    _c = TestClient(web.app, follow_redirects=False)
+    _r = _c.get(f"/admin/system_add?key=s3cret&tenant={_no_blog}"
+                f"&system=blog&back=plan")
+    ck("  and installing from the Plan tab comes BACK to the Plan tab",
+       _r.status_code == 303 and "tab=plan" in _r.headers.get("location", "")
+       and f"tenant={_no_blog}" in _r.headers.get("location", ""),
+       _r.headers.get("location", "")[:110])
+    ck("  …with the row it just made, so the next control is Turn it on",
+       systems.find(_no_blog, "blog") is not None
+       and "Turn it on" in admin_ui.render_plan("s3cret", _no_blog),
+       "installing and then being told to go and install it is the loop this "
+       "card was one branch short of closing")
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

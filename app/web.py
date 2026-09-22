@@ -3624,8 +3624,38 @@ def admin_workroom(request: Request, output_id: str,
         if hit is not None and hit.output_id != output_id:
             return RedirectResponse(
                 f"/admin/work/{quote(hit.output_id)}?key={quote(key)}", 303)
-        return HTMLResponse("<h3>No artifact kept for this id.</h3>",
-                            status_code=404)
+        # AND WHERE THERE IS NOTHING TO REDIRECT TO, the console — not a bare
+        # page. Every branch above this one exists to avoid a dead end: the
+        # sign-in door instead of a 401, the batch board instead of a 404 on a
+        # variant's id, "rule 3, the reader keeps their place". This branch
+        # ended in a white page with no shell, no nav, no theme and no way
+        # back but the browser button — the same shape as the
+        # `{"detail":"Method Not Allowed"}` that `_console_http_error`
+        # already turns into a sentence.
+        #
+        # TWO different things end here and the reader is told which. A row
+        # that kept no artifact is a REAL state, not a bad link: a variant
+        # blocked at the gate never reaches its batch board, which is exactly
+        # how the demo's own ad board became a white page. Its tenant comes
+        # with the row, so the reader lands on their own account.
+        from urllib.parse import urlencode
+        with db.SessionLocal() as s:
+            _row = s.get(db.Output, output_id)
+            _t = str(getattr(_row, "tenant", "") or "")
+            _fmt = str(getattr(_row, "format", "") or "")
+            _st = str(getattr(_row, "status", "") or "")
+            _found = _row is not None
+            s.expunge_all()
+        said = (f"that {_fmt or 'run'} row is on the ledger "
+                f"({_st or 'filed'}) and kept no reviewable artifact — a "
+                f"draft blocked at the gate never reaches a board. Its run, "
+                f"and what stopped it, are on Diagnostics."
+                if _found else
+                "nothing is filed under that id — the link is older than the "
+                "row it pointed at, or the account was reset.")
+        return RedirectResponse("/admin/ui?" + urlencode(
+            {k: v for k, v in {"key": key, "tab": "content", "tenant": _t,
+                               "err": said}.items() if v}), 303)
     return HTMLResponse(admin_ui_mod.render_workroom(
         key, output_id, art, kw, ap, ok=ok, err=err))
 
@@ -6465,13 +6495,20 @@ def systems_seed(key: str = Depends(admin_key)):
 
 
 @app.get("/admin/system_add")
-def system_add(key: str = Depends(admin_key), tenant: str = "", system: str = ""):
+def system_add(key: str = Depends(admin_key), tenant: str = "",
+               system: str = "", back: str = ""):
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import systems
     if not tenant or not system:
         return {"error": "tenant and system are both required"}
     systems.create(tenant, system)
+    # `back=plan` the way `system_set` already has it. Installing from the
+    # Plan tab's Switch card used to land on the Systems list, which is the
+    # amnesia `_back_to_systems` was written to stop one level up: a
+    # control's redirect keeps the place the control lived in.
+    if back == "plan" and tenant:
+        return _plan_back(tenant, key, msg=f"{system} installed")
     return _back_to_systems(key, tenant=tenant, system=system)
 
 

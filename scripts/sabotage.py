@@ -1076,6 +1076,30 @@ SABOTAGES = [
                "ad for the pitcher proved by a claim about the platter",
     },
     {
+        "name": "a_dead_work_id_is_a_bare_page",
+        "file": "app/web.py",
+        "find": '        return RedirectResponse("/admin/ui?" + urlencode(\n'
+                '            {k: v for k, v in {"key": key, "tab": "content", "tenant": _t,\n'
+                '                               "err": said}.items() if v}), 303)',
+        "replace": '        return HTMLResponse("<h3>No artifact kept for this id.</h3>",\n'
+                   '                            status_code=404)  # SABOTAGE',
+        "suites": ["test_an_action_never_renders_at_its_own_address.py"],
+        "why": "a link to a row that kept no artifact — a variant blocked at "
+               "the gate, which is every variant on an offline run — is a "
+               "white page with no shell, no nav and no way back but the "
+               "browser button",
+    },
+    {
+        "name": "the_plan_card_tells_you_a_url",
+        "file": "app/admin_ui.py",
+        "find": '        elif part == "switch" and not ok:',
+        "replace": "        elif False:  # SABOTAGE",
+        "suites": ["test_plan_tab.py"],
+        "why": "an account with nothing installed is told to visit "
+               "/admin/system_add instead of being given the button, on a "
+               "card whose two neighbours both carry working controls",
+    },
+    {
         "name": "an_offline_ad_never_names_its_product",
         "file": "app/skill_pack.py",
         "find": '    said = f"{name} — {proof}." if name else f"{proof}."',
