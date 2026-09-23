@@ -3455,7 +3455,7 @@ def _workflow_subs(row) -> tuple:
 
 
 def _system_view(key: str, row, flash: str, ppage: int = 1,
-                 wf: str = "", plan_id: str = "") -> str:
+                 wf: str = "", plan_id: str = "", shelf: dict | None = None) -> str:
     """One system's workflow: planned, waiting, shipped, measured — in the
     order the work moves, with the queue's controls leading each section.
 
@@ -3520,7 +3520,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
         "shipped": lambda: _shipped_section(row),
         "measured": lambda: _measured_section(row),
         "segments": lambda: _segments_card(key, row),
-        "designs": lambda: _structures_card(key, row.tenant),
+        "designs": lambda: _structures_card(key, row.tenant, view=shelf or {}),
         "settings": lambda: _settings_section(key, row),
         "runs": lambda: _runs_section(key, row),
     }
@@ -3576,7 +3576,7 @@ SYSTEM_SUBS = (("active", "Active"), ("available", "Available"))
 
 def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
                    system: str = "", ppage: int = 1, sub: str = "",
-                   wf: str = "", plan_id: str = "") -> str:
+                   wf: str = "", plan_id: str = "", shelf: dict | None = None) -> str:
     """One account's pipelines.
 
     This tab used to render `systems.all_systems()` grouped by client, so the
@@ -3602,7 +3602,7 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
         target = systems.find(tenant, system)
         if target is not None:
             return _system_view(key, target, flash, ppage=ppage, wf=wf,
-                                plan_id=plan_id)
+                                plan_id=plan_id, shelf=shelf or {})
         flash += (f'<div class="note">No <code>{_esc(system)}</code> system '
                   f'is installed for this account — the list below is what '
                   f'is.</div>')
@@ -6743,6 +6743,142 @@ def _image_model_card(key: str, tenant: str) -> str:
 </div>"""
 
 
+#: How many references a shelf shows at once. Two pictures a row and twenty
+#: of them is a page nobody reads to the bottom of — and on a console served
+#: from a 512 MB instance it is also bytes.
+SHELF_PAGE = 8
+
+#: The sorts a shelf offers, and what each one is FOR. Newest first is how you
+#: find the one you just added; most used is how you find the one that works;
+#: by name is how you find the one you named.
+SHELF_SORTS = (("recent", "newest first"), ("used", "most used"), ("name", "by name"))
+
+
+def _shelf(key: str, *, title: str, says: str, add: str, items: list, view: dict,
+           back: str, states: tuple = ()) -> str:
+    """ONE SHELF FOR EVERY KIND OF REFERENCE — the email designs today, the
+    article layout and the visual boards next.
+
+    Owner, 2026-09-23: *"extremely messy, with so many competing buttons and
+    no clear menu workflow … we should have a sub menu to edit / delete /
+    reread reference."* Measured before the rewrite: seven references put 29
+    buttons, 13 forms, 7 dropdowns and 28 links on one page, each row
+    repeating the same four buttons with its findings and rounds unfolded
+    beneath it.
+
+    So a row carries the FACTS and ONE action — the one that belongs to the
+    state it is in — and everything else lives in the row's own menu. What a
+    row cannot hold (the reference beside ours, the judge's findings, the
+    rounds) lives on the reference's own page, one click away. The header
+    holds the search, the sort and the filter; the shelf pages.
+
+    An item is `{id, name, thumb, chips, facts, primary, menu, href, note}`.
+    `menu` is a list of `(label, html)` — a form or a link, rendered inside
+    the fold so the row reads as one thing with one way in.
+    """
+    q = str(view.get("q") or "").strip()
+    sort = str(view.get("sort") or "recent")
+    state = str(view.get("state") or "all")
+    page = max(1, int(view.get("page") or 1))
+    n_all = len(items)
+    if q:
+        ql = q.lower()
+        items = [i for i in items
+                 if ql in (i.get("name", "") + " " + i.get("facts", "")
+                           + " " + i.get("note", "")).lower()]
+    # THE CHIPS COUNT WHAT THE FILTER WOULD SHOW, not what it is showing: a
+    # chip that reads 0 because its own filter is on teaches the reader that
+    # the shelf is empty when it is one click from four references.
+    matched = list(items)
+    if state and state != "all":
+        items = [i for i in items if state in (i.get("states") or ())]
+    if sort == "used":
+        items.sort(key=lambda i: -int(i.get("used") or 0))
+    elif sort == "name":
+        items.sort(key=lambda i: (i.get("name") or "").lower())
+    pages = max(1, (len(items) + SHELF_PAGE - 1) // SHELF_PAGE)
+    page = min(page, pages)
+    shown = items[(page - 1) * SHELF_PAGE: page * SHELF_PAGE]
+
+    def _link(**over) -> str:
+        args = {"q": q, "sort": sort, "state": state, "page": page}
+        args.update(over)
+        keep = "&amp;".join(f"d{k}={_q(str(v))}" for k, v in args.items() if v not in ("", None, "all", 1))
+        return _esc(back) + (("&" if "?" in back else "?") + keep.replace("&amp;", "&") if keep else "")
+
+    chips = "".join(
+        f'<a class="chip{" on" if state == sl else ""}" href="{_link(state=sl, page=1)}">'
+        f'{_esc(lbl)} {sum(1 for i in matched if sl == "all" or sl in (i.get("states") or ()))}</a>'
+        for sl, lbl in (("all", "All"),) + tuple(states))
+    sorts = "".join(f'<option value="{sl}"{" selected" if sort == sl else ""}>{_esc(lbl)}</option>'
+                    for sl, lbl in SHELF_SORTS)
+    rows = "".join(_shelf_row(i) for i in shown) or (
+        f'<p class="mut">{"nothing matches " + _esc(q) if q else "nothing here yet"}.</p>')
+    pager = ""
+    if pages > 1:
+        pager = (f'<p class="mut">{(page - 1) * SHELF_PAGE + 1}–'
+                 f'{min(page * SHELF_PAGE, len(items))} of {len(items)}'
+                 + (f' &middot; <a href="{_link(page=page - 1)}">previous</a>' if page > 1 else "")
+                 + (f' &middot; <a href="{_link(page=page + 1)}">next</a>' if page < pages else "")
+                 + "</p>")
+    return f"""
+<div class="card"><div class="head"><h2>{_esc(title)}</h2>
+  <span class="mut">{says}</span></div>
+  {add}
+  <form class="row" method="get" action="{_esc(back.split("?")[0])}" style="gap:6px;align-items:center">
+    {"".join(f'<input type="hidden" name="{_esc(k)}" value="{_esc(v)}">'
+             for k, v in _pairs(back))}
+    <input name="dq" value="{_esc(q)}" placeholder="search these references"
+           style="flex:1;min-width:12rem">
+    <select name="dsort">{sorts}</select>
+    <button class="sec">Show</button>
+    {f'<a class="mut" href="{_link(q="", state="all", page=1)}">clear</a>' if (q or state != "all") else ""}
+  </form>
+  <div class="chips" style="margin:6px 0 10px">{chips}</div>
+  {rows}
+  {pager}
+  <p class="mut">{n_all} in the shared library; the state chips above count what is on this shelf.</p>
+</div>"""
+
+
+def _shelf_row(i: dict) -> str:
+    """One reference: what it is, what state it is in, ONE action, and a menu."""
+    menu = "".join(html for _lbl, html in (i.get("menu") or []))
+    thumb = (f'<a href="{_esc(i.get("href") or "#")}"><img src="{_esc(i["thumb"])}" alt="" '
+             f'style="width:64px;height:84px;object-fit:cover;border:1px solid var(--rule);'
+             f'border-radius:4px;background:var(--rule2)"></a>' if i.get("thumb") else "")
+    return f"""
+  <div class="msg" style="display:flex;gap:11px;align-items:flex-start;margin:9px 0">
+    {thumb}
+    <div style="flex:1;min-width:0">
+      <b><a href="{_esc(i.get("href") or "#")}">{_esc(i.get("name") or "untitled")}</a></b>
+      {" ".join(i.get("chips") or [])}
+      <br><span class="when">{i.get("facts", "")}</span>
+      {f'<br><span class="mut">&ldquo;{_esc(i["note"])}&rdquo;</span>' if i.get("note") else ""}
+      <div class="nacts">
+        {i.get("primary", "")}
+        <details class="fix"><summary title="rename, re-read, take out, delete">&hellip;</summary>
+          <div class="pop">{menu}</div></details>
+      </div>
+    </div>
+  </div>"""
+
+
+def _pairs(url: str) -> list:
+    """The query pairs a shelf's own GET form must carry forward — the tab,
+    the account, the system and the room it lives in. Without them a search
+    lands on the console's front page, which is how a filter becomes a way
+    of losing your place."""
+    from urllib.parse import parse_qsl, urlsplit
+    return [(k, v) for k, v in parse_qsl(urlsplit(url).query)
+            if k in ("tab", "tenant", "system", "wf", "sub", "key")]
+
+
+def _q(v: str) -> str:
+    from urllib.parse import quote
+    return quote(str(v))
+
+
 def _es_standing(tenant: str) -> str:
     from . import email_structures as _es
     return _es.standing_designation(tenant)
@@ -6883,88 +7019,177 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
             + "<br>" + choose + "<br>" + form)
 
 
-def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
-    """The collective library of email structures, and the swipe board that
-    feeds it. On Brand beside the visual boards because it is the same idea
-    one channel over: a reference contributes words, never its own material.
+def _structures_card(key: str, tenant: str, preview_entity: str = "",
+                     view: dict | None = None) -> str:
+    """THE DESIGNS ROOM — the shared reference library, on a shelf.
 
-    SHARED, and rendered as shared — the library carries no account, and the
-    card says so, because a structure that looked like this brand's own would
-    invite somebody to put this brand's facts in its notes.
+    What it was until 2026-09-23: every reference laid out flat with its
+    recreation, its findings and its rounds unfolded beneath it, four buttons
+    repeated on each. Seven of them made 29 buttons on one page. What the
+    owner asked for: *"a sub menu to edit / delete / reread reference"*, a
+    rename, pages, and a note saying why a reference is kept.
+
+    So this builds the rows and `_shelf` renders them; everything that needs
+    room — the reference beside ours, the judge, the rounds — is on the
+    reference's own page.
     """
-    from . import email_structures as _es
+    from . import email_structures as _es, recreate as _rc, web as _web
     rows = _es.library()
-    proposed = [r for r in rows if r["review"] == "proposed"]
-    approved = [r for r in rows if r["review"] == "approved"]
-
-    def _usable(st: dict) -> str:
-        ok, why = _es.usable_for(tenant, st)
-        return ("<span class=\"ok\">usable here</span>" if ok else
-                f'<span class="when">not for this brand — {_esc(why)}</span>')
-
-    shots = {sw["structure_id"]: sw for sw in _es.swipes() if sw["structure_id"]}
-
-    def _one(st: dict, controls: str) -> str:
-        shot = shots.get(st["id"])
-        thumb = (f'<a href="{_esc(shot["image"])}"><img src="{_esc(shot["image"])}" '
-                 f'alt="{_esc(shot["title"])}" style="max-width:120px;max-height:160px;'
-                 f'float:right;margin:0 0 6px 10px;border:1px solid #ddd"></a>'
-                 if shot and shot.get("image") else "")
-        # THE RECREATION IS THE DESIGN — the model's email for THIS brand
-        # beside the reference, the judge's review and the choice under it.
-        # The token reading that used to fold away here is gone from the
-        # console (owner, 2026-09-12: "why do we have to tell it to read the
-        # design instead of it happening automatically" — it reads on Add).
-        body = _recreation_block(key, tenant, st, shot)
-        return (f'<div class="msg">{thumb}<b>{_esc(st["name"])}</b> '
-                f'<span class="when">{_esc(st["source"])}'
-                + (f' · <a href="{_esc(st["source_url"])}">source</a>' if st["source_url"] else "")
-                + (f' · used {st["used_count"]}×' if st["used_count"] else "")
-                + "</span>"
-                # a design read into a brief is the brief; its rough block
-                # order serves the rules at use and is not shown as the design
-                + (f'<br><code>{_esc(" → ".join(st["sequence"]))}</code>' if not st.get("brief") else "")
-                + (f'<br><span class="mut">{_esc(str(st["profile"].get("notes", ""))[:220])}</span>'
-                   if st["profile"].get("notes") else "")
-                + body
-                + f'<br>{_usable(st)}</div>')
-
-    # THE WHOLE FLOW ON ONE PAGE (owner, 2026-09-12): paste a link → the
-    # reference beside ours with the judge's review → choose it, or leave
-    # the draw to chance. The verdict controls sit inside each recreation
-    # block, where the review is.
-    from . import web as _web
+    standing = _es_standing(tenant)
+    taken_out = _es.out_for(tenant)
     bg = _web.bg_status("email_recreate", tenant)
     running = bg.get("state") in _jobs.IN_FLIGHT
-    paste = f"""
+    base = (f"/admin/ui?tab=systems&tenant={_q(tenant)}&system=campaign_email&wf=designs")
+    shots = {}
+    with db.SessionLocal() as s:
+        for st in rows:
+            if st.get("source_asset_id"):
+                a = s.get(db.KbAsset, st["source_asset_id"])
+                if a is not None and a.url:
+                    shots[st["id"]] = str(a.url)
+
+    def _form(action: str, label: str, fields: dict, *, cls: str = "sec",
+              confirm: str = "", title: str = "") -> str:
+        hid = "".join(f'<input type="hidden" name="{_esc(k)}" value="{_esc(str(v))}">'
+                      for k, v in fields.items())
+        return (f'<form method="post" action="{_esc(action)}" class="inl"'
+                + (f' onsubmit="return confirm({confirm!r})"' if confirm else "") + ">"
+                + f'<input type="hidden" name="key" value="{_esc(key)}">'
+                + f'<input type="hidden" name="tenant" value="{_esc(tenant)}">' + hid
+                + f'<button class="{cls}"{f" title={title!r}" if title else ""}'
+                + (" disabled" if running and action.endswith("email_recreate") else "")
+                + f">{_esc(label)}</button></form>")
+
+    items = []
+    for st in rows:
+        sid = st["id"]
+        ok, why = _es.usable_for(tenant, st)
+        last = _rc.latest(sid, tenant)
+        states, chips = [], []
+        if st["review"] == "proposed":
+            states.append("proposed")
+            chips.append('<span class="chip nb">not chosen yet</span>')
+        elif st["review"] == "rejected":
+            states.append("dropped")
+            chips.append('<span class="chip off">dropped from the library</span>')
+        elif sid in taken_out:
+            states.append("out")
+            chips.append('<span class="chip off">out of this brand&rsquo;s rotation</span>')
+        elif standing == sid:
+            states += ["rotation", "standing"]
+            chips.append('<span class="chip on">every campaign uses this</span>')
+        else:
+            states.append("rotation")
+            chips.append('<span class="chip on">in the rotation</span>')
+        if not ok:
+            states.append("unusable")
+            chips.append(f'<span class="chip off" title="{_esc(why)}">not for this brand</span>')
+        facts = " &middot; ".join(x for x in (
+            _esc(st["source"] or "a reference"),
+            (f'used {st["used_count"]}&times;' if st["used_count"] else "never used"),
+            (f'last {_esc(st["last_used_at"][:10])}' if st["last_used_at"] else ""),
+            (f'{_esc(last["status"])} {_esc(last["at"][:10])}' if last else
+             "not recreated for this brand yet"),
+        ) if x)
+        primary = ""
+        if st["review"] == "proposed":
+            primary = (f'<a href="/admin/email_structure?key={_esc(key)}&amp;tenant={_q(tenant)}'
+                       f'&amp;id={_esc(sid)}&amp;verdict=approved&amp;ui=1"><button>Use it</button></a>')
+        elif sid in taken_out:
+            primary = _form("/admin/reference_rotation", "Put back in the rotation",
+                            {"id": sid, "back_in": "1"}, cls="")
+        elif st["review"] == "approved" and ok:
+            primary = (_designate_form(key, tenant, "", "Back to random")
+                       if standing == sid else
+                       _designate_form(key, tenant, sid, "Use for every campaign"))
+        menu = [
+            ("open", f'<a href="/admin/reference?key={_esc(key)}&amp;tenant={_q(tenant)}'
+                     f'&amp;id={_esc(sid)}">Open it &mdash; the reference beside ours, and the judge</a><br>'),
+            ("rename", '<label>Rename</label>'
+                       + _form("/admin/reference_rename", "Rename", {"id": sid}).replace(
+                           "<button", f'<input name="name" value="{_esc(st["name"])}"><button')),
+            ("note", '<label>Why we keep this &mdash; every email built on it hears you</label>'
+                     + _form("/admin/reference_note", "Save", {"id": sid}).replace(
+                         "<button", f'<input name="note" value="{_esc(_es.note_of(sid))}" '
+                                    f'placeholder="e.g. the four-step story, never the mascot"><button')),
+            ("reread", _form("/admin/email_recreate", "Read the reference again",
+                             {"structure": sid, "reread": "1"},
+                             title="reads the picture again into a fresh brief, then recreates")),
+            ("recreate", _form("/admin/email_recreate", "Recreate for this brand",
+                               {"structure": sid})),
+            ("out", _form("/admin/reference_rotation",
+                          "Put back in the rotation" if sid in taken_out
+                          else "Take out of this brand's rotation",
+                          {"id": sid, "back_in": "1" if sid in taken_out else ""})),
+            ("source", (f'<a href="{_esc(st["source_url"])}" target="_blank" rel="noopener">'
+                        f'The email it was read from</a><br>' if st["source_url"] else "")),
+            ("delete", _form("/admin/reference_delete", "Delete for every account",
+                             {"id": sid},
+                             confirm="Delete this design from the shared library? "
+                                     "Emails already built on it are not touched.")),
+        ]
+        items.append({"id": sid, "name": st["name"], "thumb": shots.get(sid, ""),
+                      "chips": chips, "states": states, "facts": facts,
+                      "note": _es.note_of(sid), "used": st["used_count"],
+                      "primary": primary, "menu": menu,
+                      "href": f"/admin/reference?key={key}&tenant={tenant}&id={sid}"})
+
+    add = f"""
     <form method="post" action="/admin/email_reference" style="margin:8px 0">
       <input type="hidden" name="key" value="{_esc(key)}">
       <input type="hidden" name="tenant" value="{_esc(tenant)}">
-      <input name="url" size="52" placeholder="https://reallygoodemails.com/emails/…">
+      <input name="url" size="46" placeholder="https://reallygoodemails.com/emails/…">
       <button type="submit"{" disabled" if running else ""}>Add this reference</button>
-      <span class="when">one email's page on Really Good Emails. It is read in
-      words, recreated for {_esc(tenant)} with its own pictures and copy, and
-      judged beside the reference — the review lands below.</span>
-    </form>""" + (f'<p class="when">running — {_esc(bg.get("detail") or "starting")}</p>' if running else "")
-    standing = _es_standing(tenant)
-    standing_name = next((st["name"] for st in approved if st["id"] == standing), "")
-    pool = [st for st in approved if _es.usable_for(tenant, st)[0]]
-    draw = (f'<p><b>Your campaigns:</b> every one is built on <b>{_esc(standing_name)}</b> until you say otherwise.</p>'
-            if standing_name else
-            f'<p><b>Your campaigns:</b> each draws at random from the {len(pool)} design(s) in the rotation '
-            f'this brand may use{"" if pool else " — none yet; add a reference above"}. '
-            f'A plan can still name one. Only with nothing in the rotation is the house design used.</p>')
-    body = (paste + draw
-            + (f'<h4>In the rotation ({len(approved)})</h4>'
-               + "".join(_one(st, "") for st in approved) if approved else
-               '<p class="mut">Nothing in the rotation yet — add a reference above; it is in '
-               'the rotation the moment it lands, and <i>Not this one</i> takes it out.</p>')
-            + (f'<h4>Filed by the older reader — look, then choose ({len(proposed)})</h4>'
-               + "".join(_one(st, "") for st in proposed) if proposed else ""))
+      <span class="when">one email's page. It is read in words, recreated for
+      {_esc(tenant)} with its own pictures and copy, and judged beside the
+      reference &mdash; the review lands on its own page.</span>
+    </form>""" + (f'<p class="when">running &mdash; {_esc(bg.get("detail") or "queued")}</p>'
+                  if running else "")
+    pool = [i for i in items if "rotation" in i["states"] and "unusable" not in i["states"]]
+    says = (f'every campaign is built on <b>{_esc(next((i["name"] for i in items if i["id"] == standing), ""))}</b>'
+            if standing else
+            f'each campaign draws at random from the {len(pool)} design(s) this brand may use'
+            + ("" if pool else " — none yet; add a reference"))
+    return _shelf(key, title=f"Designs — the references, recreated for {_esc(tenant)}",
+                  says=says + '. The library is shared across accounts; taking one out is this brand&rsquo;s own decision.',
+                  add=add, items=items, view=view or {}, back=base,
+                  states=(("rotation", "In rotation"), ("standing", "Standing"),
+                          ("out", "Taken out"), ("proposed", "Not chosen yet")))
+
+
+def render_reference(key: str, tenant: str, structure_id: str,
+                     msg: str = "", err: str = "") -> str:
+    """One design's page, in the console frame — reached from the shelf."""
+    tenant, _here, _rows = _account(tenant)
+    flash = (f'<div class="note">{_esc(msg)}</div>' if msg else "") + (
+        f'<div class="note err">{_esc(err)}</div>' if err else "")
+    return _shell(key, "systems", "Design", flash + _reference_page(key, tenant, structure_id),
+                  tenant=tenant)
+
+
+def _reference_page(key: str, tenant: str, structure_id: str) -> str:
+    """ONE REFERENCE, with room: the picture beside ours, the judge's line,
+    every open finding, the rounds, and the controls that need space. The
+    shelf sends you here rather than unfolding all of it into a list."""
+    from . import email_structures as _es
+    st = next((r for r in _es.library() if r["id"] == structure_id), None)
+    back = f"/admin/ui?tab=systems&tenant={_q(tenant)}&system=campaign_email&wf=designs"
+    if st is None:
+        return (f'<div class="card"><div class="head"><h2>No such design</h2></div>'
+                f'<p class="mut">It may have been deleted. '
+                f'<a href="{back}">Back to the shelf</a>.</p></div>')
+    shot = None
+    ok, why = _es.usable_for(tenant, st)
+    note = _es.note_of(structure_id)
     return f"""
-<div class="card"><div class="head"><h2>Designs — the references, recreated for {_esc(tenant)}</h2>
-  <span class="mut">shared across every account — a design, never a client's words or pictures</span></div>
-  {body}
+<div class="card"><div class="head"><h2>{_esc(st["name"])}</h2>
+  <span class="mut"><a href="{back}">&larr; every design</a></span></div>
+  <p class="when">{_esc(st["source"] or "a reference")}
+    {f'&middot; <a href="{_esc(st["source_url"])}" target="_blank" rel="noopener">the email it was read from</a>' if st["source_url"] else ""}
+    {f'&middot; used {st["used_count"]}&times;' if st["used_count"] else ""}</p>
+  {f'<p class="mut">&ldquo;{_esc(note)}&rdquo; — every email built on this design hears it.</p>' if note else ""}
+  {"" if ok else f'<p class="when">Not usable for this brand — {_esc(why)}</p>'}
+  {_recreation_block(key, tenant, st, shot)}
 </div>"""
 
 

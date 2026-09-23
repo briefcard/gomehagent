@@ -38,6 +38,46 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'the_shelf_unfolds_every_control_again',
+        "file": 'app/admin_ui.py',
+        "find": '        <details class="fix"><summary title="rename, re-read, take out, delete">&hellip;</summary>\n',
+        "replace": '        <details class="fix" open><summary>&hellip;</summary>  <!-- SABOTAGE -->\n',
+        "suites": ['test_the_designs_shelf.py'],
+        "why": "every row opens its whole menu again, which is the page the owner called extremely messy — 29 buttons across seven references, with no way to tell the one action that belongs to a design's state from the seven that do not",
+    },
+    {
+        "name": 'a_designs_note_never_reaches_the_maker',
+        "file": 'app/recreate.py',
+        "find": '    _ref_note = _es_note(structure_id)\n',
+        "replace": '    _ref_note = ""  # SABOTAGE\n',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "'why we keep this' becomes decoration on a card — the owner writes what matters about a design and every email built on it is made as if they had said nothing",
+    },
+    {
+        "name": 'taking_one_design_out_takes_it_from_everybody',
+        "file": 'app/email_structures.py',
+        "find": '    taken_out = out_for(tenant)\n',
+        "replace": '    taken_out = set()  # SABOTAGE\n',
+        "suites": ['test_the_designs_shelf.py'],
+        "why": "a design this brand took out keeps being drawn for it — and the only control that worked before was the shared reject, which took the design away from every account at once",
+    },
+    {
+        "name": 'the_filter_chips_count_the_remainder',
+        "file": 'app/admin_ui.py',
+        "find": '    matched = list(items)\n',
+        "replace": '    matched = []  # SABOTAGE\n',
+        "suites": ['test_the_designs_shelf.py'],
+        "why": "with a filter on, every other chip reads 0 — the shelf says it is empty while four references sit one click away",
+    },
+    {
+        "name": 'a_deleted_design_is_still_every_campaigns_design',
+        "file": 'app/email_structures.py',
+        "find": '        if standing_designation(t) == structure_id:\n',
+        "replace": '        if False:  # SABOTAGE\n',
+        "suites": ['test_the_designs_shelf.py'],
+        "why": "a brand whose standing choice was deleted points at a design that no longer exists, and its campaigns are built on nothing with nothing saying so",
+    },
+    {
         "name": 'a_recreation_is_no_longer_queued_work',
         "file": 'app/jobs.py',
         "find": '    "email_recreate": {\n',
@@ -232,8 +272,8 @@ SABOTAGES = [
     {
         "name": 'a_reference_is_added_where_its_review_lands',
         "file": 'app/admin_ui.py',
-        "find": '    body = (paste + draw\n',
-        "replace": '    body = (draw\n',
+        "find": '                  add=add, items=items, view=view or {}, back=base,\n',
+        "replace": '                  add="", items=items, view=view or {}, back=base,  # SABOTAGE\n',
         "suites": ['test_the_model_makes_the_email.py'],
         "why": "the paste form exists in a variable nothing renders — a reference email can no longer be added from the console",
     },

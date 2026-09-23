@@ -1773,9 +1773,20 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     # (Phase 4). The bar rises with the brand's own best work instead of
     # staying at the hand-made email of 2026-09-12.
     from . import exemplars as _ex
+    from .email_structures import note_of as _es_note
     _std, _std_is = _ex.standard(tenant, _ex.EMAIL, fallback=exemplar())
     kit_["_standard"], kit_["_standard_is"] = _std, _std_is
     kit_["_notes"] = _ex.notes_text(tenant, _ex.EMAIL)
+    # AND WHAT THE OWNER SAID ABOUT THIS ONE DESIGN. Written on the shelf as
+    # "why we keep this" — a field that only sat on a card would be the same
+    # defect as a KB rule that never reaches a validator, so it rides with
+    # the brand's standing notes and outranks the brief exactly as they do.
+    _ref_note = _es_note(structure_id)
+    if _ref_note:
+        kit_["_notes"] = (kit_["_notes"] + "\n" if kit_["_notes"] else "") + (
+            "WHAT THE OWNER HAS SAID ABOUT THIS DESIGN — their words, and they "
+            "outrank the brief and the reference:\n- " + _ref_note + "\n")
+        story.append(f"Held to what you said about this design: {_ref_note[:120]}")
     if _ex.notes(tenant, _ex.EMAIL):
         story.append(f"Held to what you have said about this brand's emails ({len(_ex.notes(tenant, _ex.EMAIL))} note(s)).")
     if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):

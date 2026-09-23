@@ -1301,6 +1301,72 @@ async def creative_note(request: Request, key: str = Depends(admin_key)):
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
 
+@app.post("/admin/reference_rename")
+async def reference_rename(request: Request, key: str = Depends(admin_key)):
+    """The owner's name for a design. Every name the reader writes sounds
+    like the last one, which is unusable as a label on a shelf."""
+    from fastapi.responses import RedirectResponse
+    from . import email_structures as _es
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    why = _es.rename(str(form.get("id", "")), str(form.get("name", "")))
+    arg = ("err", why) if why else ("ok", "renamed")
+    return RedirectResponse(_designs_back(str(form.get("tenant", "")),
+                                          str(form.get("key") or ""), arg), 303)
+
+
+@app.post("/admin/reference_note")
+async def reference_note(request: Request, key: str = Depends(admin_key)):
+    """WHY THIS ONE IS KEPT, in the owner's words — and it reaches the maker:
+    `recreate.run` puts it in front of the writer and the judge for every
+    email built on this design, beside the brand's standing notes."""
+    from fastapi.responses import RedirectResponse
+    from . import email_structures as _es
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    said = str(form.get("note", "")).strip()
+    why = _es.set_note(str(form.get("id", "")), said)
+    arg = (("err", why) if why else
+           ("ok", "kept — every email built on this design will hear it" if said
+            else "cleared"))
+    return RedirectResponse(_designs_back(str(form.get("tenant", "")),
+                                          str(form.get("key") or ""), arg), 303)
+
+
+@app.post("/admin/reference_rotation")
+async def reference_rotation(request: Request, key: str = Depends(admin_key)):
+    """IN OR OUT OF THIS BRAND'S ROTATION — per brand, because the library is
+    shared and the decision is not. Until 2026-09-23 "Not this one" set the
+    shared row to rejected, which took the design away from every account."""
+    from fastapi.responses import RedirectResponse
+    from . import email_structures as _es
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    said = _es.set_out(tenant, str(form.get("id", "")),
+                       not str(form.get("back_in") or "").strip())
+    arg = ("ok" if "rotation" in said else "err", said)
+    return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
+
+
+@app.post("/admin/reference_delete")
+async def reference_delete(request: Request, key: str = Depends(admin_key)):
+    """Remove a design from the shared library. The emails already built on
+    it are not touched — deleting the pattern does not unmake the work."""
+    from fastapi.responses import RedirectResponse
+    from . import email_structures as _es
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    said = _es.delete(str(form.get("id", "")))
+    arg = ("ok" if said.startswith("deleted") else "err", said)
+    return RedirectResponse(_designs_back(str(form.get("tenant", "")),
+                                          str(form.get("key") or ""), arg), 303)
+
+
 def _designs_back(tenant: str, key: str, arg: tuple) -> str:
     """Back to the Designs room of this brand's campaign email system — the
     one page the reference flow lives on."""
@@ -1353,6 +1419,20 @@ async def email_design_designate(request: Request, key: str = Depends(admin_key)
     said = _es.designate(tenant, str(form.get("structure", "")))
     arg = ("ok" if ("until you say" in said or "random" in said) else "err", said)
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
+
+
+@app.get("/admin/reference", response_class=HTMLResponse)
+def reference_page(request: Request, key: str = Depends(admin_key), tenant: str = "",
+                   id: str = "", ok: str = "", err: str = ""):
+    """ONE DESIGN'S PAGE: the reference beside ours, the judge's line, every
+    open finding and the rounds. The shelf carries the facts and one action
+    per row and sends the reader here for everything that needs room — which
+    is what stopped the room being 29 buttons on one page."""
+    from . import admin_ui as ui
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    link_key = key if request.query_params.get("key") else ""
+    return HTMLResponse(ui.render_reference(link_key, tenant, id, msg=ok, err=err))
 
 
 @app.get("/admin/email_recreation")
@@ -2874,7 +2954,13 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                      or request.query_params.get("ppage", "1"))
         except ValueError:
             pp = 1
-        return ui.render_systems(link_key, tenant,
+        # THE SHELF'S OWN VIEW — search, sort, filter and page, prefixed `d`
+        # so a reference shelf and the system pager never fight over `page`.
+        shelf = {"q": request.query_params.get("dq", ""),
+                 "sort": request.query_params.get("dsort", ""),
+                 "state": request.query_params.get("dstate", ""),
+                 "page": request.query_params.get("dpage", "1")}
+        return ui.render_systems(link_key, tenant, shelf=shelf,
                                  sub=request.query_params.get("sub", ""),
                                  msg=request.query_params.get("ok", ""),
                                  err=request.query_params.get("err", ""),

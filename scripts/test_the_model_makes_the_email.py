@@ -539,6 +539,19 @@ def main() -> int:
        and sum(1 for r in es.library() if r["source_asset_id"] == shrimp_id) == 1)
     ck("the drafter's brief for a design is its concept and its copy jobs",
        "THE DESIGN THIS SEND IS BUILT IN: a recipe" in es.brief(new) and "four numbered steps" in es.brief(new))
+    # WHAT THE OWNER SAID ABOUT THIS ONE DESIGN reaches the maker (2026-09-23).
+    # It is written on the shelf as "why we keep this", and a field that only
+    # sat on a card would be the same defect as a KB rule that never reaches a
+    # validator.
+    es.set_note(sid, "the four-step story, never the mascot")
+    compose_seen.clear()
+    got_n = rc.run(sid, "baci", "portofino", seed="note")
+    ck("the note on a design is put in front of the writer, in the owner's words",
+       any("never the mascot" in p for p in compose_seen), str(got_n.get("note"))[:120])
+    ck("  and the run says it was held to it",
+       "said about this design" in (got_n.get("note") or ""), (got_n.get("note") or "")[:200])
+    es.set_note(sid, "")
+
     es.approve(sid)
     ck("a chosen design overrides recency", es.pick("baci", designated=new["id"], recent_designs=[new["id"]])["structure"]["id"] == new["id"])
     es.designate("baci", new["id"])
@@ -656,9 +669,20 @@ def main() -> int:
        and bg[-1]["kind"] == "email_recreate" and bg[-1]["payload"]["mode"] == "swipe",
        str(bg[-1:])[:160])
     room = admin_ui._structures_card("s3cret", "baci")
-    ck("the room: paste at the top, the reference beside ours, the judge's line, the choice",
-       'action="/admin/email_reference"' in room and "ours, for baci" in room and "the judge: same concept" in room
-       and "Not this one" in room and "Use this for every campaign" in room and "draws at random from" in room)
+    # THE ROOM IS A SHELF NOW (2026-09-23): paste at the top, a row per
+    # reference with the facts, one action and a menu — and what needs room,
+    # the reference beside ours and the judge's line, on the design's own page.
+    ck("the room: paste at the top, a row per design, one action and a menu",
+       'action="/admin/email_reference"' in room and "Use for every campaign" in room
+       and 'details class="fix"' in room and "/admin/reference?" in room
+       and "draws at random from" in room)
+    ck("  and the judgement is NOT unfolded into the list",
+       "the judge: same concept" not in room and "open finding" not in room,
+       "seven references put 29 buttons and every finding on one page")
+    one = admin_ui._reference_page("s3cret", "baci", new["id"])
+    ck("  the design's own page carries the reference beside ours and the judge",
+       "ours, for baci" in one and "the judge: same concept" in one
+       and "every design" in one)
     r = c.get(f"/admin/email_recreation?key=s3cret&id={rc.latest(new['id'], 'baci')['id']}")
     ck("the kept HTML is served as a page", r.status_code == 200 and "<table" in r.text)
     r = c.post("/admin/email_recreate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": new["id"], "entity": "portofino"}, follow_redirects=False)

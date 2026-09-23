@@ -145,6 +145,102 @@ def _review(structure_id: str, verdict: str, by: str) -> str:
         return f"{verdict}: {row.name}"
 
 
+def rename(structure_id: str, name: str) -> str:
+    """The owner's name for a design wins. The maker's own name is read off
+    the reference and every one of them sounds like the last ("A recipe told
+    in four steps…"), which is unusable as a label on a shelf of twenty."""
+    name = " ".join(str(name or "").split())[:120]
+    if not name:
+        return "a design needs a name"
+    with db.SessionLocal() as s:
+        row = s.get(db.EmailStructure, structure_id)
+        if row is None:
+            return "no such design"
+        row.name = name
+        s.commit()
+        return ""
+
+
+def set_note(structure_id: str, note: str) -> str:
+    """WHY THIS ONE IS KEPT, in the owner's words — and it is not decoration:
+    `recreate.run` puts it in front of the maker and the judge for every
+    email built on this design. A field that only sat on a card would be the
+    same defect as a KB rule that never reaches a validator."""
+    note = " ".join(str(note or "").split())[:600]
+    with db.SessionLocal() as s:
+        row = s.get(db.EmailStructure, structure_id)
+        if row is None:
+            return "no such design"
+        prof = dict(row.profile or {})
+        if note:
+            prof["note"] = note
+        else:
+            prof.pop("note", None)
+        row.profile = prof
+        s.commit()
+        return ""
+
+
+def note_of(structure_id: str) -> str:
+    with db.SessionLocal() as s:
+        row = s.get(db.EmailStructure, structure_id)
+        return str((dict(row.profile or {}) if row else {}).get("note") or "")
+
+
+def delete(structure_id: str) -> str:
+    """Remove a design from the library for everybody. The recreations made
+    from it are left alone: they are what a brand's emails were built on, and
+    deleting the pattern does not unmake the work."""
+    from . import tenants
+    with db.SessionLocal() as s:
+        row = s.get(db.EmailStructure, structure_id)
+        if row is None:
+            return "no such design"
+        name = row.name
+        s.delete(row)
+        s.commit()
+    # a brand whose standing choice was this one draws at random again, and
+    # is told so rather than left pointing at nothing
+    freed = []
+    for t in [t_.key for t_ in tenants.all_tenants(include_paused=True)]:
+        if standing_designation(t) == structure_id:
+            designate(t, "")
+            freed.append(t)
+    said = f"deleted: {name}"
+    return said + (f" — {', '.join(freed)} draw at random again" if freed else "")
+
+
+#: WHICH DESIGNS THIS BRAND HAS TAKEN OUT. Kept per brand, because the library
+#: is shared and the decision is not: "not this one" for Baci said nothing
+#: about Eien, and until 2026-09-23 it rejected the design for every account
+#: at once. The library's own `review` still says whether a design is worth
+#: keeping AT ALL; this says whether THIS brand draws on it.
+_OUT = "designs_out"
+
+
+def out_for(tenant: str) -> set:
+    from . import kb
+    b = kb.ensure_brand(tenant, tenant)
+    got = (dict(getattr(b, "visual", None) or {}).get(_OUT)) or []
+    return {str(x) for x in got if x}
+
+
+def set_out(tenant: str, structure_id: str, out: bool) -> str:
+    from . import kb
+    if not (tenant and structure_id):
+        return "a brand and a design are needed"
+    b = kb.ensure_brand(tenant, tenant)
+    visual = dict(getattr(b, "visual", None) or {})
+    have = {str(x) for x in (visual.get(_OUT) or []) if x}
+    have.add(structure_id) if out else have.discard(structure_id)
+    visual[_OUT] = sorted(have)
+    kb.set_brand(tenant, visual=visual)
+    if out and standing_designation(tenant) == structure_id:
+        designate(tenant, "")
+        return "taken out of this brand's rotation — its campaigns draw at random again"
+    return "taken out of this brand's rotation" if out else "back in this brand's rotation"
+
+
 def sequence_from_brief(brief: dict) -> list:
     """A rough block order read off a brief's sections — ONLY so the rules
     that bind at use keep working (`requires_of`: products need a catalogue,
@@ -358,8 +454,13 @@ def eligible(tenant: str, *, intent: str = "", fmt: str = "",
     the older, order-only structures."""
     recent = {signature(s) for s in (recent_shapes or []) if s}
     recent_ids = {d for d in (recent_designs or []) if d}
+    # WHAT THIS BRAND TOOK OUT. The library is shared and the decision is not
+    # (2026-09-23) — "not this one" is a fact about this brand's rotation.
+    taken_out = out_for(tenant)
     out = []
     for st in library(review="approved"):
+        if st["id"] in taken_out:
+            continue
         if intent and st["fits_intents"] and intent not in st["fits_intents"]:
             continue
         if fmt and st["fits_formats"] and fmt not in st["fits_formats"]:
@@ -582,24 +683,9 @@ def add_swipe(raw_url: str, *, tenant: str = SWIPE_TENANT) -> dict:
             "image": meta["image"]}
 
 
-def swipes(tenant: str = SWIPE_TENANT) -> list[dict]:
-    """Every swiped screenshot, with the structure it was read into — or the
-    fact that it was not. The place to SEE the references."""
-    with db.SessionLocal() as s:
-        rows = (s.query(db.KbAsset)
-                .filter(db.KbAsset.tenant == tenant, db.KbAsset.kind == SWIPE_KIND,
-                        db.KbAsset.status == "active")
-                .order_by(db.KbAsset.created_at.desc()).all())
-        by_asset = {str(r.source_asset_id): r for r in
-                    s.query(db.EmailStructure).all() if r.source_asset_id}
-        out = []
-        for a in rows:
-            st = by_asset.get(a.id)
-            out.append({"asset_id": a.id, "image": a.url or "", "title": a.title or "",
-                        "source_url": a.source or "",
-                        "structure_id": st.id if st is not None else "",
-                        "structure_name": st.name if st is not None else "",
-                        "review": st.review if st is not None else "unread"})
-        return out
-
-
+# `swipes()` lived here until 2026-09-23: it mapped every swiped screenshot to
+# the structure read off it, for a room that drew the two side by side. The
+# shelf reads a design's reference off the design's own row
+# (`source_asset_id`), which is the one that survives two structures being
+# read from one screenshot, and a swipe that failed to become a design is now
+# the failed JOB that says so.
