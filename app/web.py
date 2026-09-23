@@ -1380,6 +1380,55 @@ async def reference_delete(request: Request, key: str = Depends(admin_key)):
                                           str(form.get("key") or ""), arg), 303)
 
 
+@app.get("/admin/jobs.json")
+def jobs_json(key: str = Depends(admin_key), tenant: str = "") -> dict:
+    """What the frame's pill reads every few seconds: how many jobs this
+    account has in the air and what the first of them is doing.
+
+    A pure read, deliberately small — the pill polls it on every console page,
+    and a poller that can start work is the defect `render_diagnostics` has a
+    comment about. It returns counts and sentences; nothing here writes."""
+    from . import jobs as _jobs_
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    if not tenant:
+        return {"n_flight": 0, "says": ""}
+    got = _jobs_.board(tenant, done=0)
+    return {"n_flight": got["n_flight"], "says": got["says"],
+            "running": len(got["running"]), "queued": len(got["queued"])}
+
+
+@app.post("/admin/job_cancel")
+async def job_cancel(request: Request, key: str = Depends(admin_key)):
+    """Take a queued job off the queue before a worker reaches it."""
+    from fastapi.responses import RedirectResponse
+    from . import jobs as _jobs_
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    why = _jobs_.cancel(str(form.get("id", "")))
+    return RedirectResponse(
+        _console_url(tenant, "jobs", **({"err": why} if why else
+                                        {"ok": "taken off the queue"})), 303)
+
+
+@app.post("/admin/job_again")
+async def job_again(request: Request, key: str = Depends(admin_key)):
+    """Queue the same work again — for one a restart stopped, or one that
+    failed for a reason since fixed. A NEW row: the old one is what happened."""
+    from fastapi.responses import RedirectResponse
+    from . import jobs as _jobs_
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    got = _jobs_.again(str(form.get("id", "")))
+    arg = (("err", got.get("why") or "that could not be queued") if not got.get("ok")
+           else ("ok", got.get("why") or "queued again — a worker picks it up shortly"))
+    return RedirectResponse(_console_url(tenant, "jobs", **{arg[0]: arg[1]}), 303)
+
+
 def _designs_back(tenant: str, key: str, arg: tuple) -> str:
     """Back to the Designs room of this brand's campaign email system — the
     one page the reference flow lives on, at its canonical address."""
@@ -2978,6 +3027,12 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                  # queue opens on the page that holds it.
                                  plan_id=request.query_params.get("plan", ""),
                                  ppage=pp)
+    if tab == "jobs":
+        # THE QUEUE, at /admin/<account>/jobs — where the pill in the frame
+        # clicks into (owner, 2026-09-23).
+        return ui.render_jobs(link_key, tenant,
+                              msg=request.query_params.get("ok", ""),
+                              err=request.query_params.get("err", ""))
     if tab == "kb":
         try:
             kpg = int(request.query_params.get("page", "1"))

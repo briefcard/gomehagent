@@ -38,6 +38,48 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "the_pill_needs_script_to_be_true",
+        "file": "app/admin_ui.py",
+        "find": '    hidden = "" if got["n_flight"] else " hidden"\n',
+        "replace": '    hidden = " hidden"  # SABOTAGE\n',
+        "suites": ["test_the_queue_is_visible.py"],
+        "why": "the pill renders empty and fills in only once a script has "
+               "run, so a page read with script blocked — or in the seconds "
+               "before the first poll — says nothing is happening while a "
+               "twelve-minute recreation runs",
+    },
+    {
+        "name": "a_queued_job_does_not_know_its_place",
+        "file": "app/jobs.py",
+        "find": '                got["position"] = len(queued) + 1\n',
+        "replace": '                got["position"] = 1  # SABOTAGE\n',
+        "suites": ["test_the_queue_is_visible.py"],
+        "why": "every waiting job says it is next, so three behind a long "
+               "recreation read as one about to start — the silence this "
+               "queue was built to remove, wearing a number",
+    },
+    {
+        "name": "a_running_job_can_be_cancelled",
+        "file": "app/jobs.py",
+        "find": '        if row.state != "queued":\n',
+        "replace": '        if False:  # SABOTAGE\n',
+        "suites": ["test_the_queue_is_visible.py"],
+        "why": "a job a worker is inside is marked cancelled while it keeps "
+               "running — the row and the process disagree, which is the "
+               "two-stores problem this table exists to end",
+    },
+    {
+        "name": "running_it_again_queues_nothing",
+        "file": "app/jobs.py",
+        "find": '    return enqueue(tenant, kind_, payload=payload, system_key=system_key,\n'
+                '                   label=label, dedupe=True)',
+        "replace": '    return {"ok": True, "id": job_id, "why": ""}  # SABOTAGE',
+        "suites": ["test_the_queue_is_visible.py"],
+        "why": "\"Run it again\" reports success and queues nothing — the "
+               "owner presses it, the pill stays empty, and the work never "
+               "happens",
+    },
+    {
         "name": 'the_key_rides_in_the_address_bar_again',
         "file": 'app/web.py',
         "find": '            and "text/html" in request.headers.get("accept", "")\n',

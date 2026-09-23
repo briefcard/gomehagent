@@ -59,7 +59,7 @@ STALE_AFTER_SECONDS = 5 * 60
 #: heartbeat extends it, so this is the grace period after the last beat.
 LEASE_SECONDS = STALE_AFTER_SECONDS
 
-TERMINAL = ("done", "failed", "interrupted")
+TERMINAL = ("done", "failed", "interrupted", "cancelled")
 
 #: THE REGISTRY. A kind names what to call and what a deploy costs.
 #:
@@ -576,6 +576,7 @@ def as_dict(row) -> dict:
         "done": "ran",
         "failed": "ran and failed",
         "interrupted": "stopped by a restart, and not started again on its own",
+        "cancelled": "taken off the queue before a worker reached it",
     }.get(state, state)
     return {"id": row.id, "tenant": row.tenant, "kind": row.kind,
             "system_key": row.system_key or "", "label": row.label or "",
@@ -602,6 +603,89 @@ def status(tenant: str, kind_: str) -> dict:
         return {}
     return {"state": got["state"], "detail": got["detail"], "at": got["at"],
             "says": got["says"], "attempts": got["attempts"]}
+
+
+def board(tenant: str, *, done: int = 12) -> dict:
+    """WHAT THIS ACCOUNT HAS IN THE AIR, for the pill in the frame and the
+    queue room it clicks into.
+
+    `{running: [...], queued: [...], done: [...], n_flight, says}` — the
+    in-flight rows carry a POSITION and a `waited`/`ran_for` in seconds,
+    because "queued" with nothing else said is the same silence the queue was
+    built to remove: three of them behind a twelve-minute recreation is a
+    different fact from one that is about to start.
+    """
+    now = db.utcnow()
+
+    def _secs(then) -> int:
+        return int((now - db.as_utc(then)).total_seconds()) if then else 0
+
+    with db.SessionLocal() as s:
+        rows = (s.query(db.JobQueue).filter(db.JobQueue.tenant == tenant)
+                .order_by(db.JobQueue.created_at.asc()).all())
+        running, queued, fin = [], [], []
+        for r in rows:
+            got = as_dict(r)
+            if r.state == "running":
+                got["ran_for"] = _secs(r.started_at)
+                running.append(got)
+            elif r.state == "queued":
+                got["waited"] = _secs(r.created_at)
+                got["position"] = len(queued) + 1
+                queued.append(got)
+            else:
+                got["ran_for"] = (int((db.as_utc(r.finished_at)
+                                       - db.as_utc(r.started_at)).total_seconds())
+                                  if r.finished_at and r.started_at else 0)
+                fin.append(got)
+        fin.reverse()
+        fin = fin[:max(0, done)]
+    n = len(running) + len(queued)
+    if not n:
+        says = ""
+    else:
+        first = (running or queued)[0]
+        says = first.get("detail") or first.get("label") or first["kind"]
+        if n > 1:
+            says += f" · {n - 1} more waiting"
+    return {"running": running, "queued": queued, "done": fin,
+            "n_flight": n, "says": says}
+
+
+def cancel(job_id: str) -> str:
+    """Take a QUEUED job off the queue. "" when it went, else why not.
+
+    A running job is not cancellable and says so rather than pretending: the
+    worker is inside a model call, and a row marked cancelled under it would
+    be a second store disagreeing with the process — which is the whole thing
+    this table exists to stop.
+    """
+    with db.SessionLocal() as s:
+        row = s.get(db.JobQueue, job_id)
+        if row is None:
+            return "no such job"
+        if row.state != "queued":
+            return ("it is already running — a worker is inside it, and it "
+                    "finishes or a restart interrupts it"
+                    if row.state == "running" else f"it is {row.state}, not queued")
+        row.state, row.detail = "cancelled", "taken off the queue by hand"
+        row.finished_at = db.utcnow()
+        s.commit()
+        return ""
+
+
+def again(job_id: str) -> dict:
+    """Queue the same work again — the control a job that was interrupted or
+    failed carries. A NEW row, because the old one is what happened and the
+    history the one-row store never kept is the point."""
+    with db.SessionLocal() as s:
+        row = s.get(db.JobQueue, job_id)
+        if row is None:
+            return {"ok": False, "why": "no such job", "id": ""}
+        kind_, tenant, payload = row.kind, row.tenant, dict(row.payload or {})
+        system_key, label = row.system_key or "", row.label or ""
+    return enqueue(tenant, kind_, payload=payload, system_key=system_key,
+                   label=label, dedupe=True)
 
 
 def recent(tenant: str = "", limit: int = 20) -> list[dict]:

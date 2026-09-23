@@ -295,6 +295,22 @@ h3{font:700 .98rem/1.3 var(--sans);margin:0}
 .gnote[data-state=world] .lb{color:var(--mut)}
 .meter i.w{background:var(--mut)}
 /* File the judgement where you formed it. Two buttons, no form to scroll to. */
+/* THE PILL. Work runs in the worker since 2026-09-23, which is the right
+   place for it and also out of sight: a press returns instantly and the
+   only sign anything is happening was a card on the page you pressed it
+   from. This says what is in the air on EVERY page, and clicks into the
+   queue. Fixed, bottom-left, above nothing — it must never cover a control. */
+.jobpill{position:fixed;left:14px;bottom:14px;z-index:60;max-width:min(30rem,72vw);
+  display:flex;gap:8px;align-items:center;padding:.5em .8em;border-radius:999px;
+  background:var(--bg);border:1px solid var(--acc);color:var(--ink);
+  box-shadow:0 8px 26px rgba(0,0,0,.26);font-size:.74rem;text-decoration:none}
+.jobpill:hover{border-color:var(--acc);color:var(--acc)}
+.jobpill .spin{width:9px;height:9px;border-radius:50%;background:var(--acc);
+  flex:0 0 auto;animation:jobpulse 1.4s ease-in-out infinite}
+.jobpill b{font-family:var(--mono);font-size:.7rem}
+.jobpill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@keyframes jobpulse{0%,100%{opacity:.35}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.jobpill .spin{animation:none}}
 .nacts{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
 .nacts form{margin:0}
 .nacts button{font-family:var(--mono);font-size:.62rem;padding:.34em .55em;
@@ -942,6 +958,127 @@ def _every_note(every: bool, what: str) -> str:
             if every else "")
 
 
+def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str:
+    """THE QUEUE: what is running, what is behind it, and what just ran.
+
+    The pill says how many; this says which, in what order, how long each has
+    been at it and what it is doing right now — and carries the two controls
+    a queue needs: take one off before a worker reaches it, and run one again
+    that a restart stopped.
+    """
+    from . import jobs as _j
+    tenant, _here, _rows = _account(tenant)
+    flash = (f'<div class="note">{_esc(msg)}</div>' if msg else "") + (
+        f'<div class="note err">{_esc(err)}</div>' if err else "")
+    got = _j.board(tenant)
+
+    def _mins(n: int) -> str:
+        n = int(n or 0)
+        return f"{n}s" if n < 90 else f"{n // 60}m {n % 60}s"
+
+    def _act(action: str, label: str, job_id: str, cls: str = "sec") -> str:
+        return (f'<form method="post" action="/admin/{action}" class="inl">'
+                f'<input type="hidden" name="key" value="{_esc(key)}">'
+                f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+                f'<input type="hidden" name="id" value="{_esc(job_id)}">'
+                f'<button class="{cls}">{_esc(label)}</button></form>')
+
+    def _row(j: dict, place: str = "") -> str:
+        state = j["state"]
+        chip = ('<span class="chip on">running</span>' if state == "running" else
+                f'<span class="chip nb">{_esc(place)}</span>' if state == "queued" else
+                '<span class="chip off">failed</span>' if state == "failed" else
+                f'<span class="chip nb">{_esc(state)}</span>')
+        how_long = (f'{_mins(j.get("ran_for", 0))} so far' if state == "running" else
+                    f'waiting {_mins(j.get("waited", 0))}' if state == "queued" else
+                    (f'took {_mins(j.get("ran_for", 0))}' if j.get("ran_for") else ""))
+        acts = ""
+        if state == "queued":
+            acts = _act("job_cancel", "Take it off the queue", j["id"])
+        elif state in ("interrupted", "failed"):
+            acts = _act("job_again", "Run it again", j["id"])
+        return f"""
+      <div class="msg">
+        {chip} <b>{_esc(j.get("label") or j["kind"])}</b>
+        <span class="when">{_esc(j["kind"])}
+          {" · " + _esc(j["system_key"]) if j["system_key"] else ""}
+          {" · " + _esc(how_long) if how_long else ""}
+          {" · attempt " + str(j["attempts"]) if j["attempts"] > 1 else ""}
+          {" · " + _esc(str(j["at"])[:16].replace("T", " ")) if j.get("at") else ""}</span>
+        <br><span class="mut">{_esc(j["says"])}{" &mdash; " + _esc(j["detail"])
+                                                   if j.get("detail") else ""}</span>
+        {f'<div class="nacts">{acts}</div>' if acts else ""}
+      </div>"""
+
+    flight = ("".join(_row(j) for j in got["running"])
+              + "".join(_row(j, f"{j['position']} in line") for j in got["queued"]))
+    body = f"""
+{flash}
+<div class="card"><div class="head"><h2>The queue</h2>
+  <span class="mut">the heavy work runs in the worker; this is what it has
+  in hand and what is behind it</span></div>
+  {flight if flight else '<p class="mut">Nothing in the air. A press that starts '
+   'something slow — recreating a reference, a set of frames, filling a board, '
+   'a catalogue sync — appears here within a few seconds.</p>'}
+  <p class="mut">A worker picks up the next one within half a minute, and runs
+  up to four of this account&rsquo;s jobs a turn.</p>
+</div>
+<div class="card"><div class="head"><h2>What ran</h2>
+  <span class="mut">newest first &middot; every run its own row</span></div>
+  {"".join(_row(j) for j in got["done"]) if got["done"] else
+   '<p class="mut">Nothing has run for this account yet.</p>'}
+</div>"""
+    return _shell(key, "jobs", "Queue", body, tenant=tenant)
+
+
+def _job_pill(tenant: str) -> str:
+    """WHAT IS IN THE AIR, on every page of this account.
+
+    Owner, 2026-09-23, after the heavy work moved to the worker: *"can we
+    have a loading toaster that updates us on the status of each ongoing job
+    and clicks into a job queue that we can track in case there are several
+    jobs in the queue?"* The move was right and it cost visibility: a press
+    returns instantly now, and the only sign anything was happening was a
+    card on the page you pressed it from.
+
+    Rendered SERVER-SIDE, so it is true without a line of script running —
+    the script below only keeps it true while you read. Nothing when the
+    account has nothing in the air: a permanent badge saying "0 jobs" is
+    furniture, and the pill has to mean something the moment it appears.
+    """
+    if not tenant or tenant == ALL:
+        return ""
+    from . import jobs as _j
+    try:
+        got = _j.board(tenant, done=0)
+    except Exception:                                            # noqa: BLE001
+        return ""                       # a frame must never fail on a widget
+    href = url(tenant, "jobs")
+    hidden = "" if got["n_flight"] else " hidden"
+    return f"""
+<a class="jobpill" id="jobpill" href="{_esc(href)}"{hidden}>
+  <span class="spin"></span><b id="jobn">{got["n_flight"]}</b>
+  <span id="jobsays">{_esc(got["says"])}</span></a>
+<script>
+(function(){{
+  var pill=document.getElementById('jobpill');if(!pill)return;
+  var n=document.getElementById('jobn'),says=document.getElementById('jobsays'),stop=0;
+  function tick(){{
+    if(stop>40)return;                       /* ~3 minutes of a quiet page */
+    fetch('/admin/jobs.json?tenant={_esc(tenant)}',{{credentials:'same-origin'}})
+      .then(function(r){{return r.ok?r.json():null;}})
+      .then(function(d){{
+        if(!d)return;
+        if(d.n_flight){{stop=0;pill.hidden=false;n.textContent=d.n_flight;
+          says.textContent=d.says||'';}}
+        else {{stop++;pill.hidden=true;}}
+      }}).catch(function(){{stop++;}});
+  }}
+  setInterval(tick,5000);
+}})();
+</script>"""
+
+
 def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
            tenant: str = "", head: str = "") -> str:
     """Sidebar, client switcher, then the page.
@@ -1017,6 +1154,12 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
                   f"&amp;tenant={_esc(tenant)}")
     waiting = (f'<a class="pend" href="{_pend_href}">'
                f'<span class="ico">!</span>{_n} waiting</a>' if _n else "")
+    # THE QUEUE IS ALWAYS REACHABLE, not only while the pill is up. The pill
+    # appears when something is in the air and hides when it is not, which is
+    # right for a pill and wrong as the only door: "what ran, and did it
+    # finish" is a question asked most often when nothing is running.
+    queue_link = ("" if tenant == ALL else
+                  f'<a href="{_esc(url(tenant, "jobs"))}">Queue</a>')
 
     who = _account_name(tenant, here)
     # The client view is one account's page; there is no portal for "all".
@@ -1055,14 +1198,14 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     <div class="switch">{switch}</div>
     <div class="navlabel">Manage</div>
     {nav}
-    <div class="foot">{waiting}{client_view}{sign_out}</div>
+    <div class="foot">{waiting}{queue_link}{client_view}{sign_out}</div>
   </div>
   <div class="main">
     <div class="pagehead"><h1>{_esc(title)}</h1>
       <span class="who">{_esc(who)}</span>{theme_ctl}</div>
     {body}
   </div>
-</div></body></html>"""
+</div>{_job_pill(tenant)}</body></html>"""
 
 
 def _esc(v) -> str:
