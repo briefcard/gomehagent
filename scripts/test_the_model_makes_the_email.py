@@ -665,7 +665,7 @@ def main() -> int:
     c = TestClient(web.app)
     r = c.post("/admin/email_reference?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "https://reallygoodemails.com/emails/shrimp"}, follow_redirects=False)
     ck("pasting a link posts, queues the work, and comes back to the Designs room",
-       r.status_code == 303 and "wf=designs" in r.headers.get("location", "")
+       r.status_code == 303 and "/designs" in r.headers.get("location", "")
        and bg[-1]["kind"] == "email_recreate" and bg[-1]["payload"]["mode"] == "swipe",
        str(bg[-1:])[:160])
     room = admin_ui._structures_card("s3cret", "baci")
@@ -674,7 +674,7 @@ def main() -> int:
     # the reference beside ours and the judge's line, on the design's own page.
     ck("the room: paste at the top, a row per design, one action and a menu",
        'action="/admin/email_reference"' in room and "Use for every campaign" in room
-       and 'details class="fix"' in room and "/admin/reference?" in room
+       and 'details class="fix"' in room and "/designs/" in room
        and "draws at random from" in room)
     ck("  and the judgement is NOT unfolded into the list",
        "the judge: same concept" not in room and "open finding" not in room,
@@ -706,7 +706,7 @@ def main() -> int:
        and bg[-1]["kind"] == "email_recreate"
        and bg[-1]["payload"].get("structure") == fresh["id"], str(bg[-1:])[:160])
     r = c.post("/admin/email_design_designate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": new["id"]}, follow_redirects=False)
-    ck("the standing choice posts and comes back to the room", r.status_code == 303 and "wf=designs" in r.headers.get("location", "")
+    ck("the standing choice posts and comes back to the room", r.status_code == 303 and "/designs" in r.headers.get("location", "")
        and es.standing_designation("baci") == new["id"])
     es.designate("baci", "")
     r = c.post("/admin/picture_kind?key=s3cret", data={"key": "s3cret", "tenant": "baci", "asset_id": a_id, "kind": "flat-lay"}, follow_redirects=False)

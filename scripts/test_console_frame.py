@@ -227,7 +227,8 @@ def main() -> int:
     from app import config as _cfg, web as _web
 
     def _on(r):
-        m = _re.search(r'class="[^"]*on[^"]*"[^>]*tenant=([a-z]+)', r.text)
+        # the account is in the PATH since 2026-09-23: /admin/<account>/<tab>
+        m = _re.search(r'class="[^"]*\bon\b[^"]*"[^>]*href="/admin/([a-z]+)/', r.text)
         return m.group(1) if m else ""
 
     _c = _TC(_web.app)

@@ -233,6 +233,32 @@ async def _console_session(request: Request, call_next):
     a Response directly (the redirects after a form post), and FastAPI does not
     merge a dependency's response headers into those.
     """
+    # AND TAKE IT OUT OF THE ADDRESS BAR. A key in the URL is a key in the
+    # browser's history, in the referrer of every outbound click, in whatever
+    # the owner pastes into a chat or a ticket — and in every link the page
+    # then draws, which is how one `?key=` at the front door becomes a
+    # session where the credential is on screen all day (owner, 2026-09-23,
+    # having just pasted a live console URL: *"Isn't this ridiculous?"*).
+    #
+    # So a BROWSER arriving with a valid key is bounced once to the same page
+    # without it, carrying the cookie. The redirect is deliberately limited to
+    # requests that asked for HTML: a script, a deploy check or a suite sends
+    # `Accept: */*`, keeps working exactly as before, and is not owed a
+    # cookie jar to read a page with.
+    if (request.method == "GET"
+            and request.url.path.startswith(_GATED_PREFIXES)
+            and request.query_params.get("key")
+            and "text/html" in request.headers.get("accept", "")
+            and _matches(request.query_params.get("key", ""), config.APPROVAL_SECRET or "")):
+        from urllib.parse import urlencode
+        from fastapi.responses import RedirectResponse
+        rest = [(k, v) for k, v in request.query_params.multi_items() if k != "key"]
+        out = RedirectResponse(
+            request.url.path + (f"?{urlencode(rest)}" if rest else ""), 303)
+        out.set_cookie(ADMIN_COOKIE, _console_token(), max_age=_COOKIE_MAX_AGE,
+                       httponly=True, samesite="lax",
+                       secure=request.url.scheme == "https")
+        return out
     response = await call_next(request)
     if not request.url.path.startswith(_GATED_PREFIXES):
         return response
@@ -1369,13 +1395,9 @@ async def reference_delete(request: Request, key: str = Depends(admin_key)):
 
 def _designs_back(tenant: str, key: str, arg: tuple) -> str:
     """Back to the Designs room of this brand's campaign email system — the
-    one page the reference flow lives on."""
-    from urllib.parse import quote
-    back = (f"/admin/ui?tab=systems&tenant={quote(tenant)}&system=campaign_email&wf=designs"
-            f"&{arg[0]}={quote(arg[1])}")
-    if key:
-        back += f"&key={quote(key)}"
-    return back
+    one page the reference flow lives on, at its canonical address."""
+    from . import admin_ui as ui
+    return ui.url(tenant, "systems", "campaign_email", "designs", **{arg[0]: arg[1]})
 
 
 @app.post("/admin/email_reference")
@@ -2931,7 +2953,7 @@ def admin_ui(request: Request, key: str = Depends(admin_key),
 
 
 def _console_body(request: Request, key: str, tab: str, tenant: str,
-                  started: str):
+                  started: str, system: str = "", room: str = ""):
     """The console. Opens on Review — the tab the day starts on (owner,
     2026-08-21: the fastest path to the actual work). It landed on
     Connections for historical reasons: that tab existed first."""
@@ -2964,8 +2986,13 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
                                  sub=request.query_params.get("sub", ""),
                                  msg=request.query_params.get("ok", ""),
                                  err=request.query_params.get("err", ""),
-                                 system=request.query_params.get("system", ""),
-                                 wf=request.query_params.get("wf", ""),
+                                 # THE PATH FIRST. `/admin/baci/systems/
+                                 # campaign_email/designs` names the system
+                                 # and the room; the query form still
+                                 # resolves for everything written before
+                                 # 2026-09-23 and for every bookmark.
+                                 system=system or request.query_params.get("system", ""),
+                                 wf=room or request.query_params.get("wf", ""),
                                  # Which plan the reader came for, so the
                                  # queue opens on the page that holds it.
                                  plan_id=request.query_params.get("plan", ""),
@@ -2997,7 +3024,7 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
             days = 30
         return ui.render_assurance(
             link_key, tenant, days=max(1, min(days, 365)),
-            system=request.query_params.get("system", ""),
+            system=system or request.query_params.get("system", ""),
             rule=request.query_params.get("rule", ""),
             # WHAT A RUN WAS DRAFTING WITHOUT — the other half of the
             # drill-down. `rule` opens what the layer CAUGHT; `gap` opens the
@@ -9690,3 +9717,99 @@ def tenant_scope_admin(key: str = Depends(admin_key), report_only: str = "") -> 
     return {"filled": filled, "report": tenant_scope.report(),
             "note": "unassigned rows are excluded from per-client queries by "
                     "default — set them by hand or leave them out of reports"}
+
+
+# ---------------------------------------------------------------------------
+# THE CONSOLE'S CANONICAL ADDRESSES
+#
+# Owner, 2026-09-23: *"We need to fix the way we do routing — look at how
+# messy this is."* The page's identity moves into the path, in the order a
+# person would say it, and the query keeps only what is a view OF that page:
+#
+#     /admin/baci/systems/campaign_email/designs?dstate=out&dpage=2
+#     /admin/baci/brand
+#     /admin/all/content
+#
+# These are declared at the END of this module on purpose: Starlette matches
+# in declaration order, so every named route above — `/admin/work/{id}`,
+# `/admin/oauth/{provider}`, every action — still wins against the two-segment
+# pattern here. `test_console_routing` holds that order, because a route added
+# below these would be shadowed by them and answer the console instead.
+#
+# `/admin/ui?tab=…` keeps working and is not redirected: bookmarks, the links
+# in older pages and every suite go on resolving. What changed is what the
+# console EMITS, which is what the address bar ends up showing.
+# ---------------------------------------------------------------------------
+
+def _console_at(request: Request, key: str, tenant: str, tab: str,
+                system: str = "", room: str = ""):
+    from . import admin_ui as ui
+    ui.set_theme(request.cookies.get(THEME_COOKIE, ""))
+    who = ui.ALL if tenant == "all" else tenant
+    body = _console_body(request, key, tab, who, "", system=system, room=room)
+    if not isinstance(body, str):
+        return body
+    resp = HTMLResponse(body)
+    if who and who != ui.ALL:
+        resp.set_cookie(ACCOUNT_COOKIE, who, max_age=_COOKIE_MAX_AGE,
+                        httponly=True, samesite="lax",
+                        secure=request.url.scheme == "https")
+    return resp
+
+
+@app.get("/admin/{tenant}", response_class=HTMLResponse)
+def console_account(request: Request, tenant: str, key: str = Depends(admin_key)):
+    """An account on its own opens on the tab the day starts on. `/admin/baci`
+    is the shortest true thing a person can type, so it answers rather than
+    404s — but only for an account that exists: an unknown name is a typo,
+    and rendering the first account's data under it is the one mistake this
+    console's frame was rebuilt to stop making."""
+    from fastapi.responses import RedirectResponse
+    from . import admin_ui as ui, tenants as _t
+    # A NAME THAT IS NOT AN ACCOUNT IS NOT THIS ROUTE'S BUSINESS. One segment
+    # under /admin/ is mostly ACTIONS — `/admin/assets_decide` and two dozen
+    # siblings — and a GET on one of those has its own answer: the console
+    # with a sentence saying a button sends it. Deciding that here, before
+    # the session check, keeps that rule working rather than turning every
+    # mistyped action into a sign-in page.
+    known = {t.key for t in _t.all_tenants(include_paused=True)} | {"all"}
+    if tenant not in known:
+        raise StarletteHTTPException(status_code=405)
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    return RedirectResponse(ui.url(tenant, "content"), 303)
+
+
+@app.get("/admin/{tenant}/{tab}", response_class=HTMLResponse)
+def console_tab(request: Request, tenant: str, tab: str,
+                key: str = Depends(admin_key)):
+    return _console_at(request, key, tenant, tab)
+
+
+@app.get("/admin/{tenant}/{tab}/{system}", response_class=HTMLResponse)
+def console_system(request: Request, tenant: str, tab: str, system: str,
+                   key: str = Depends(admin_key)):
+    return _console_at(request, key, tenant, tab, system)
+
+
+@app.get("/admin/{tenant}/{tab}/{system}/{room}", response_class=HTMLResponse)
+def console_room(request: Request, tenant: str, tab: str, system: str, room: str,
+                 key: str = Depends(admin_key)):
+    return _console_at(request, key, tenant, tab, system, room)
+
+
+@app.get("/admin/{tenant}/{tab}/{system}/{room}/{item}", response_class=HTMLResponse)
+def console_item(request: Request, tenant: str, tab: str, system: str, room: str,
+                 item: str, key: str = Depends(admin_key)):
+    """ONE THING IN A ROOM, at its own address — a design on the Designs
+    shelf today: `/admin/baci/systems/campaign_email/designs/<id>`. A page you
+    can send to somebody is a page with a URL that says what it is."""
+    from . import admin_ui as ui
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    ui.set_theme(request.cookies.get(THEME_COOKIE, ""))
+    if (tab, room) == ("systems", "designs"):
+        return HTMLResponse(ui.render_reference(
+            "", tenant, item, msg=request.query_params.get("ok", ""),
+            err=request.query_params.get("err", "")))
+    return _console_at(request, key, tenant, tab, system, room)

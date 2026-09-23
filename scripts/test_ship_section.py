@@ -75,7 +75,7 @@ def main() -> int:
     print("\n— the entry points lead here, not to the fallback —")
     frame = admin_ui.render_plan("s3cret", "baci")
     ck("the frame's waiting pill targets the section",
-       "tab=content&amp;sub=ship" in frame and "/admin/pending" not in
+       "/admin/baci/content?sub=ship" in frame and "/admin/pending" not in
        frame.split("waiting</a>")[0].rsplit("<a", 1)[-1],
        "/admin/pending survives only as the unauthenticated-email fallback")
 

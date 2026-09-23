@@ -85,8 +85,8 @@ def main() -> int:
     runs_v = wf("runs")
     ck("Runs holds the five numbers", "</b> runs" in runs_v)
     ck("the rail offers every section",
-       all(f"&amp;wf={v}" in settings for v, _l in admin_ui.WORKFLOW_SUBS),
-       "each section is a tab now, not a scroll")
+       all(f"/{v}\"" in settings for v, _l in admin_ui.WORKFLOW_SUBS),
+       "each section is a tab now, not a scroll — and a path, not a parameter")
 
     # ---- 3. ONE toggle convention ----------------------------------------
     print("\n— one toggle, everywhere —")

@@ -90,6 +90,15 @@ def main() -> int:
     def resolves(p: str) -> bool:
         if p in routes:
             return True
+        # ASK THE ROUTER, not a second implementation of it. Since 2026-09-23
+        # the console's pages live at `/admin/<tenant>/<tab>/…`, which no
+        # literal comparison can answer — and a suite that re-implements the
+        # matching would drift from the thing it is checking.
+        from starlette.routing import Match
+        scope = {"type": "http", "method": "GET", "path": p, "path_params": {},
+                 "headers": [], "query_string": b"", "root_path": ""}
+        if any(r.matches(scope)[0] is not Match.NONE for r in app.routes):
+            return True
         return any(r == p or r.startswith(p + "/") or r.startswith(p + "{")
                    or (r.split("{")[0].rstrip("/") == p) for r in routes)
 

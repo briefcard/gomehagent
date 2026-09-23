@@ -728,6 +728,37 @@ BG_PICTURE_LABELS = (("ad_frames", "Ad frames"),
 #: it before it can be started at all.
 BG_ALL_LABELS = BG_LABELS + BG_BRAND_LABELS + BG_PICTURE_LABELS
 
+def url(tenant: str, tab: str = "content", *parts, **view) -> str:
+    """THE ONE PLACE A CONSOLE LINK IS BUILT.
+
+    Owner, 2026-09-23, on `/admin/ui?tab=systems&tenant=baci&system=campaign_
+    email&wf=designs&key=…`: *"We need to fix the way we do routing — look at
+    how messy this is … Isn't this ridiculous?"* It was: the path said
+    nothing, four query parameters carried the identity of the page, and the
+    credential rode along beside them.
+
+    The identity of a page goes in the PATH, in the order you would say it —
+    the account, then the tab, then whatever that tab nests:
+
+        /admin/baci/systems/campaign_email/designs
+        /admin/baci/brand
+        /admin/baci/content?page=2
+
+    and the query keeps only what is genuinely a VIEW of that page: a page
+    number, a search, a sort, a flash message. A link built anywhere else is
+    a link that drifts, which is why every caller comes through here.
+    """
+    from urllib.parse import quote, urlencode
+    # "all" rather than the internal `*`: a path segment a person can type,
+    # and the route maps it back. The cross-account view is a place you go on
+    # purpose, so it is named in the URL like everywhere else.
+    who = "all" if (not tenant or tenant == ALL) else tenant
+    path = "/admin/" + "/".join(quote(str(p_), safe="") for p_ in
+                                ([who, tab] + [x for x in parts if x]))
+    q = {k: v for k, v in view.items() if v not in ("", None)}
+    return path + (f"?{urlencode(q)}" if q else "")
+
+
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
          ("brand", "Brand", "❖"),
          # The SEO plan the blog is built from. It sits beside Systems rather
@@ -968,7 +999,7 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     switch = "".join(
         f'<a class="{"on" if r.key == tenant else ""}" '
         f'style="--tint:{hues.get(r.key, "")}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab={tab}&amp;tenant={_esc(r.key)}">'
+        f'href="{_esc(url(r.key, tab))}">'
         f'<span class="dot"></span>{_esc(r.name)}'
         + (f'<span class="navbadge" title="{_BADGE_TITLES["content"]}">'
            f'{_n}</span>' if (_n := rollups.get(r.key, 0)) else "")
@@ -976,14 +1007,14 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     # Cross-account is a place you go on purpose, listed apart from the clients
     # so it can never be the account you are on without having chosen it.
     switch += (f'<a class="every {"on" if tenant == ALL else ""}" '
-               f'href="/admin/ui?key={_esc(key)}&amp;tab={tab}&amp;tenant={ALL}">'
+               f'href="{_esc(url(ALL, tab))}">'
                f'<span class="dot"></span>All accounts</a>')
 
     badges = _badges(tenant)
     nav = "".join(
         f'<a class="{"on" if t == tab else ""}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab={t}&amp;tenant={_esc(tenant)}'
-        f'{suffix if t == tab else ""}"><span class="ico">{i}</span>{label}'
+        f'href="{_esc(url(tenant, t))}{suffix if t == tab else ""}"'
+        f'><span class="ico">{i}</span>{label}'
         + (f'<span class="navbadge" title="{_BADGE_TITLES[t]}">'
            f'{_n}</span>'
            if (_n := badges.get(t, 0)) else "")
@@ -1011,7 +1042,7 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
     # pooled view — so the pill goes to /admin/pending, the one queue that
     # renders all-accounts rows, each labelled with its owner.
     _pend_href = ("/admin/pending?key=" + _esc(key) if tenant == ALL else
-                  f"/admin/ui?key={_esc(key)}&amp;tab=content&amp;sub=ship"
+                  f"{_esc(url(tenant, 'content', sub='ship'))}"
                   f"&amp;tenant={_esc(tenant)}")
     waiting = (f'<a class="pend" href="{_pend_href}">'
                f'<span class="ico">!</span>{_n} waiting</a>' if _n else "")
@@ -2117,12 +2148,9 @@ def _sysview_url(key: str, row, anchor: str = "", ppage: int = 0,
     means every existing link keeps working and lands on the right tab
     (fluidity rule 3: URLs and params never break).
     """
-    url = (f"/admin/ui?key={_esc(key)}&amp;tab=systems"
-           f"&amp;tenant={_esc(row.tenant)}&amp;system={_esc(row.key)}")
-    if anchor:
-        url += f"&amp;wf={anchor}"
-    if ppage and ppage > 1:
-        url += f"&amp;ppage={ppage}"
+    url_ = _esc(globals()["url"](row.tenant, "systems", row.key, anchor,
+                                **({"ppage": ppage} if ppage and ppage > 1 else {})))
+    url = url_
     # NAMING THE PLAN, NOT THE PAGE IT HAPPENS TO BE ON. Owner, 2026-09-02:
     # *"I want the clickable link to take you to the specific planned action
     # in the respective system — right now it just takes you to the system
@@ -3496,9 +3524,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
     counts = _board_counts([row])[row.id]
 
     def _href(v: str) -> str:
-        return (f"/admin/ui?tab=systems&amp;tenant={_esc(row.tenant)}"
-                f"&amp;system={_esc(row.key)}&amp;wf={v}"
-                + (f"&amp;key={_esc(key)}" if key else ""))
+        return _esc(url(row.tenant, "systems", row.key, v))
 
     #: Counts on the rail come from the SAME batch the strip renders, so a
     #: tab label and the list behind it cannot disagree (design rule 8).
@@ -3528,7 +3554,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
     body = f"""
 {flash}
 <div>
-  <div class="crumb"><a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(row.tenant)}">&larr; Systems</a></div>
+  <div class="crumb"><a href="{_esc(url(row.tenant, "systems"))}">&larr; Systems</a></div>
   <div class="head" style="border-bottom:0;padding-bottom:0">
     <h2>{_esc(row.name)}</h2>
     <code>{_esc(row.key)}</code>
@@ -3645,7 +3671,7 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
                 <h2>{_esc(t.name if t else tkey)}</h2>
                 <code>{_esc(tkey)}</code>
                 <span class="mut">{live} of {len(group)} live</span>
-                <a class="btn sec" href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tkey)}">Open this account</a>
+                <a class="btn sec" href="{_esc(url(tkey, "systems"))}">Open this account</a>
               </div>
               {cards}
             </div>"""
@@ -7039,7 +7065,7 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
     taken_out = _es.out_for(tenant)
     bg = _web.bg_status("email_recreate", tenant)
     running = bg.get("state") in _jobs.IN_FLIGHT
-    base = (f"/admin/ui?tab=systems&tenant={_q(tenant)}&system=campaign_email&wf=designs")
+    base = url(tenant, "systems", "campaign_email", "designs")
     shots = {}
     with db.SessionLocal() as s:
         for st in rows:
@@ -7103,8 +7129,8 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
                        if standing == sid else
                        _designate_form(key, tenant, sid, "Use for every campaign"))
         menu = [
-            ("open", f'<a href="/admin/reference?key={_esc(key)}&amp;tenant={_q(tenant)}'
-                     f'&amp;id={_esc(sid)}">Open it &mdash; the reference beside ours, and the judge</a><br>'),
+            ("open", f'<a href="{_esc(url(tenant, "systems", "campaign_email", "designs", sid))}">'
+                     f'Open it &mdash; the reference beside ours, and the judge</a><br>'),
             ("rename", '<label>Rename</label>'
                        + _form("/admin/reference_rename", "Rename", {"id": sid}).replace(
                            "<button", f'<input name="name" value="{_esc(st["name"])}"><button')),
@@ -7132,7 +7158,7 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
                       "chips": chips, "states": states, "facts": facts,
                       "note": _es.note_of(sid), "used": st["used_count"],
                       "primary": primary, "menu": menu,
-                      "href": f"/admin/reference?key={key}&tenant={tenant}&id={sid}"})
+                      "href": url(tenant, "systems", "campaign_email", "designs", sid)})
 
     add = f"""
     <form method="post" action="/admin/email_reference" style="margin:8px 0">
@@ -7173,7 +7199,7 @@ def _reference_page(key: str, tenant: str, structure_id: str) -> str:
     shelf sends you here rather than unfolding all of it into a list."""
     from . import email_structures as _es
     st = next((r for r in _es.library() if r["id"] == structure_id), None)
-    back = f"/admin/ui?tab=systems&tenant={_q(tenant)}&system=campaign_email&wf=designs"
+    back = url(tenant, "systems", "campaign_email", "designs")
     if st is None:
         return (f'<div class="card"><div class="head"><h2>No such design</h2></div>'
                 f'<p class="mut">It may have been deleted. '
@@ -12160,8 +12186,7 @@ def _plan_window(key: str, tenant: str, days: int) -> str:
     """
     return '<div class="filters">' + "".join(
         f'<a class="{"on" if days == d else ""}" '
-        f'href="/admin/ui?tab=plan&amp;tenant={_esc(tenant)}&amp;days={d}'
-        + (f"&amp;key={_esc(key)}" if key else "")
+        f'href="{_esc(url(tenant, "plan", days=d))}'
         + f'">{lbl}</a>' for d, lbl in ((7, "7 days"), (28, "28 days"),
                                         (90, "90 days"))) + \
         '<span class="mut" style="margin-left:8px">every dated table on this ' \
@@ -12624,8 +12649,7 @@ def _plan_questions_btn(key: str, tenant: str, cov: dict,
 def _sub_href_days(key: str, tenant: str, days: int) -> str:
     """The Progress tab at a different window. One builder, so a link that
     changes the window cannot lose the tab or the account on the way."""
-    return (f"/admin/ui?key={_esc(key)}&amp;tab=plan&amp;tenant={_esc(tenant)}"
-            f"&amp;sub=progress&amp;days={int(days)}#progress")
+    return _esc(url(tenant, "plan", sub="progress", days=int(days))) + "#progress"
 
 
 def _progress_section(key: str, tenant: str, days: int,
@@ -15484,8 +15508,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
         sub = PLAN_SUBS[0][0]
 
     def _sub_href(v: str) -> str:
-        return (f"/admin/ui?tab=plan&amp;tenant={_esc(tenant)}&amp;days={days}"
-                f"&amp;sub={v}" + (f"&amp;key={_esc(key)}" if key else ""))
+        return _esc(url(tenant, "plan", days=days, sub=v))
 
     strip = '<div class="subtabs">' + "".join(
         f'<a class="subtab{" on" if v == sub else ""}" '

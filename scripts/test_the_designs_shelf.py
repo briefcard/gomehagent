@@ -100,7 +100,7 @@ def main() -> int:
        "open finding" not in page and "round(s)" not in page,
        "they are what made the old room unreadable")
     ck("  and each row links to the page that does carry them",
-       page.count("/admin/reference?") >= rows)
+       page.count("/systems/campaign_email/designs/") >= rows)
 
     print("\n— the states, and the one action each of them wants —")
     es.designate("baci", ids[1])
@@ -143,7 +143,7 @@ def main() -> int:
                                                 "id": ids[0], "name": "The four-step story"},
                follow_redirects=False)
     ck("renaming posts and comes back to the shelf",
-       r.status_code == 303 and "wf=designs" in r.headers.get("location", ""))
+       r.status_code == 303 and "/designs" in r.headers.get("location", ""))
     ck("  and the owner's name is what the shelf shows, and what search finds",
        "The four-step story" in ui._structures_card(KEY, "baci", view={"q": "four-step"}))
     ck("  an empty name is refused rather than silently blanking it",

@@ -115,7 +115,7 @@ def main() -> int:
     for d in (1, 7, 30, 90):
         ck(f"  a link sets the window to {d}", f"days={d}" in page)
     ck("  each link keeps the tab and the account",
-       page.count("sub=progress") >= 4 and page.count("tenant=baci") >= 4,
+       page.count("sub=progress") >= 4 and page.count("/admin/baci/plan") >= 4,
        "a window switch that loses the account is a switch nobody uses twice")
     ck("  and the empty window's reason is on the page, not just in the data",
        "nothing was measured" in page,

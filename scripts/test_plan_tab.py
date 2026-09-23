@@ -73,7 +73,7 @@ def main() -> int:
     # ---- 2. ONE window control -------------------------------------------
     print("\n— one window, governing every dated table —")
     ck("the control is rendered once, in the header",
-       landing.count('href="/admin/ui?tab=plan') >= 3
+       landing.count(f'href="{admin_ui.url(T, "plan")}') >= 3
        and "every dated table on this page reads this window" in landing)
     b7 = admin_ui.render_plan("s3cret", T, sub="board", days=7)
     b90 = admin_ui.render_plan("s3cret", T, sub="board", days=90)
@@ -98,7 +98,7 @@ def main() -> int:
     rows = systems.for_tenant(T)
     ck("  naming every installed system, linking to its workflow",
        all(r.name in strat for r in rows)
-       and all(f"system={r.key}" in strat for r in rows), str(len(rows)))
+       and all(f"/systems/{r.key}" in strat for r in rows), str(len(rows)))
 
     # ---- 4. Schedule, and the plan that can never come due ---------------
     print("\n— what is coming, across every system —")

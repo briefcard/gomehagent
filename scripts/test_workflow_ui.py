@@ -87,7 +87,7 @@ def main() -> int:
     print("\n— the Systems tab carries the work strip —")
     tab = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency").text
     ck("the card links into the system's own view",
-       "system=wf_probe" in tab and "Workflow" in tab)
+       "/systems/wf_probe" in tab and "Workflow" in tab)
     ck("the strip counts the queue", ">1</b> planned" in tab, "expected 1 planned")
     ck("the strip counts what waits on a person", "waiting on you" in tab)
 
@@ -124,7 +124,7 @@ def main() -> int:
         _page = c.get("/admin/ui?key=s3cret&tab=systems&tenant=agency"
                       f"&system=lead_responder&wf={_sub}").text
         ck(f"…and its {_sub} section still renders", f'id="{_sub}"' in _page)
-        ck(f"  reachable from the rail", f"&amp;wf={_sub}" in lead_v)
+        ck(f"  reachable from the rail", f"/systems/lead_responder/{_sub}" in lead_v)
 
     # ---- filing and editing through the routes --------------------------
     print("\n— plan_new files; the flash names completeness —")
@@ -314,8 +314,7 @@ def main() -> int:
     ck("…and it renders from the record — no live call promised on load",
        "reads the live ESP" in seg_card)
     ck("…and the rail offers it only on an ESP system",
-       "&amp;wf=segments" in seg_card
-       and "&amp;wf=segments" not in _view(c, "agency"),
+       "/segments\"" in seg_card and "/segments\"" not in _view(c, "agency"),
        "an empty Segments room on a blog system teaches that a tab can mean "
        "nothing")
     ck("a non-ESP system has no Segments card",

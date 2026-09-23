@@ -38,6 +38,30 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'the_key_rides_in_the_address_bar_again',
+        "file": 'app/web.py',
+        "find": '            and "text/html" in request.headers.get("accept", "")\n',
+        "replace": '            and False  # SABOTAGE\n',
+        "suites": ['test_console_routing.py'],
+        "why": "the console credential stays in the URL, in the history, in the referrer of every outbound click and in every link the page draws — one visit to a ?key= link and the secret is on screen all day, which is how it ended up pasted into a chat",
+    },
+    {
+        "name": 'the_path_stops_naming_the_room',
+        "file": 'app/web.py',
+        "find": '                                 wf=room or request.query_params.get("wf", ""),\n',
+        "replace": '                                 wf=request.query_params.get("wf", ""),  # SABOTAGE\n',
+        "suites": ['test_console_routing.py'],
+        "why": "/admin/baci/systems/campaign_email/designs opens the system's first room instead of Designs — the address says one thing and the page shows another, which is worse than the query string it replaced",
+    },
+    {
+        "name": 'a_console_link_is_hand_written_again',
+        "file": 'app/admin_ui.py',
+        "find": '        return _esc(url(row.tenant, "systems", row.key, v))\n',
+        "replace": '        return f"/admin/ui?tab=systems&amp;tenant={_esc(row.tenant)}&amp;system={_esc(row.key)}&amp;wf={v}"  # SABOTAGE\n',
+        "suites": ['test_console_routing.py'],
+        "why": "the rooms on a system's rail go back to hand-written query strings, and the address bar drifts back to the four-parameter URL one link at a time",
+    },
+    {
         "name": 'the_shelf_unfolds_every_control_again',
         "file": 'app/admin_ui.py',
         "find": '        <details class="fix"><summary title="rename, re-read, take out, delete">&hellip;</summary>\n',

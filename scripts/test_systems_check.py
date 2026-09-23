@@ -159,7 +159,7 @@ def main() -> int:
     ck("…with the run's own error, not just a count",
        "nothing to check against" in h)
     ck("…and what the run produced", "Glasses that go where you go" in h)
-    ck("…and a way to act on it", "tab=kb" in h and "Knowledge" in h)
+    ck("…and a way to act on it", "/baci/kb" in h and "Knowledge" in h)
     ck("…and the per-system table separates blocked from defective",
        "defective" in h and "Every system, last" in h)
 

@@ -82,7 +82,7 @@ def main() -> int:
        f"plan={last.id}" in sched and f"#plan-{last.id}" in sched,
        "the anchor existed; nothing pointed at it")
     ck("  and still carries the system it belongs to",
-       "tab=systems" in sched and "system=blog" in sched)
+       "/systems/blog" in sched, "the path names it now, not two parameters")
 
     print()
     print("— and the queue opens on the page that holds it —")
