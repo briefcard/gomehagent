@@ -859,3 +859,12 @@ def last_scan(tenant: str) -> dict:
     r = runs[0]
     return {"at": _db.as_utc(r.created_at), "stage": r.stage,
             "blocked_on": r.blocked_on or [], **(r.outcome or {})}
+
+
+def scan_and_record(tenant: str, limit: int = 60, since: str = "") -> dict:
+    """Scan the site and file the result — the one unit a press, the worker's
+    schedule and the queue all run. It lived as a closure inside the route,
+    which is how the same scan ended up started three different ways."""
+    result = scan(tenant, limit=limit, since=since)
+    record_scan(tenant, result)
+    return result

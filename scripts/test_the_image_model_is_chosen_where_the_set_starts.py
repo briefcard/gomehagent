@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image  # noqa: E402
 
+from app import jobs as _jobs_s  # noqa: E402
 from app import (admin_ui as ui, coherence, config, creative, db, gemini_images,  # noqa: E402
                  imagegen, kb, kb_seed, tenants, web)
 
@@ -164,7 +165,7 @@ def main() -> int:
        and gcalls and all(m == "gemini-3-pro-image" for m in gcalls), str(got.get("sets"))[:220])
     ck("  and the summary names each model's count",
        imagegen.MODEL + ": 1 made" in got.get("note", "") and "gemini:gemini-3-pro-image: 1 made" in got.get("note", "")
-       and "made 2" in web._summarise(got), got.get("note", "")[:200])
+       and "made 2" in _jobs_s.summarise(got), got.get("note", "")[:200])
     frames = [a for a in kb.assets("baci", publishable_only=False) if (a.batch or "")]
     tags = {t for a in frames for t in (a.tags or []) if str(t).startswith("model:")}
     ck("  every frame carries the model that drew it",

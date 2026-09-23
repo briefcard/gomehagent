@@ -395,7 +395,7 @@ def main() -> int:
 
     # ---- 7. a source that read nothing SAYS SO ----------------------------
     print("\n— absence is not an answer: an empty source is named —")
-    from app.web import _summarise
+    from app.jobs import summarise as _summarise
     line = _summarise({"proposed_count": 12, "pages_read": 40, "sources": [
         {"label": "Website", "pages_found": 40},
         {"label": "Spring", "pages_found": 0}]})
@@ -405,11 +405,9 @@ def main() -> int:
        "READ NOTHING" not in _summarise(
            {"proposed_count": 12, "sources": [{"label": "Website",
                                                "pages_found": 40}]}))
-    import json as _json
-    with db.SessionLocal() as _s:
-        _s.merge(db.Setting(key="bg:harvest:baci", value=_json.dumps(
-            {"state": "done", "detail": line, "at": "2026-08-28T16:40:00"})))
-        _s.commit()
+    # the harvest's outcome lives on its job row — the one status store
+    from app import jobs as _jobs
+    _jobs.finish(_jobs.enqueue("baci", "harvest", dedupe=False)["id"], "done", line)
     brand_page = admin_ui.render_brand("s3cret", "baci")
     ck("the Brand tab says it beside the source list it is about",
        "read nothing: Spring" in brand_page)

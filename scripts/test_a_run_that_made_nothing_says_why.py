@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image  # noqa: E402
 
+from app import jobs  # noqa: E402
 from app import (admin_ui as ui, coherence, creative, db, imagegen, kb,  # noqa: E402
                  kb_seed, tenants, web)
 
@@ -103,10 +104,10 @@ def main() -> int:
     ck("  the board's contribution is still said after it",
        "drawn from 0 photograph(s) of the product and 4 board pin(s)" in note
        and "1 pin(s) kept out" in note)
-    said = web._summarise(got)
+    said = jobs.summarise(got)
     ck("the run summary carries the reason once, not twice",
        "safety system" in said and said.count("rejected as a result") == 1, said[:300])
-    bare = web._summarise({"made": 0, "clean": 0, "note": "nothing was generated",
+    bare = jobs.summarise({"made": 0, "clean": 0, "note": "nothing was generated",
                            "errors": ["identity/person_led: 502: upstream connect error"]})
     ck("  and a result whose note forgot its errors still gets them said, with the count",
        "1 error(s)" in bare and "upstream connect error" in bare, bare)
@@ -173,7 +174,7 @@ def main() -> int:
        got3.get("made", 0) >= 1 and "cell(s) failed" in note3 and "Rate limit" in note3
        and note3.index("passed review") < note3.index("cell(s) failed"), note3[:300])
     ck("  and the summary does not repeat it",
-       web._summarise(got3).count("Rate limit") == 1)
+       jobs.summarise(got3).count("Rate limit") == 1)
 
     print()
     if _fail:

@@ -116,14 +116,17 @@ def main():
        st in ("approved", "executed"), st)
 
     print("\n--- 2 · sources lead the page, and say when they ran ---")
-    with db.SessionLocal() as s:
-        s.add(db.Setting(key="bg:harvest:baci", value=json.dumps(
-            {"state": "finished", "at": "2026-08-27T09:00",
-             "detail": "12 proposals filed"})))
-        s.add(db.Setting(key="bg:email:baci", value=json.dumps(
-            {"state": "failed", "at": "2026-08-27T10:00",
-             "detail": "RefreshError: token revoked"})))
-        s.commit()
+    # THE FEEDERS' OUTCOMES LIVE ON THEIR JOB ROWS — the one status store.
+    import datetime as _dt
+    from app import jobs as _jobs
+    for kind_, state_, detail_, hour in (("harvest", "done", "12 proposals filed", 9),
+                                         ("email", "failed", "RefreshError: token revoked", 10)):
+        jid = _jobs.enqueue("baci", kind_, dedupe=False)["id"]
+        _jobs.finish(jid, state_, detail_)
+        with db.SessionLocal() as s:
+            s.get(db.JobQueue, jid).finished_at = _dt.datetime(2026, 8, 27, hour, 0,
+                                                               tzinfo=_dt.timezone.utc)
+            s.commit()
     h = page("ship")
     ck("the Sources block names the feeders with their state",
        "Sources — what fills these queues" in h

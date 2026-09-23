@@ -191,14 +191,6 @@ SABOTAGES = [
         "why": "in the twenty seconds before a worker picks the job up the room says nothing is happening and offers the button again, so one press becomes two paid runs",
     },
     {
-        "name": 'the_rooms_stop_reading_the_queue_for_migrated_work',
-        "file": 'app/web.py',
-        "find": '    if label in _jobs.KINDS:\n',
-        "replace": '    if False:  # SABOTAGE\n',
-        "suites": ['test_job_queue.py'],
-        "why": "every room that reports a background action reads the store the work no longer writes to, so a recreation, a set of frames or a board fill runs in the worker and the console shows silence — the same broken-button experience the queue was built to end",
-    },
-    {
         "name": 'a_boards_choice_is_lost_crossing_the_queue',
         "file": 'app/creative.py',
         "find": '        kw["boards"] = tuple(kw.get("boards") or ())\n',
@@ -213,14 +205,6 @@ SABOTAGES = [
         "replace": '    if False:  # SABOTAGE\n',
         "suites": ['test_job_queue.py'],
         "why": "'Read the reference again' quietly recreates from the old reading instead, so a design whose READING was wrong can never be corrected and the owner presses a button that cannot do what it says",
-    },
-    {
-        "name": 'the_pictures_room_stops_reading_the_queue',
-        "file": 'app/admin_ui.py',
-        "find": '        got = _jobs.status(tenant, label) or _bgs(label, tenant) or {}\n',
-        "replace": '        got = _bgs(label, tenant) or {}  # SABOTAGE\n',
-        "suites": ['test_job_queue.py'],
-        "why": "the hand-off of approved pictures to the client's site runs in the worker and the room that promised those pictures says nothing about it — a hand-off a deploy stopped looks identical to one that finished, which is the silence the queue was built to remove",
     },
     {
         "name": 'a_stopped_run_restarts_itself_and_spends_again',
@@ -1557,18 +1541,6 @@ SABOTAGES = [
         "replace": "    return True  # SABOTAGE",
         "suites": ["test_replies.py", "test_worker_systems.py"],
         "why": "a paused system keeps running — the off switch does nothing",
-    },
-    {
-        "name": "compliance_double_run",
-        "file": "app/worker.py",
-        # Re-anchored 2026-09-04 when the loop became `_compliance_one` (the
-        # sweep sharded per account); the claim is unchanged.
-        "find": "            compliance.record_scan(key, compliance.scan(key, limit=60, since=since))",
-        "replace": ("            compliance.record_scan(key, compliance.scan(key, limit=60, since=since))\n"
-                    "            systems.start_run(site.id, key, trigger='schedule')  # SABOTAGE"),
-        "suites": ["test_correlate.py"],
-        "why": "every compliance scan is recorded twice, halving every rate "
-               "computed from the ledger",
     },
     {
         "name": "sweep_survives_no_model",
@@ -3153,19 +3125,6 @@ SABOTAGES = [
                "back to muted grey, the least important text on the page; a "
                "refusal nobody notices is a claim that quietly never "
                "became usable",
-    },
-    {
-        "name": "verify_lands_on_the_card",
-        "file": "app/web.py",
-        "find": "    if ui and tenant:\n"
-                "        import json as _json",
-        "replace": "    if False:  # SABOTAGE\n"
-                   "        import json as _json",
-        "suites": ["test_connections_tab.py"],
-        "why": "Test connections goes back to dumping raw JSON in a new tab "
-               "— the console's own button becomes the dead-end the page's "
-               "copy used to document, and the stored per-provider summary "
-               "on the Status card stops updating",
     },
     {
         "name": "signin_link_flashes_back",
@@ -9246,22 +9205,6 @@ SABOTAGES = [
         'replace': '        png = raw  # SABOTAGE',
         'suites': ['test_the_model_takes_what_the_docs_say.py'],
         'why': 'JPEG bytes travel the pipeline labelled PNG — filed, cut and imported as a format they are not',
-    },
-    {
-        'name': 'a_job_that_can_say_where_it_stands_is_asked_to',
-        'file': 'app/web.py',
-        'find': '    if takes_progress and "progress" not in kw:\n        kw["progress"] = lambda text: _mark("running", str(text or "")[:600])',
-        'replace': '    if False:  # SABOTAGE\n        kw["progress"] = lambda text: _mark("running", str(text or "")[:600])',
-        'suites': ['test_the_model_takes_what_the_docs_say.py'],
-        'why': 'the run reports every cell and nothing writes it down, so the card is blank for twenty minutes again',
-    },
-    {
-        'name': 'an_interrupted_job_is_said_at_boot',
-        'file': 'app/web.py',
-        'find': '                if str(got.get("state") or "") != "running":\n                    continue',
-        'replace': '                if True:  # SABOTAGE\n                    continue',
-        'suites': ['test_the_model_takes_what_the_docs_say.py'],
-        'why': 'a run the deploy killed says running forever, and the owner waits on a job that stopped an hour ago',
     },
     {
         'name': 'the_running_card_is_honest',

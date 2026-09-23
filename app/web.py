@@ -21,55 +21,7 @@ app = FastAPI(title="Saias Operations Assistant")
 @app.on_event("startup")
 def startup() -> None:
     db.init_db()
-    _sweep_interrupted()
 
-
-def _sweep_interrupted() -> int:
-    """A background job that was RUNNING when the process died reports
-    nothing ever again — a deploy restarts the server, and the owner's card
-    says "running" for a run that stopped hours ago (owner, 2026-09-08, five
-    minutes into a run whose card promised two). At boot, every `bg:*` row
-    left in `running` is marked failed with the reason, so the next look at
-    the card says what happened and what to do. Returns how many."""
-    import json as _json
-    n = 0
-    try:
-        with db.SessionLocal() as s:
-            for row in s.query(db.Setting).filter(db.Setting.key.like("bg:%")).all():
-                try:
-                    got = _json.loads(row.value or "{}")
-                except Exception:                                # noqa: BLE001
-                    continue
-                if str(got.get("state") or "") != "running":
-                    continue
-                row.value = _json.dumps({
-                    "state": "failed",
-                    "detail": ("the server restarted while this was running (a deploy "
-                               "does that) — the work stopped where it was; press it "
-                               "again" + (f". Last progress: {got['detail']}"
-                                          if got.get("detail") else "")),
-                    "at": str(got.get("at") or db.utcnow().isoformat())})
-                s.merge(row)
-                n += 1
-            s.commit()
-    except Exception:                                            # noqa: BLE001
-        log.exception("sweeping interrupted background jobs failed")
-    return n
-
-
-# ---------------------------------------------------------------------------
-# Console session.
-#
-# Every admin route used to require `?key=<APPROVAL_SECRET>` on every request,
-# so the credential rode in browser history, Referer headers and every access
-# log — and each of the ten console forms re-embedded it to keep navigation
-# working. The key is now accepted once, from the query string or an
-# `X-Admin-Key` header, and exchanged for a session cookie.
-#
-# This is a session, not an auth layer: still one shared credential, still no
-# per-user identity. It removes the leak surface, not the need for real auth
-# before any client gets a login.
-# ---------------------------------------------------------------------------
 
 ADMIN_COOKIE = "console"
 _COOKIE_MAX_AGE = 60 * 60 * 24 * 14        # 14 days
@@ -1154,7 +1106,7 @@ async def brand_voice_derive(request: Request, key: str = Depends(admin_key)):
     if not tenant:
         return RedirectResponse(
             _console_url("", "brand", err="pick an account first"), 303)
-    _run_bg("voice", vc.derive, tenant)
+    _jobs.enqueue(tenant, "voice")
     # THE ANCHOR GOES ON LAST. The sibling theme routes append `key=` to a
     # fragmentless URL, so copying their shape here put the credential AFTER
     # `#voice` — where it is a fragment, never sent to the server. It survived
@@ -1592,8 +1544,7 @@ def canva_harvest(key: str = Depends(admin_key), tenant: str = "agency",
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
-    from . import canva as _cv
-    return _cv.harvest(tenant, design_id=design_id)
+    return _jobs.enqueue(tenant, "canva_harvest", payload={"design_id": design_id})
 
 
 @app.get("/admin/drive_photos")
@@ -1606,8 +1557,7 @@ def drive_photos(key: str = Depends(admin_key), tenant: str = "",
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
-    from . import creative as _cr
-    return _cr.harvest_drive(tenant, folder=folder, limit=limit)
+    return _jobs.enqueue(tenant, "drive_photos", payload={"folder": folder, "limit": limit})
 
 
 @app.get("/admin/canva_probe")
@@ -1691,10 +1641,10 @@ def admin_answer_engines(key: str = Depends(admin_key), tenant: str = "",
     if not tenant:
         return {"error": "name an account, e.g. ?tenant=baci"}
     from . import answer_engines as _ae
+    put = _jobs.enqueue(tenant, "answer_engines",
+                        payload={"probe": bool(probe), "days": max(1, min(days, 365))})
     if not ui:
-        return _ae.check(tenant, probe=bool(probe), days=max(1, min(days, 365)))
-    _run_bg(f"answer_engines:{tenant}", _ae.check, tenant,
-            probe=bool(probe), days=max(1, min(days, 365)))
+        return put
     return _plan_back(tenant, key, sub="progress", msg=(
         "checking whether the answer engines can read the site — it asks the "
         "site once per crawler, so give it a moment and refresh"))
@@ -3603,28 +3553,12 @@ def admin_keywords_harvest(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "name an account, e.g. ?tenant=baci"}
     src = tuple(s.strip() for s in sources.split(",") if s.strip())
     sd = tuple(s.strip() for s in seeds.split(",") if s.strip())
-    try:
-        got = keywords.harvest(tenant, seeds=sd, days=max(1, min(days, 180)),
-                               limit=max(1, min(limit, 200)),
-                               **({"sources": src} if src else {}))
-    except Exception as exc:  # noqa: BLE001
-        out = {"error": f"{exc.__class__.__name__}: {str(exc)[:200]}"}
-        return _plan_back(tenant, key, err=out["error"]) if ui else out
+    put = _jobs.enqueue(tenant, "keywords_harvest", payload={
+        "seeds": list(sd), "days": max(1, min(days, 180)), "limit": max(1, min(limit, 200)),
+        **({"sources": list(src)} if src else {})})
     if not ui:
-        return got
-    added = got.get("added") or {}
-    said = ("found " + ", ".join(f"{n} from {s}" for s, n in added.items() if n)
-            if any(added.values()) else "found nothing new")
-    # `orphan_pillars` counts phrases nothing else contained, so each became a
-    # pillar on its own. It is the difference between "we found a theme" and
-    # "we found six unrelated phrases and called each one a theme", and it was
-    # computed and rendered nowhere until the 2026-08-28 piping audit.
-    orphans = int(got.get("orphan_pillars") or 0)
-    lone = (f"; {orphans} phrase{'' if orphans == 1 else 's'} stood alone and "
-            f"became {'its own pillar' if orphans == 1 else 'their own pillars'}"
-            if orphans else "")
-    return _plan_back(tenant, key, msg=f"{said}; {got.get('clusters', 0)} cluster(s)"
-                      + lone + ("  " + " ".join(got.get("notes") or [])))
+        return put
+    return _plan_back(tenant, key, msg=_queued(put, "gathering keywords")[1])
 
 
 @app.get("/admin/keywords_rivals")
@@ -5984,15 +5918,11 @@ def offers_harvest(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     if not tenant:
         return {"error": "tenant is required — name the client explicitly"}
-    from . import offers as _of
-    got = _of.harvest(tenant, apply=bool(apply))
+    put = _jobs.enqueue(tenant, "offers_harvest", payload={"apply": bool(apply)})
     if ui:
-        msg = (f"{got['filed']} offer(s) filed for review from "
-               f"{got['sends_read']} past send(s)" if got.get("applied")
-               else f"{len(got['proposals'])} offer(s) found in "
-                    f"{got['sends_read']} past send(s) — nothing written yet")
-        return _back_to_content(tenant, msg=msg, anchor="proposals")
-    return got
+        return _back_to_content(tenant, msg=_queued(put, "reading past sends for offers")[1],
+                                anchor="proposals")
+    return put
 
 
 @app.get("/admin/kb")
@@ -7851,17 +7781,10 @@ async def asset_harvest(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     aid = str(form.get("asset_id", "")).strip()
-    from . import canva as _cv
-    got = _cv.harvest(tenant, asset_id=aid)
-    if not got.get("ok"):
-        return _back_to_content(tenant, msg=f"Canva: {got.get('error', '')}"[:200],
-                                anchor="kept")
-    bits = [f"{got.get('filed', 0)} picture(s) back from Canva"]
-    if got.get("pending"):
-        bits.append(f"{len(got['pending'])} still rendering — press again in a moment")
-    if got.get("failed"):
-        bits.append("; ".join(str(x) for x in got["failed"])[:120])
-    return _back_to_content(tenant, msg=" · ".join(bits)[:200], anchor="kept")
+    put = _jobs.enqueue(tenant, "canva_harvest", payload={"asset_id": aid},
+                        system_key=f"asset:{aid}")
+    return _back_to_content(tenant, msg=_queued(put, "fetching it back from Canva")[1],
+                            anchor="kept")
 
 
 @app.post("/admin/asset_add", response_class=HTMLResponse)
@@ -8426,8 +8349,9 @@ async def skill_run(request: Request, key: str = Depends(admin_key)) -> dict:
         return {"error": f"unknown skill {name!r}",
                 "available": [s["key"] for s in skill.catalogue(tenant)]}
     params = {k: v for k, v in (body.get("params") or {}).items()}
-    return skill.run(name, tenant, trigger=str(body.get("trigger", "manual")),
-                     ref=str(body.get("ref", "")), **params)
+    return _jobs.enqueue(tenant, "system_run", system_key=name, payload={
+        "key": name, "trigger": str(body.get("trigger", "manual")),
+        "ref": str(body.get("ref", "")), **params}, dedupe=False)
 
 
 @app.get("/admin/verify")
@@ -8443,37 +8367,16 @@ def verify_tenant(key: str = Depends(admin_key), tenant: str = "",
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
+    from fastapi.responses import RedirectResponse
     from . import tenants
+    who = [tenant] if tenant else [t.key for t in tenants.all_tenants()]
+    put = [_jobs.enqueue(t, "verify") for t in who]
     if ui and tenant:
-        import json as _json
-
-        def _run_and_store(tk: str) -> None:
-            got = tenants.verify(tk)
-            results = {c: r for c, r in got.items()
-                       if isinstance(r, dict) and "status" in r}
-            with db.SessionLocal() as s:
-                k = f"verify_result:{tk}"
-                row = s.get(db.Setting, k)
-                val = _json.dumps({"when": str(db.utcnow()),
-                                   "results": results})
-                if row is None:
-                    s.add(db.Setting(key=k, value=val))
-                else:
-                    row.value = val
-                s.commit()
-
-        from urllib.parse import quote as _q
-
-        from fastapi.responses import RedirectResponse
-        _run_bg(f"verify:{tenant}", _run_and_store, tenant)
         return RedirectResponse(
             _console_url(tenant, "accounts",
-                         ok="testing every connection in the background — "
-                            "the per-provider result lands on this card; "
-                            "refresh in a moment"), 303)
-    if not tenant:
-        return {"tenants": [tenants.verify(t.key) for t in tenants.all_tenants()]}
-    return tenants.verify(tenant)
+                         ok="testing every connection — the per-provider "
+                            "result lands on this card when it is done"), 303)
+    return {"queued": put}
 
 
 @app.get("/admin/seed_kb")
@@ -8852,76 +8755,6 @@ def _back_to_kb(tenant: str, err: str = "", ok: str = "", anchor: str = "",
     return RedirectResponse(q, status_code=303)
 
 
-def _run_bg(label: str, fn, *args, **kw) -> None:
-    """Run a slow action off the request.
-
-    A 40-page compliance scan takes 16s locally and longer on a cold container,
-    and a GET that blocks that long with no feedback is indistinguishable from a
-    broken button — which is exactly how it was reported. The work continues;
-    the page comes straight back and the result appears in the tab when it
-    lands.
-
-    The outcome is RECORDED, not only logged. The first version caught the
-    exception, wrote it to the service log and returned — so a background
-    action that failed looked exactly like one still running: the banner said
-    "proposals will appear above when it finishes" and they never did. That is
-    the same broken-button experience this function was written to remove,
-    moved one layer down. The traceback was in Render and the operator was in
-    a browser, and nothing joined them.
-
-    A successful run that produced nothing is recorded too, for the same
-    reason: "read 40 pages, proposed 0, everything already on file" and "the
-    button did nothing" are different facts and must not look alike.
-    """
-    import json as _json
-    import threading
-
-    tenant = kw.get("tenant") or (args[0] if args else "")
-
-    def _mark(state: str, detail: str = "") -> None:
-        with db.SessionLocal() as s:
-            key = f"bg:{label}:{tenant}"
-            row = s.get(db.Setting, key) or db.Setting(key=key)
-            row.value = _json.dumps({"state": state, "detail": detail[:1500],
-                                     "at": db.utcnow().isoformat()})
-            s.merge(row)
-            s.commit()
-
-    # PROGRESS, FOR THE JOBS THAT CAN SAY IT. A run of twenty minutes that
-    # reports nothing until the end is a broken button for nineteen of them
-    # (owner, 2026-09-08). A job whose signature takes `progress` is handed a
-    # writer; each call replaces the running detail, and the card shows it.
-    import inspect
-    try:
-        takes_progress = "progress" in inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        takes_progress = False
-    if takes_progress and "progress" not in kw:
-        kw["progress"] = lambda text: _mark("running", str(text or "")[:600])
-
-    def _go():
-        try:
-            result = fn(*args, **kw)
-        except Exception as exc:  # noqa: BLE001
-            log.exception("%s failed", label)
-            _mark("failed", f"{exc.__class__.__name__}: {exc}")
-            return
-        _mark("done", _summarise(result))
-
-    _mark("running")
-    threading.Thread(target=_go, daemon=True).start()
-
-
-#: THE SUMMARISER MOVED (2026-09-23). It reads what a run returned — the
-#: numbers, the sources that read nothing, the losses, the note, the errors —
-#: and it is now needed in two processes: this one, for the labels still run
-#: as threads, and the worker, for everything on the queue. It lives in
-#: `app.jobs`, which both import and which imports neither.
-_summarise = _jobs.summarise
-_losses = _jobs._losses
-_LOSS_KEYS = _jobs._LOSS_KEYS
-
-
 def _queued(got: dict, doing: str) -> tuple:
     """What a press that queued work says back. ONE sentence-maker, so every
     room words it the same way and an already-running job says so rather
@@ -8931,26 +8764,6 @@ def _queued(got: dict, doing: str) -> tuple:
     if got.get("already"):
         return ("ok", f"{doing} — {got.get('why') or 'it is already running'}; it appears here when it lands")
     return ("ok", f"{doing} — a worker picks this up within half a minute; it appears here when it lands")
-
-
-def bg_status(label: str, tenant: str) -> dict:
-    """What the last background run of this action did, if anything.
-
-    THE QUEUE FIRST. A label that is a kind of queued job is answered by the
-    queue, which is the store that also holds what to RUN; `jobs.status`
-    returns this function's own shape so the rooms did not have to change
-    when the heavy work moved to the worker (2026-09-23). A label that has
-    not moved still has its one `Setting` row.
-    """
-    import json as _json
-    if label in _jobs.KINDS:
-        return _jobs.status(tenant, label)
-    with db.SessionLocal() as s:
-        row = s.get(db.Setting, f"bg:{label}:{tenant}")
-        try:
-            return _json.loads(row.value) if row and row.value else {}
-        except Exception:  # noqa: BLE001
-            return {}
 
 
 @app.get("/admin/fill")
@@ -8989,14 +8802,10 @@ def email_harvest_route(key: str = Depends(admin_key), tenant: str = "",
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import email_harvest as eh
-    if ui:
-        # "email", the key the Review banner reads — "email_harvest" wrote a
-        # status nothing displayed, so a crashed mine looked identical to
-        # one still running.
-        _run_bg("email", eh.mine, tenant, days=days, limit=limit,
-                apply=True)
-        return _back_to_content(tenant, "email")
-    return eh.mine(tenant, days=days, limit=limit, apply=bool(apply))
+    # "email", the kind the Review banner reads.
+    put = _jobs.enqueue(tenant, "email", payload={
+        "days": days, "limit": limit, "apply": True if ui else bool(apply)})
+    return _back_to_content(tenant, "email") if ui else put
 
 
 @app.post("/admin/kb_remove")
@@ -9527,13 +9336,11 @@ def harvest_route(key: str = Depends(admin_key), tenant: str = "",
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
     from . import harvest as hv
-    if ui:
-        _run_bg("harvest", hv.harvest if tenant else hv.harvest_all,
-                *( (tenant,) if tenant else () ),
-                limit=limit, apply=bool(apply))
-        return _back_to_content(tenant, "harvest")
-    return (hv.harvest(tenant, limit=limit, apply=bool(apply)) if tenant
-            else hv.harvest_all(limit=limit, apply=bool(apply)))
+    from . import tenants as _tn
+    who = [tenant] if tenant else [t.key for t in _tn.all_tenants()]
+    put = [_jobs.enqueue(t, "harvest", payload={"limit": limit, "apply": bool(apply)})
+           for t in who]
+    return _back_to_content(tenant, "harvest") if ui else {"queued": put}
 
 
 @app.get("/admin/compliance_scan")
@@ -9553,14 +9360,8 @@ def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
     from . import compliance
     if not tenant:
         return {"error": "name a tenant, e.g. ?tenant=baci"}
-    def _scan_and_record(_t=""):
-        # `_t` exists only so _run_bg can key the status by tenant — its key
-        # is args[0], and the parameterless closure filed every scan under
-        # the EMPTY tenant, where no reader ever looked.
-        compliance.record_scan(tenant, compliance.scan(
-            tenant, limit=limit, since=since))
+    put = _jobs.enqueue(tenant, "scan", payload={"limit": limit, "since": since})
     if ui:
-        _run_bg("scan", _scan_and_record, tenant)
         # BACK TO THE PAGE THE BUTTON IS ON. Compliance moved to Assurance
         # (2026-08-23) and this redirect did not move with it, so pressing the
         # one button on Assurance landed you on Review — the very tab the card
@@ -9568,9 +9369,7 @@ def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
         from fastapi.responses import RedirectResponse as _RR
         from urllib.parse import quote as _qt
         return _RR(_console_url(tenant, "assurance", started="scan"), 303)
-    result = compliance.scan(tenant, limit=limit, since=since)
-    compliance.record_scan(tenant, result)
-    return result
+    return put
 
 
 @app.get("/admin/catalog_sync")
@@ -9593,7 +9392,7 @@ def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
     if ui:
         _jobs.enqueue(tenant, "sync", payload={"limit": limit, "dry_run": bool(report_only)})
         return _back_to_content(tenant, "sync")
-    return cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))
+    return _jobs.enqueue(tenant, "sync", payload={"limit": limit, "dry_run": bool(report_only)})
 
 
 @app.get("/admin/schema_check")

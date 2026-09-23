@@ -147,6 +147,37 @@ KINDS: dict[str, dict] = {
         # again lands on the same rows.
         "retryable": True,
     },
+    # ── EVERYTHING ELSE THE CONSOLE STARTS (2026-09-23) ─────────────────────
+    # These ran as threads in the web process, or inline in the request, and
+    # the same function could be started three ways with two status stores.
+    # One door now: a press queues its kind; nothing runs in a request.
+    "voice": {"what": "the brand's voice, read off its site into a proposal",
+              "target": "app.voice:derive",
+              # re-running overwrites the proposal it wrote; nothing is sent
+              "retryable": True},
+    "email": {"what": "claims and objections mined from sent mail",
+              "target": "app.email_harvest:mine",
+              # files proposals; a second pass could file a second copy
+              "retryable": False},
+    "harvest": {"what": "the brand's own pages read for claims",
+                "target": "app.harvest:harvest", "retryable": False},
+    "scan": {"what": "the live site checked against the brand's banned claims",
+             "target": "app.compliance:scan_and_record",
+             # a read and a record; running it twice records the same scan
+             "retryable": True},
+    "answer_engines": {"what": "whether the answer engines can read the site",
+                       "target": "app.answer_engines:check", "retryable": True},
+    "verify": {"what": "every connection this account has, live-tested",
+               "target": "app.tenants:verify_and_store", "retryable": True},
+    "canva_harvest": {"what": "a design pulled from Canva into the library",
+                      "target": "app.canva:harvest", "retryable": False},
+    "drive_photos": {"what": "photographs pulled from a Drive folder",
+                     "target": "app.creative:harvest_drive", "retryable": False},
+    "keywords_harvest": {"what": "keywords gathered from Search Console and Semrush",
+                         # Semrush is billed per line; never repeat it unasked
+                         "target": "app.keywords:harvest", "retryable": False},
+    "offers_harvest": {"what": "offers mined from sent mail",
+                       "target": "app.offers:harvest", "retryable": False},
 }
 
 
@@ -352,6 +383,13 @@ def summarise(result) -> str:
     lost = _losses(result)
     if lost:
         bits.append("LOST: " + " · ".join(lost))
+    # a keyword harvest's phrases that nothing else contained, each made a
+    # pillar of its own — "we found a theme" and "we found six unrelated
+    # phrases and called each one a theme" are different results
+    lone = int(result.get("orphan_pillars") or 0)
+    if lone:
+        bits.append(f"{lone} phrase{'' if lone == 1 else 's'} stood alone and became "
+                    f"{'its own pillar' if lone == 1 else 'their own pillars'}")
     # A set's own `note` is where it says what it was drawn from and what
     # was kept out of the request; a strip that only counted frames would
     # show a board of reference pins as a board that is working.
@@ -593,9 +631,12 @@ def as_dict(row) -> dict:
 
 
 def status(tenant: str, kind_: str) -> dict:
-    """The latest job of one kind, in the shape `web.bg_status` returns.
+    """The latest job of one kind — THE status reader. Every card, strip and
+    banner that says whether something is running asks this; there is no
+    second store to fall back to since `web.bg_status` and its `Setting` rows
+    were deleted on 2026-09-23.
 
-    A SHIM ON PURPOSE. The picture and brand rooms render background state
+    Its shape is the one the rooms were written against, ON PURPOSE. The picture and brand rooms render background state
     off `admin_ui.BG_*_LABELS` with wording tuned over several rounds — the
     honest estimate of how long a frame takes, the progress line, the reason
     a refusal gave in the API's own words. Migrating a label to the queue

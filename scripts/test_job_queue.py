@@ -262,7 +262,7 @@ def main() -> int:
     from app import web as _w
     qid = jobs.enqueue("eien", "email_recreate",
                        payload={"mode": "run", "structure": "st-1"})["id"]
-    st = _w.bg_status("email_recreate", "eien")
+    st = jobs.status("eien", "email_recreate")
     ck("the room reads the queue for a migrated label",
        st.get("state") == "queued", str(st))
     ck("  and QUEUED counts as in flight, so the button that started it is "
@@ -271,9 +271,10 @@ def main() -> int:
     ck("  no room decides that for itself any more",
        not re.search(r'state"\)\s*==\s*"running"', open(
            os.path.join(_here, "app", "admin_ui.py"), encoding="utf-8").read()))
-    ck("a label that has not moved still has its own store",
-       _w.bg_status("harvest", "eien") == {})
-    jobs.finish(qid, "done", "kept round 1 of 2")
+    ck("there is ONE status store — the thread runner and its Setting rows "
+       "are gone, so every label is a kind",
+       not hasattr(_w, "bg_status") and not hasattr(_w, "_run_bg")
+       and not hasattr(_w, "_sweep_interrupted"))
 
     print("\n— the payload is JSON, and the targets take it as it arrives —")
     from app import creative as _cr, recreate as _rc

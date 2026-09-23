@@ -675,3 +675,22 @@ def seed_owner(chat_id: str, name: str = "Gomeh") -> dict:
                           role="owner", active_tenant="agency"))
         s.commit()
     return {"owner": name, "chat_id": str(chat_id)}
+
+
+def verify_and_store(tenant: str) -> dict:
+    """Live-test every connection this account has and keep the per-provider
+    result where the Connections card reads it (`verify_result:<tenant>`).
+    Moved out of the route that used to define it inline."""
+    import json as _json
+    got = verify(tenant)
+    results = {c: r for c, r in got.items() if isinstance(r, dict) and "status" in r}
+    with db.SessionLocal() as s:
+        k = f"verify_result:{tenant}"
+        row = s.get(db.Setting, k)
+        val = _json.dumps({"when": str(db.utcnow()), "results": results})
+        if row is None:
+            s.add(db.Setting(key=k, value=val))
+        else:
+            row.value = val
+        s.commit()
+    return {"ok": True, "checked": len(results), "results": results}

@@ -4232,7 +4232,6 @@ def _pictures_card(key: str, tenant: str) -> str:
     what"; pictures were reported under the palette and filled from under a
     heading about words."""
     from . import kb as _kb
-    from .web import bg_status as _bg_status
     if not tenant:
         return ""
     rows = [a for a in _kb.assets(tenant) if (a.kind or "image") == "image"]
@@ -4243,8 +4242,8 @@ def _pictures_card(key: str, tenant: str) -> str:
         kinds[k] = kinds.get(k, 0) + 1
     pics = " · ".join(f"{_esc(k)} <b>{n}</b>" for k, n in sorted(kinds.items()))
     none_line = ""
-    sync_state = _bg_status("sync", tenant)
-    harvest_state = _bg_status("harvest", tenant)
+    sync_state = _jobs.status(tenant, "sync")
+    harvest_state = _jobs.status(tenant, "harvest")
 
     def _ran(st: dict) -> str:
         if not st:
@@ -4470,9 +4469,8 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     # running, finished with a proposal, failed with a reason. `derive_voice`
     # survives as a URL parameter that opens the panel — the old GET must not
     # 404 — but it no longer starts anything.
-    from .web import bg_status as _bg_status
     from . import voice as vc
-    vstate = _bg_status("voice", tenant)
+    vstate = _jobs.status(tenant, "voice")
     got = vc.proposed(tenant)
     running = vstate.get("state") in _jobs.IN_FLIGHT
     when = _esc((vstate.get("at") or "")[:16].replace("T", " "))
@@ -4652,7 +4650,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     # control (design rule 1) and "go and press Run harvest on Review" is a
     # fix instruction, which is the defect that rule exists to stop.
     def _last_run(label_: str, name: str, action: str, extra: dict) -> str:
-        st = _bg_status(label_, tenant)
+        st = _jobs.status(tenant, label_)
         stamp = _esc((st.get("at") or "")[:16].replace("T", " "))
         detail = str(st.get("detail", ""))
         if not st:
@@ -6309,7 +6307,6 @@ def _sources_block(key: str, tenant: str) -> str:
     running plain, finished with its own summary) and its button beside
     it — controls lead.
     """
-    from .web import bg_status
     has_store = bool(tenants.capabilities(tenant).get("commerce"))
     acts = {"harvest": ("/admin/harvest", "Run harvest", {"apply": "1"},
                         "reads the site, files proposals"),
@@ -6324,7 +6321,7 @@ def _sources_block(key: str, tenant: str) -> str:
                      "checks live pages against the ban list")}
     rows = ""
     for label, name in BG_LABELS:
-        st = bg_status(label, tenant)
+        st = _jobs.status(tenant, label)
         when = _esc((st.get("at") or "")[:16].replace("T", " "))
         if not st:
             state = '<span class="mut">never ran</span>'
@@ -6346,9 +6343,9 @@ def _sources_block(key: str, tenant: str) -> str:
     # A failure is the one state that must not hide in a fold.
     fails = "".join(
         f'<div class="note"><strong>{name} failed</strong> — '
-        f'{_esc(bg_status(label, tenant).get("detail", ""))}</div>'
+        f'{_esc(_jobs.status(tenant, label).get("detail", ""))}</div>'
         for label, name in BG_LABELS
-        if bg_status(label, tenant).get("state") == "failed")
+        if _jobs.status(tenant, label).get("state") == "failed")
     return f"""
 <details class="sec"><summary>Sources — what fills these queues, and when
 each last ran</summary>{rows}</details>{fails}"""
@@ -6420,7 +6417,6 @@ def _frames_run(tenant: str) -> str:
     one still going: the banner promises pictures and none arrive. So the
     state is READ where the pictures were promised to appear.
     """
-    from .web import bg_status as _bgs
     out = ""
     # READ OFF THE REGISTRY. `BG_PICTURE_LABELS` is what says this section
     # reports these actions, and a registry nothing reads is a declaration
@@ -6432,7 +6428,7 @@ def _frames_run(tenant: str) -> str:
         # has moved to the worker answers from its job row; one still running
         # in this process answers where it always did. The labels stay the
         # vocabulary either way, so migrating one costs this section nothing.
-        got = _jobs.status(tenant, label) or _bgs(label, tenant) or {}
+        got = _jobs.status(tenant, label) or {}
         state = str(got.get("state") or "")
         if not state:
             continue
@@ -7063,7 +7059,7 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
     if concept and concept[:120] != (st.get("name") or "")[:120]:
         # said once: a design named by its concept does not repeat it
         brief_line = f'<br><span class="mut">brief: {_esc(concept)}</span>'
-    bg = _web.bg_status("email_recreate", tenant)
+    bg = _jobs.status(tenant, "email_recreate")
     last = recreate.latest(st["id"], tenant)
     running = bg.get("state") in _jobs.IN_FLIGHT
     ents = kb.entities(tenant)[:24]
@@ -7187,7 +7183,7 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
     rows = _es.library()
     standing = _es_standing(tenant)
     taken_out = _es.out_for(tenant)
-    bg = _web.bg_status("email_recreate", tenant)
+    bg = _jobs.status(tenant, "email_recreate")
     running = bg.get("state") in _jobs.IN_FLIGHT
     base = url(tenant, "systems", "campaign_email", "designs")
     shots = {}
@@ -7545,8 +7541,7 @@ def _board_card(key: str, tenant: str) -> str:
     pool_tiles = "".join(_tile(a, []) for a in shown)
     # WHAT THE LAST FILL OR READ DID, where the boards are. A background
     # action that failed must not look like one still running.
-    from .web import bg_status as _bgs
-    bst = _bgs("boards", tenant) or {}
+    bst = _jobs.status(tenant, "boards") or {}
     bnote = ""
     if bst.get("state") in _jobs.IN_FLIGHT:
         bnote = ('<div class="note">Reading the Pinterest board &mdash; the pins '
@@ -7908,8 +7903,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
         # The card renders EMPTY too (spec §4): a crawler-fed queue that
         # vanishes when empty hides that the queue exists at all — and the
         # empty state is where the filling action belongs.
-        from .web import bg_status as _bgs
-        _hv = _bgs("harvest", tenant)
+        _hv = _jobs.status(tenant, "harvest")
         _hv_when = _esc((_hv.get("at") or "never")[:16].replace("T", " "))
         pics_html = f"""
     <div class="anchor" id="pics"></div>
@@ -8441,9 +8435,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     # — one place, with each source's action beside its state. A RUNNING
     # source still announces itself here so "refresh in a moment" is
     # visible without opening the fold.
-    from .web import bg_status
     for label, name in BG_LABELS:
-        st = bg_status(label, tenant)
+        st = _jobs.status(tenant, label)
         if st.get("state") in _jobs.IN_FLIGHT:
             banner += (f'<div class="ok">{name} is running. '
                        f'Refresh in a moment.</div>')
@@ -10649,10 +10642,9 @@ def _scan_rows(key: str, rows) -> str:
     stopped the pill and the numbers disagreeing. `render_assurance` already
     holds the resolved rows and hands them over.
     """
-    from .web import bg_status
     out = ""
     for t in rows:
-        st = bg_status("scan", t.key)
+        st = _jobs.status(t.key, "scan")
         when = _esc((st.get("at") or "")[:16].replace("T", " "))
         if not st:
             state = '<span class="mut">never scanned</span>'
@@ -11093,8 +11085,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
         scan_note = ('<div class="ok">Scan started — it reads the live site, '
                      'so give it a minute and refresh.</div>')
     try:
-        from .web import bg_status as _bgs
-        _st = _bgs("scan", tenant) or {}
+        _st = _jobs.status(tenant, "scan") or {}
     except Exception:                                            # noqa: BLE001
         _st = {}
     if _st.get("state") == "failed":

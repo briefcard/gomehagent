@@ -69,7 +69,7 @@ KNOWN = {
         "table EmailLog has 2 writers and no declared owner: email_harvest.py, worker.py",
         "table FeedbackItem has 2 writers and no declared owner: skill_pack.py, web.py",
         "table Memory has 2 writers and no declared owner: memory.py, systems.py",
-        "table Setting has 11 writers and no declared owner: canva.py, command_agent.py, email_harvest.py, ledger.py, ops_commands.py, ops_jobs.py, segments.py, skills.py, systems.py, web.py, worker.py",
+        "table Setting has 11 writers and no declared owner: canva.py, command_agent.py, email_harvest.py, ledger.py, ops_commands.py, ops_jobs.py, segments.py, skills.py, systems.py, tenants.py, worker.py",
         "table Tenant has 2 writers and no declared owner: tenants.py, web.py",
         "table User has 3 writers and no declared owner: portal.py, tenants.py, web.py",
         "table WaMessage has 2 writers and no declared owner: telegram.py, whatsapp.py"

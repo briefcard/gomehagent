@@ -122,23 +122,20 @@ def main():
     try:
         r = c.get(f"/admin/verify?key={KEY}&tenant=baci&ui=1",
                   follow_redirects=False)
-        ck("Test connections lands back with a flash and runs in the "
-           "background", r.status_code == 303
-           and "background" in r.headers.get("location", ""),
+        ck("Test connections lands back with a flash and runs on the worker",
+           r.status_code == 303 and "testing every connection" in
+           r.headers.get("location", "").replace("%20", " "),
            r.headers.get("location", ""))
-        for _ in range(40):                       # the bg thread finishes
-            with db.SessionLocal() as s:
-                if s.get(db.Setting, "verify_result:baci"):
-                    break
-            time.sleep(0.1)
+        from app import jobs as _jobs
+        _jobs.drain("baci", "test-worker")
         st2 = page()
         ck("…and the per-provider result lands ON the Status card",
            "Last live test" in st2 and "commerce: ok" in st2
            and "inbox: FAIL" in st2)
         r = c.get(f"/admin/verify?key={KEY}&tenant=baci",
                   follow_redirects=False)
-        ck("…the bare JSON probe survives for hand calls",
-           r.status_code == 200 and "commerce" in r.text)
+        ck("…a hand call queues it too — nothing runs inside a request",
+           r.status_code == 200 and r.json()["queued"][0]["ok"])
     finally:
         tenants.verify = real_verify
 

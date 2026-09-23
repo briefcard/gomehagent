@@ -208,43 +208,12 @@ def main() -> int:  # noqa: PLR0915
        and 'value="both"' not in ui.model_select())
     config.GEMINI_API_KEY = "gk-test"
 
+    # A RUN SAYS WHERE IT STANDS — the progress writer and the boot sweep
+    # this section tested belonged to `web._run_bg`, deleted 2026-09-23 when
+    # every run moved onto the queue. `jobs.run_one` hands the same writer
+    # (its heartbeat) and `jobs.reclaim` does the sweep; test_job_queue
+    # proves both.
     print("\n— A RUN SAYS WHERE IT STANDS —")
-    seen: list = []
-
-    def _slow(tenant, *, progress=None):
-        for i in (1, 2):
-            progress(f"cell {i} of 2")
-            seen.append(_bg("slowjob", tenant).get("detail"))
-        return {"made": 2}
-    web._run_bg("slowjob", _slow, "baci")
-    for _ in range(50):
-        if _bg("slowjob", "baci").get("state") == "done":
-            break
-        time.sleep(0.05)
-    ck("a job that takes `progress` is handed a writer, and each call replaces the running detail",
-       seen == ["cell 1 of 2", "cell 2 of 2"] and _bg("slowjob", "baci").get("state") == "done", str(seen))
-
-    def _plain(tenant):
-        return {"made": 1}
-    web._run_bg("plainjob", _plain, "baci")
-    for _ in range(50):
-        if _bg("plainjob", "baci").get("state") == "done":
-            break
-        time.sleep(0.05)
-    ck("  a job without it is called exactly as before", _bg("plainjob", "baci").get("state") == "done")
-
-    with db.SessionLocal() as s:
-        s.merge(db.Setting(key="bg:ad_frames:baci", value=json.dumps(
-            {"state": "running", "detail": "cell 3 of 8 — 2 kept", "at": "2026-09-08T15:36:00"})))
-        s.merge(db.Setting(key="bg:layers:baci", value=json.dumps(
-            {"state": "done", "detail": "3 placements", "at": "2026-09-08T10:00:00"})))
-        s.commit()
-    n = web._sweep_interrupted()
-    after = _bg("ad_frames", "baci")
-    ck("at boot a job left RUNNING is marked failed with the reason, its last progress kept; done rows untouched",
-       n == 1 and after.get("state") == "failed" and "server restarted" in after.get("detail", "")
-       and "cell 3 of 8" in after.get("detail", "") and after.get("at") == "2026-09-08T15:36:00"
-       and _bg("layers", "baci").get("state") == "done", str(after))
     # THE CARD READS THE JOB ROW (2026-09-23) — the work moved to the worker,
     # and the row that says what to run is also the row that says how it went.
     from app import jobs as _jobs

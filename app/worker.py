@@ -649,7 +649,7 @@ def _compliance_one(key: str) -> dict:
             prev = compliance.last_scan(key) or {}
             at = prev.get("at")
             since = at.date().isoformat() if at else ""
-            compliance.record_scan(key, compliance.scan(key, limit=60, since=since))
+            compliance.scan_and_record(key, limit=60, since=since)
             out["site"] = "scanned"
         except Exception as exc:                             # noqa: BLE001
             # Only reached if the scan RAISED, which `record_scan` never

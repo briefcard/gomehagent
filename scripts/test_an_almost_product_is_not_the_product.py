@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image  # noqa: E402
 
+from app import jobs  # noqa: E402
 from app import (coherence, creative, db, imagegen, kb, kb_seed, llm,  # noqa: E402
                  tenants, web)
 
@@ -248,7 +249,7 @@ def main() -> int:
        '"invented"' in asked[-1] and "reference images do not show" in " ".join(asked[-1].split())
        and v.get("invented") is True and v.get("match") == 70, str(v))
     ck("the run summary carries the drop",
-       "NOT the product" in web._summarise(got))
+       "NOT the product" in jobs.summarise(got))
 
     print()
     if _fail:
