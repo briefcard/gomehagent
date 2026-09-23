@@ -89,14 +89,18 @@ def main() -> int:
         text = '{"verdicts": [], "overall": "fine", "fix": ""}'
     llm.ask = lambda *a, **k: _Ok()
 
-    def _run_now(label, fn, *a, **k):
-        sent.update(k)
-        return fn(*a, **k)            # the REAL batch, synchronously
-    web._run_bg = _run_now
+    # THE PRESS QUEUES NOW (2026-09-23), so the seam has three sides: the
+    # route builds a payload, the registry names who takes it, and the worker
+    # calls that function. `run_now` walks all three in this process — a spy
+    # on the payload alone would be the same half-test this comment records.
+    import _queued
+    from app import jobs as _jobs
     vid = _variant_output("baci")
-    r = c.post(f"/admin/ad_frames?key={KEY}",
-               data={"tenant": "baci", "output_id": vid, "plates": "1"},
-               follow_redirects=False)
+    with _queued.run_now(_jobs) as queued:
+        r = c.post(f"/admin/ad_frames?key={KEY}",
+                   data={"tenant": "baci", "output_id": vid, "plates": "1"},
+                   follow_redirects=False)
+    sent.update(queued[-1]["payload"] if queued else {})
     ck("the run is accepted", r.status_code in (200, 303), str(r.status_code))
     ck("the ad's first line is sent as `prominent`, not only as `headline`",
        sent.get("prominent") == HEADLINE, repr(sent.get("prominent")))

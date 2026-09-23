@@ -1738,6 +1738,41 @@ def batch_each(tenant: str, *, models: list, progress=None, **kw) -> dict:
             "sets": sets, "models": [x["model"] for x in sets], "note": note}
 
 
+def frames_job(tenant: str, *, models: list | None = None, progress=None, **kw) -> dict:
+    """THE QUEUE'S DOOR TO A SET OF FRAMES — one model, or one set per model.
+
+    `app.jobs` calls a kind's target as `fn(tenant=..., **payload)` and a
+    payload is JSON, so `boards` arrives as a list and is handed on as the
+    tuple `batch` expects. Frame generation belongs in the worker: each
+    candidate is a megabyte or two of PNG and the judge decodes several of
+    them per cell.
+    """
+    names = [str(m) for m in (models or []) if str(m)]
+    if kw.get("boards") is not None:
+        kw["boards"] = tuple(kw.get("boards") or ())
+    if len(names) > 1:
+        return batch_each(tenant, models=names, progress=progress, **kw)
+    if names:
+        kw["image_model"] = names[0]
+    return batch(tenant, progress=progress, **kw)
+
+
+def board_job(tenant: str, *, mode: str = "read", slug: str = "", board: str = "",
+              progress=None) -> dict:
+    """THE QUEUE'S DOOR TO A BOARD — fill it from a Pinterest board's public
+    feed, or read its reference pins into direction. Up to forty fetches and
+    a vision call, neither of which belongs in the process serving the
+    console."""
+    if mode == "fill":
+        from . import pinterest
+        if not (slug and board):
+            return {"ok": False, "why": "a board and its address are needed"}
+        return pinterest.fill_board(tenant, slug, board)
+    if not slug:
+        return {"ok": False, "why": "a board is needed"}
+    return read_board_direction(tenant, slug)
+
+
 def _composite(tenant: str, product_id: str, plate: bytes, shape: str, *,
                headline: str = "", subline: str = "") -> dict:
     """The photograph onto the plate, at the one shape this set is cut at.

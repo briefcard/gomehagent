@@ -221,11 +221,12 @@ def main() -> int:
        "not read into direction yet" in page2 and "guide nothing" in page2)
 
     print("\n— THE ROUTES —")
-    scheduled: list = []
-    real_bg = web._run_bg
-    web._run_bg = lambda label, fn, *a, **kw: scheduled.append((label, fn, a))
+    # A PRESS QUEUES, it no longer threads (2026-09-23) — the spy records the
+    # row the worker will pick up, which is the same fact one store over.
+    import _queued
+    from app import jobs as _jobs
     from fastapi.testclient import TestClient
-    try:
+    with _queued.spy(_jobs) as scheduled:
         client = TestClient(web.app)
         r = client.post("/admin/board_fill", params={"key": KEY},
                         data={"tenant": "baci", "board": "lifestyle",
@@ -237,24 +238,25 @@ def main() -> int:
         r = client.post("/admin/board_fill", params={"key": KEY},
                         data={"tenant": "baci", "board": "lifestyle", "url": BOARD + "?x=1"},
                         follow_redirects=False)
-        ck("  a board link schedules the fill in the background, cleaned, and says so",
-           r.status_code == 303 and scheduled and scheduled[-1][0] == "boards"
-           and scheduled[-1][1] is pinterest.fill_board and scheduled[-1][2] == ("baci", "lifestyle", BOARD)
-           and "background" in unquote(r.headers.get("location", "")), str(scheduled)[:160])
+        ck("  a board link queues the fill, cleaned, and says so",
+           r.status_code == 303 and scheduled and scheduled[-1]["kind"] == "boards"
+           and scheduled[-1]["payload"] == {"mode": "fill", "slug": "lifestyle", "board": BOARD}
+           and "worker" in unquote(r.headers.get("location", "")), str(scheduled)[:200])
         r = client.post("/admin/board_read", params={"key": KEY},
                         data={"tenant": "baci", "board": "studio"}, follow_redirects=False)
         ck("  reading a board's pins into direction is its own control",
-           r.status_code == 303 and scheduled[-1][0] == "boards"
-           and scheduled[-1][1] is creative.read_board_direction and scheduled[-1][2] == ("baci", "studio"))
-    finally:
-        web._run_bg = real_bg
+           r.status_code == 303 and scheduled[-1]["kind"] == "boards"
+           and scheduled[-1]["payload"] == {"mode": "read", "slug": "studio"})
+        ck("  and the kind's target really is the board work, not a name that "
+           "resolves to nothing",
+           _jobs._resolve(_jobs.KINDS["boards"]["target"]) is creative.board_job)
     ck("  the label the boards card reads is declared",
        any(lbl == "boards" for lbl, _n in ui.BG_BRAND_LABELS))
-    with db.SessionLocal() as s:
-        s.merge(db.Setting(key="bg:boards:baci", value=json.dumps(
-            {"state": "failed", "detail": "Pinterest answered 404 for the board's feed",
-             "at": "2026-09-08T10:00:00"})))
-        s.commit()
+    # THE FAILURE LIVES ON THE JOB ROW NOW — same fact, the store the work
+    # itself writes to rather than a note beside it.
+    _jobs.finish(_jobs.enqueue("baci", "boards", payload={"mode": "read", "slug": "studio"},
+                               dedupe=False)["id"],
+                 "failed", "Pinterest answered 404 for the board's feed")
     page3 = ui.render_brand(KEY, tenant="baci")
     ck("  a fill that failed is said on the card, with the reason",
        "The board fill failed" in page3 and "answered 404" in page3)

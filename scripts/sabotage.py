@@ -38,6 +38,70 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": 'a_recreation_is_no_longer_queued_work',
+        "file": 'app/jobs.py',
+        "find": '    "email_recreate": {\n',
+        "replace": '    "email_recreate_SABOTAGE": {\n',
+        "suites": ['test_job_queue.py'],
+        "why": "recreating a reference goes back to a daemon thread inside the web service, where one screenshot decodes to 16 MB beside a 131 MB baseline on a 512 MB instance — which is what restarted the owner's console under them on 2026-09-23",
+    },
+    {
+        "name": 'a_queued_job_looks_like_no_job_at_all',
+        "file": 'app/jobs.py',
+        "find": 'IN_FLIGHT = ("queued", "running")\n',
+        "replace": 'IN_FLIGHT = ("running",)  # SABOTAGE\n',
+        "suites": ['test_job_queue.py'],
+        "why": "in the twenty seconds before a worker picks the job up the room says nothing is happening and offers the button again, so one press becomes two paid runs",
+    },
+    {
+        "name": 'the_rooms_stop_reading_the_queue_for_migrated_work',
+        "file": 'app/web.py',
+        "find": '    if label in _jobs.KINDS:\n',
+        "replace": '    if False:  # SABOTAGE\n',
+        "suites": ['test_job_queue.py'],
+        "why": "every room that reports a background action reads the store the work no longer writes to, so a recreation, a set of frames or a board fill runs in the worker and the console shows silence — the same broken-button experience the queue was built to end",
+    },
+    {
+        "name": 'a_boards_choice_is_lost_crossing_the_queue',
+        "file": 'app/creative.py',
+        "find": '        kw["boards"] = tuple(kw.get("boards") or ())\n',
+        "replace": '        pass  # SABOTAGE\n',
+        "suites": ['test_job_queue.py'],
+        "why": "a payload is JSON, so the boards the owner ticked arrive as a list; handed on unconverted the generator draws from every board instead of the ones chosen, and nothing says the choice was dropped",
+    },
+    {
+        "name": 'every_recreation_mode_becomes_the_same_one',
+        "file": 'app/recreate.py',
+        "find": '    if mode == "again":\n',
+        "replace": '    if False:  # SABOTAGE\n',
+        "suites": ['test_job_queue.py'],
+        "why": "'Read the reference again' quietly recreates from the old reading instead, so a design whose READING was wrong can never be corrected and the owner presses a button that cannot do what it says",
+    },
+    {
+        "name": 'the_pictures_room_stops_reading_the_queue',
+        "file": 'app/admin_ui.py',
+        "find": '        got = _jobs.status(tenant, label) or _bgs(label, tenant) or {}\n',
+        "replace": '        got = _bgs(label, tenant) or {}  # SABOTAGE\n',
+        "suites": ['test_job_queue.py'],
+        "why": "the hand-off of approved pictures to the client's site runs in the worker and the room that promised those pictures says nothing about it — a hand-off a deploy stopped looks identical to one that finished, which is the silence the queue was built to remove",
+    },
+    {
+        "name": 'a_stopped_run_restarts_itself_and_spends_again',
+        "file": 'app/jobs.py',
+        "find": '            if retryable(row.kind):\n',
+        "replace": '            if True:  # SABOTAGE\n',
+        "suites": ['test_job_queue.py'],
+        "why": "a run a deploy stopped is started again on its own, so a system run that had already called the model and filed an approval does both a second time — one press becomes two approvals, and the owner approving both sends twice",
+    },
+    {
+        "name": 'a_double_press_queues_the_work_twice',
+        "file": 'app/jobs.py',
+        "find": '        if dedupe:\n',
+        "replace": '        if False:  # SABOTAGE\n',
+        "suites": ['test_job_queue.py'],
+        "why": "a button pressed twice while the first run is still going queues a second one — two model calls and two reports for one intent, on the kind of job this queue deliberately never retries by itself",
+    },
+    {
         "name": 'the_article_card_hides_the_judgement',
         "file": 'app/admin_ui.py',
         "find": '    live_ok, live_why = approvals.article_may_go_live(output_id, a)\n',
@@ -128,7 +192,7 @@ SABOTAGES = [
     {
         "name": 'approving_a_reference_starts_its_review',
         "file": 'app/web.py',
-        "find": '        if recreate.latest(id, tenant) is None:\n            _run_bg("email_recreate", recreate.run, id, tenant=tenant)\n',
+        "find": '        if recreate.latest(id, tenant) is None:\n            _jobs.enqueue(tenant, "email_recreate", payload={"mode": "run", "structure": id})\n',
         "replace": '        if False:\n            pass\n',
         "suites": ['test_the_model_makes_the_email.py'],
         "why": "an approved reference sits in the room with no review until somebody finds another button — the step the owner asked to remove",
@@ -770,7 +834,7 @@ SABOTAGES = [
     {
         "name": 'approving_hands_the_picture_over',
         "file": 'app/web.py',
-        "find": '        _run_bg("hosting", _hosting.publish_all, tenant)',
+        "find": '        _jobs.enqueue(tenant, "hosting")',
         "replace": '        pass  # SABOTAGE',
         "suites": ['test_creative_batch.py'],
         "why": "approved artwork never reaches the client's own site, so we stay its host for ever and the client owns nothing we made for them",
@@ -3521,7 +3585,7 @@ SABOTAGES = [
     },
     {
         "name": "an_empty_source_says_so",
-        "file": "app/web.py",
+        "file": "app/jobs.py",
         "find": "    if empty:\n"
                 "        bits.append(\"READ NOTHING: \" + \", \".join(str(e) for e in empty[:4]))",
         "replace": "    if False:  # SABOTAGE\n"
@@ -3536,7 +3600,7 @@ SABOTAGES = [
     },
     {
         "name": "a_run_says_what_it_lost",
-        "file": "app/web.py",
+        "file": "app/jobs.py",
         "find": "    lost = _losses(result)\n"
                 "    if lost:\n"
                 "        bits.append(\"LOST: \" + \" · \".join(lost))",
@@ -8489,7 +8553,7 @@ SABOTAGES = [
     {
         'name': 'approval_schedules_the_layers',
         'file': 'app/web.py',
-        'find': '            _run_bg("layers", _hosting.layer_kept, tenant, list(layered))',
+        'find': '            _jobs.enqueue(tenant, "layers", payload={"asset_ids": list(layered)})',
         'replace': '            pass  # SABOTAGE',
         'suites': ['test_a_frame_arrives_in_canva_as_layers.py'],
         'why': 'approving a frame cuts flat crops and nothing more; the ratios the owner asked to be ensured are made only by pressing three buttons per frame',
@@ -8497,8 +8561,8 @@ SABOTAGES = [
     {
         'name': 'layers_only_where_a_canva_is_connected',
         'file': 'app/web.py',
-        'find': '        if _canva.which_account(tenant).get("source"):\n            _run_bg("layers"',
-        'replace': '        if True:  # SABOTAGE\n            _run_bg("layers"',
+        'find': '        if _canva.which_account(tenant).get("source"):\n            from . import jobs as _jobs',
+        'replace': '        if True:  # SABOTAGE\n            from . import jobs as _jobs',
         'suites': ['test_a_frame_arrives_in_canva_as_layers.py'],
         'why': 'an account with no Canva connected is told three times per approved frame that it is not, in the run strip, on every approval',
     },
@@ -8600,7 +8664,7 @@ SABOTAGES = [
     },
     {
         'name': 'a_runs_errors_reach_the_summary',
-        'file': 'app/web.py',
+        'file': 'app/jobs.py',
         'find': '    if errs and errs[0].split(": ", 1)[-1][:60] not in note:\n        out += f" — {len(errs)} error(s): {errs[0][:200]}"',
         'replace': '    if False:  # SABOTAGE\n        out += f" — {len(errs)} error(s): {errs[0][:200]}"',
         'suites': ['test_a_run_that_made_nothing_says_why.py'],
@@ -8881,17 +8945,17 @@ SABOTAGES = [
     {
         'name': 'the_chosen_model_reaches_the_run',
         'file': 'app/web.py',
-        'find': '                output_id=output_id, boards=tuple(boards), image_model=models[0], **args)',
-        'replace': '                output_id=output_id, boards=tuple(boards), **args)  # SABOTAGE',
+        'find': '        models=list(models), claim=claim, plates=plates, output_id=output_id,',
+        'replace': '        models=[], claim=claim, plates=plates, output_id=output_id,  # SABOTAGE',
         'suites': ['test_the_image_model_is_chosen_where_the_set_starts.py'],
         'why': 'the owner chooses Google and gets OpenAI, and the comparison they think they are making is two sets from one model',
     },
     {
         'name': 'both_runs_one_set_per_model',
-        'file': 'app/web.py',
-        'find': '    if len(models) == 1:\n        _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates,',
-        'replace': '    if True:  # SABOTAGE\n        _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates,',
-        'suites': ['test_the_image_model_is_chosen_where_the_set_starts.py'],
+        'file': 'app/creative.py',
+        'find': '    if len(names) > 1:\n        return batch_each(tenant, models=names, progress=progress, **kw)',
+        'replace': '    if False:  # SABOTAGE\n        return batch_each(tenant, models=names, progress=progress, **kw)',
+        'suites': ['test_job_queue.py', 'test_the_image_model_is_chosen_where_the_set_starts.py'],
         'why': "'both' makes one set by the first model and calls it a comparison",
     },
     {

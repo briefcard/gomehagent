@@ -1424,6 +1424,63 @@ class JobLease(Base):
     skips = Column(Integer, default=0)                # ticks another holder won
 
 
+class JobQueue(Base):
+    """One row per piece of queued work: what to RUN, and how it went.
+
+    THE RUN OUTLIVES THE PROCESS THAT ASKED FOR IT. Long work used to happen
+    in a daemon thread inside the WEB service (`web._run_bg`), which is why
+    `web._sweep_interrupted` has to exist at all: a deploy kills the thread
+    and the card still said "running" for a run that had stopped hours before
+    (owner, 2026-09-08, five minutes into a run whose card promised two).
+
+    A thread is not a queue. It recorded what had HAPPENED and never what to
+    RUN, so nothing could pick the work back up; the status lived in one
+    `Setting` row per (label, tenant), so a second run of the same thing
+    overwrote the first and no history survived; and the heavy work competed
+    with request serving on the web dyno besides.
+
+    This row is the work AND its status, which is what stops the two
+    disagreeing. `run_id` joins it to the `SystemRun` it produced, so "is it
+    running" and "what did it decide" are one answer rather than two stores
+    that can drift.
+
+    Claimed by a single UPDATE whose WHERE clause carries the state, on
+    `JobLease`'s argument exactly: the race between two workers is decided by
+    the database — rowcount 1 wins, 0 tries the next row — with no advisory
+    locks and nothing to leak on a crash.
+
+    `attempts` and the kind's own `retryable` flag decide what a deploy
+    costs. A job that only READS may be picked up again; one that spends a
+    model call or files an approval is reported as interrupted and waits for
+    a person, because repeating it quietly is how one approval becomes two.
+    """
+
+    __tablename__ = "job_queue"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    kind = Column(String, nullable=False, index=True)     # a key of jobs.KINDS
+    system_key = Column(String, default="", index=True)   # which system it is for
+    label = Column(String, default="")                    # what to call it on screen
+    payload = Column(JSON, default=dict)                  # the call's own arguments
+    #: queued | running | done | failed | interrupted
+    #
+    #: `interrupted` is its own outcome and not a kind of `failed`: the job did
+    #: not raise, the process it was running in went away. The distinction is
+    #: what lets the card say "a deploy stopped this, press it again" instead
+    #: of showing a traceback nobody wrote.
+    state = Column(String, default="queued", index=True)
+    detail = Column(Text, default="")                     # progress, then the result
+    attempts = Column(Integer, default=0)
+    holder = Column(String, default="")                   # the instance running it
+    leased_until = Column(DateTime(timezone=True))
+    heartbeat_at = Column(DateTime(timezone=True))        # last sign of life
+    run_id = Column(String, default="")                   # the SystemRun it produced
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    started_at = Column(DateTime(timezone=True))
+    finished_at = Column(DateTime(timezone=True))
+
+
 class ArtifactBody(Base):
     """The rendered thing itself, kept whole, beside the ledger row about it.
 

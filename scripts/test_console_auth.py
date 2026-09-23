@@ -160,6 +160,20 @@ def main() -> int:
            "capabilities" not in r.json(),
            str(sorted(r.json())))
         keyed = c.get("/health?key=s3cret-console").json()
+        # WHAT THIS PROCESS IS HOLDING. The heavy creative work left the web
+        # service on 2026-09-23 because an instance was restarted under the
+        # owner mid-session; "the web is slim now" is a claim, and a claim
+        # belongs somewhere it can be read back.
+        ck("…and what this process is holding, in megabytes",
+           isinstance((keyed.get("memory") or {}).get("peak_mb"), (int, float)),
+           str(keyed.get("memory")))
+        ck("…and how much work is waiting for the worker",
+           set(keyed.get("queue") or {}) >= {"queued", "running",
+                                             "oldest_queued_seconds"},
+           "a queue that only grows means nothing is draining it, which "
+           "looks exactly like a button that does nothing")
+        ck("neither is public — they describe the infrastructure",
+           "memory" not in r.json() and "queue" not in r.json())
         cap = keyed.get("capabilities") or {}
         ck("…and with the key it says what can actually run",
            set(cap.get("can") or {}) >= {"generate_images",

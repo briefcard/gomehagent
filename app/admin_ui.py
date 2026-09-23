@@ -16,7 +16,7 @@ import json
 import logging
 import re as _re
 
-from . import config, db, kb, systems, tenants
+from . import config, db, jobs as _jobs, kb, systems, tenants
 
 #: The console renders; it does not normally log. The exception is a section
 #: that CONTAINS a failure so the rest of the page survives — the operator
@@ -4091,7 +4091,7 @@ def _pictures_card(key: str, tenant: str) -> str:
         if not st:
             return '<span class="mut">never run</span>'
         stamp = _esc((st.get("at") or "")[:16].replace("T", " "))
-        if st.get("state") == "running":
+        if st.get("state") in _jobs.IN_FLIGHT:
             return f'<span class="chip nb">running · {stamp}</span>'
         if st.get("state") == "failed":
             return f'<span class="chip off">failed {stamp}</span>'
@@ -4315,7 +4315,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     from . import voice as vc
     vstate = _bg_status("voice", tenant)
     got = vc.proposed(tenant)
-    running = vstate.get("state") == "running"
+    running = vstate.get("state") in _jobs.IN_FLIGHT
     when = _esc((vstate.get("at") or "")[:16].replace("T", " "))
     if running:
         vnote = ('<div class="ok">Reading their site now. This takes about a '
@@ -4501,7 +4501,7 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
         elif st.get("state") == "failed":
             state = (f'<span class="chip off" title="{_esc(detail)}">failed '
                      f'{stamp}</span>')
-        elif st.get("state") == "running":
+        elif st.get("state") in _jobs.IN_FLIGHT:
             state = f'<span class="chip nb">running · {stamp}</span>'
         else:
             # "READ NOTHING: <source>" is the half that matters here, so it is
@@ -6181,7 +6181,7 @@ def _sources_block(key: str, tenant: str) -> str:
         elif st.get("state") == "failed":
             state = (f'<span class="chip off" title="{_esc(st.get("detail", ""))}">'
                      f'failed {when}</span>')
-        elif st.get("state") == "running":
+        elif st.get("state") in _jobs.IN_FLIGHT:
             state = f'<span class="chip nb">running · {when}</span>'
         else:
             state = (f'<span class="mut" title="{_esc(st.get("detail", ""))}">'
@@ -6276,8 +6276,13 @@ def _frames_run(tenant: str) -> str:
     # reports these actions, and a registry nothing reads is a declaration
     # pretending to be wiring — which is the failure this codebase keeps
     # finding in its own work.
+    from . import jobs as _jobs
     for label, name in BG_PICTURE_LABELS:
-        got = _bgs(label, tenant) or {}
+        # THE QUEUE FIRST, the old thread-status second. A label whose work
+        # has moved to the worker answers from its job row; one still running
+        # in this process answers where it always did. The labels stay the
+        # vocabulary either way, so migrating one costs this section nothing.
+        got = _jobs.status(tenant, label) or _bgs(label, tenant) or {}
         state = str(got.get("state") or "")
         if not state:
             continue
@@ -6287,7 +6292,7 @@ def _frames_run(tenant: str) -> str:
         # whole recorded detail — cut at 600 it hid which cells were dropped
         # and why (2026-09-08).
         detail = _esc(str(got.get("detail") or "")[:1500])
-        if state == "running":
+        if state in _jobs.IN_FLIGHT:
             # THE HONEST ESTIMATE, then the run's own progress once it has
             # any. "Two to three minutes" was written before the judge; a
             # judged frame is a drawing of four candidates, a judge call per
@@ -6304,6 +6309,16 @@ def _frames_run(tenant: str) -> str:
                   "progress — it does not refresh itself.")
         elif state == "failed":
             chip, says = ("chip off", f"{_esc(name)} &mdash; failed"), (
+                f"{when} &mdash; {detail}")
+        elif state == "queued":
+            chip, says = ("chip", f"{_esc(name)} &mdash; queued"), (
+                "a worker picks this up within about twenty seconds. Reload "
+                "this page to see it start — it does not refresh itself.")
+        elif state == "interrupted":
+            # NOT dressed as a failure. Nothing raised; the process running it
+            # went away, and the answer is to press it again rather than to go
+            # looking for a bug.
+            chip, says = ("chip off", f"{_esc(name)} &mdash; stopped"), (
                 f"{when} &mdash; {detail}")
         else:
             chip, says = ("chip on", f"last {_esc(name).lower()} run"), (
@@ -6764,7 +6779,7 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
         brief_line = f'<br><span class="mut">brief: {_esc(concept)}</span>'
     bg = _web.bg_status("email_recreate", tenant)
     last = recreate.latest(st["id"], tenant)
-    running = bg.get("state") == "running"
+    running = bg.get("state") in _jobs.IN_FLIGHT
     ents = kb.entities(tenant)[:24]
     about = ('<select name="entity" style="max-width:260px"><option value="">the brand</option>'
              + "".join(f'<option value="{_esc(e.key)}">{_esc(e.name)}</option>' for e in ents)
@@ -6920,7 +6935,7 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "") -> str:
     # block, where the review is.
     from . import web as _web
     bg = _web.bg_status("email_recreate", tenant)
-    running = bg.get("state") == "running"
+    running = bg.get("state") in _jobs.IN_FLIGHT
     paste = f"""
     <form method="post" action="/admin/email_reference" style="margin:8px 0">
       <input type="hidden" name="key" value="{_esc(key)}">
@@ -7153,7 +7168,7 @@ def _board_card(key: str, tenant: str) -> str:
     from .web import bg_status as _bgs
     bst = _bgs("boards", tenant) or {}
     bnote = ""
-    if bst.get("state") == "running":
+    if bst.get("state") in _jobs.IN_FLIGHT:
         bnote = ('<div class="note">Reading the Pinterest board &mdash; the pins '
                  'and the direction appear here when it lands; this page does not '
                  'refresh itself.</div>')
@@ -8050,7 +8065,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     from .web import bg_status
     for label, name in BG_LABELS:
         st = bg_status(label, tenant)
-        if st.get("state") == "running":
+        if st.get("state") in _jobs.IN_FLIGHT:
             banner += (f'<div class="ok">{name} is running. '
                        f'Refresh in a moment.</div>')
 
@@ -10279,7 +10294,7 @@ def _scan_rows(key: str, rows) -> str:
         elif st.get("state") == "failed":
             state = (f'<span class="chip off" title="{_esc(st.get("detail", ""))}">'
                      f'failed {when}</span>')
-        elif st.get("state") == "running":
+        elif st.get("state") in _jobs.IN_FLIGHT:
             state = f'<span class="chip nb">running &middot; {when}</span>'
         else:
             state = (f'<span class="mut" title="{_esc(st.get("detail", ""))}">'
@@ -12756,7 +12771,7 @@ def _reports_section(key: str, row) -> str:
     <input type="hidden" name="system" value="{_esc(row.key)}">
     <button class="sec"{"" if systems.is_on(row) else " disabled"}>Run the check now</button>
     <span class="when">{"runs every Monday as well; " if weekly else ""}the report lands here when it finishes{"" if systems.is_on(row) else " — turn the system on first"}</span>
-  </form>"""
+  </form>{_run_state(row.tenant, row.key)}"""
     fixes_note = ("Each fix a report proposes waits under <b>Waiting on you</b>; "
                   "approving one writes it to the profile." if row.key == "gbp_listing" else "")
     return f"""
@@ -12770,6 +12785,37 @@ def _reports_section(key: str, row) -> str:
   {run_now}
   <div class="thread">{"".join(items)}</div>
 </div>"""
+
+
+def _run_state(tenant: str, system_key: str) -> str:
+    """Where this system's last run got to — beside the button that starts one.
+
+    THE STATE IS REPORTED WHERE ITS CONTROL IS (design rule 1). The press
+    used to write a status row keyed `bg:run:{system}:{tenant}` that no
+    reader could reach, so "Run the check now" was followed by silence
+    whether the run was working, finished, blocked or dead. This reads the
+    queue row that IS the run, so the answer is the same one the worker
+    holds — not a second store that can drift from it.
+    """
+    from . import jobs as _jobs
+    job = _jobs.latest(tenant, system_key=system_key, kind_="system_run")
+    if not job:
+        return ('<div class="when" style="margin-top:.4rem">Never run from here.</div>')
+    chip = ("off" if job["state"] in ("failed", "interrupted")
+            else "nb" if job["state"] in ("queued", "running") else "")
+    when = _esc(job["at"][:16].replace("T", " "))
+    tries = (f' · attempt {job["attempts"]}' if job["attempts"] > 1 else "")
+    # A failure and an interruption are the two states that must not hide:
+    # one needs a fix, the other needs the button pressing again, and they
+    # are not the same sentence.
+    detail = _esc(job["detail"])[:400]
+    body = (f'<div class="note"><strong>{_esc(job["says"])}</strong> — {detail}</div>'
+            if job["state"] in ("failed", "interrupted") and detail else "")
+    return (f'<div class="row" style="margin-top:.4rem">'
+            f'<span class="chip {chip}">{_esc(job["says"])}</span> '
+            f'<span class="when">{when}{tries}'
+            + (f' &mdash; {detail}' if body == "" and detail else "")
+            + f'</span></div>{body}')
 
 
 def _drafts_section(key: str, row) -> str:

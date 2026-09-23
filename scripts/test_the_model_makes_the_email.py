@@ -199,6 +199,41 @@ def main() -> int:
     ck("a section that does not say what it is is refused by name",
        rc.brief_problem({**BRIEF, "sections": [{"n": 1}]}) == "section 1 does not say what it is")
 
+    print("— 1b. the concept is FORM, and a declared turn is the design working —")
+    # The squeeze this closes: a brief whose concept named the REFERENCE's own
+    # subject ("a new pre-seasoned seafood SKU via a Taco Tuesday theme") left
+    # the maker no winning move. Carry the subject over and the brand has no
+    # such product; turn it to what the brand has and the judge called it "not
+    # the reference's concept" and BLOCKED — so the loop could not close and
+    # the send failed with RuntimeError (owner, 2026-09-22).
+    ck("the brief is told to write form, never the reference's subject",
+       "NEVER the reference's product, category, cuisine, season or" in rc._BRIEF_PROMPT
+       and "concept_instance" in rc._BRIEF_PROMPT)
+    ck("the maker's turn is read back out of its own comment",
+       rc.turned("<!doctype html><!-- turned: no seafood here; the launch is the olive oil -->"
+                 "<p>x</p>") == "no seafood here; the launch is the olive oil")
+    ck("no comment is no turn", rc.turned("<p>x</p>") == "")
+
+    _verdict = {"ours_first_words": "Set the scene in four steps", "same_concept": False,
+                "devices_in_order": True, "brand_material": True, "would_send": True,
+                "one_system": True, "weight_rhythm": "matched", "findings": []}
+    answers["email_judge"] = _verdict
+    _ref, _ours = png(640, 900), png(640, 900)
+    _blind = rc.judge(_ref, _ours, BRIEF, tenant="baci")
+    ck("with no turn declared, a different concept still blocks",
+       any(f["severity"] == "blocks" and "not the reference's concept" in f["what"]
+           for f in _blind["findings"]), str(_blind.get("why"))[:80])
+    _turned = rc.judge(_ref, _ours, BRIEF, tenant="baci",
+                       turned_="the brand has no seafood; the launch is the olive oil")
+    ck("the SAME verdict never blocks once the turn is declared",
+       not rc.blocking(_turned["findings"]),
+       str([f.get("what") for f in _turned["findings"]])[:90])
+    ck("  and the turn stays on the record rather than vanishing",
+       any("turned" in f.get("what", "") for f in _turned["findings"]))
+    ck("  and the judge was TOLD about the turn, so it judges the turned concept",
+       "TURNED THE CONCEPT" in "".join(
+           b.get("text", "") for b in seen["email_judge"][-1] if isinstance(b, dict)))
+
     print("— 2. the cast looks at a sheet that fits the tier —")
     kit = rc.kit("baci")
     ck("the kit carries the publishable pictures with their readings, never a reference pin",
@@ -607,13 +642,19 @@ def main() -> int:
     ex.forget("baci", ex.EMAIL, "Never put the logo above the headline.")
 
     print("— 9. the room —")
-    bg: list = []
-    web._run_bg = lambda label, fn, *a, **k: bg.append((label, a, k))
+    # THE PRESS QUEUES (2026-09-23): a recreation is five to seven model calls
+    # and a browser, and it no longer runs inside the service serving this page.
+    import _queued
+    from app import jobs as _jobs
     from fastapi.testclient import TestClient
+    _spy = _queued.spy(_jobs)
+    bg = _spy.__enter__()
     c = TestClient(web.app)
     r = c.post("/admin/email_reference?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "https://reallygoodemails.com/emails/shrimp"}, follow_redirects=False)
-    ck("pasting a link posts, runs off the request, and comes back to the Designs room",
-       r.status_code == 303 and "wf=designs" in r.headers.get("location", "") and bg[-1][0] == "email_recreate")
+    ck("pasting a link posts, queues the work, and comes back to the Designs room",
+       r.status_code == 303 and "wf=designs" in r.headers.get("location", "")
+       and bg[-1]["kind"] == "email_recreate" and bg[-1]["payload"]["mode"] == "swipe",
+       str(bg[-1:])[:160])
     room = admin_ui._structures_card("s3cret", "baci")
     ck("the room: paste at the top, the reference beside ours, the judge's line, the choice",
        'action="/admin/email_reference"' in room and "ours, for baci" in room and "the judge: same concept" in room
@@ -621,7 +662,25 @@ def main() -> int:
     r = c.get(f"/admin/email_recreation?key=s3cret&id={rc.latest(new['id'], 'baci')['id']}")
     ck("the kept HTML is served as a page", r.status_code == 200 and "<table" in r.text)
     r = c.post("/admin/email_recreate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": new["id"], "entity": "portofino"}, follow_redirects=False)
-    ck("Recreate again posts and runs off the request", r.status_code == 303 and bg[-1][0] == "email_recreate" and bg[-1][1] == (new["id"],))
+    ck("Recreate again posts and queues it for a worker",
+       r.status_code == 303 and bg[-1]["kind"] == "email_recreate"
+       and bg[-1]["payload"]["structure"] == new["id"]
+       and bg[-1]["payload"]["mode"] == "run", str(bg[-1:])[:160])
+    # AN APPROVED REFERENCE IS REVIEWED WITHOUT A SECOND BUTTON (owner,
+    # 2026-09-12) — the press that approves one that has never been recreated
+    # queues that first recreation itself.
+    second_ref = kb.add_asset("agency", "https://reallygoodemails.com/second.png",
+                              rights=kb.REFERENCE, title="a second reference",
+                              subject="reference", origin="human")
+    fresh = es.file_reference(second_ref, brief={"concept": "a second reference"},
+                              source_url="https://reallygoodemails.com/emails/second")
+    n_before = len(bg)
+    r = c.get(f"/admin/email_structure?key=s3cret&tenant=baci&id={fresh['id']}&verdict=approved&ui=1",
+              follow_redirects=False)
+    ck("approving a reference with no review yet starts one, with no second button",
+       r.status_code == 303 and len(bg) == n_before + 1
+       and bg[-1]["kind"] == "email_recreate"
+       and bg[-1]["payload"].get("structure") == fresh["id"], str(bg[-1:])[:160])
     r = c.post("/admin/email_design_designate?key=s3cret", data={"key": "s3cret", "tenant": "baci", "structure": new["id"]}, follow_redirects=False)
     ck("the standing choice posts and comes back to the room", r.status_code == 303 and "wf=designs" in r.headers.get("location", "")
        and es.standing_designation("baci") == new["id"])

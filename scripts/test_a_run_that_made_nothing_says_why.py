@@ -110,17 +110,23 @@ def main() -> int:
                            "errors": ["identity/person_led: 502: upstream connect error"]})
     ck("  and a result whose note forgot its errors still gets them said, with the count",
        "1 error(s)" in bare and "upstream connect error" in bare, bare)
-    # THE STRIP, through the real background runner.
-    web._run_bg("ad_frames", creative.batch, "baci", commitment=cup, entity_key="zodiac-cup",
-                fmt="ad_frame", positioning="the sign you were born under", plates=8,
-                review=False, boards=("lifestyle",))
-    for _ in range(100):
-        with db.SessionLocal() as s:
-            row = s.get(db.Setting, "bg:ad_frames:baci")
-            state = json.loads(row.value).get("state") if row else ""
-        if state == "done":
-            break
-        time.sleep(0.1)
+    _real_batch = creative.batch
+    # THE STRIP, THROUGH THE REAL PATH: the press queues and a worker runs it
+    # (2026-09-23), so the refusal has to survive being written by one process
+    # and read by another — which is exactly where "made 0" lost its reason
+    # once already.
+    from app import jobs as _jobs
+    _jobs.enqueue("baci", "ad_frames", payload={
+        "models": [], "entity_key": "zodiac-cup", "fmt": "ad_frame",
+        "positioning": "the sign you were born under", "plates": 8,
+        "review": False, "boards": ["lifestyle"]})
+    # the commitment is a live object and cannot ride in a JSON payload, so it
+    # is bound to the callee for the length of this one drain and no longer
+    creative.batch = (lambda tenant, **kw: _real_batch(tenant, commitment=cup, **kw))
+    try:
+        _jobs.drain("baci", "test-worker")
+    finally:
+        creative.batch = _real_batch
     strip = ui._frames_run("baci")
     ck("the Pictures strip shows the API's refusal where the pictures were promised",
        "safety system" in strip and "nothing was generated" in strip, strip[:400])

@@ -1058,8 +1058,16 @@ def _holder() -> str:
 #: minute later; short enough that a dead instance does not park a job for a
 #: day. Per-job overrides go in _LEASE_TTL by context string.
 LEASE_TTL_SECONDS = 20 * 60
+#: "job queue" is deliberately short. The drain holds an account's lease
+#: while its jobs run, and `_release` gives it back — so this TTL only
+#: matters when the worker DIES mid-job, which is the exact case the queue
+#: exists for. Five minutes matches `jobs.STALE_AFTER_SECONDS`, so the lease
+#: frees at about the moment the job itself is declared stale; a sibling that
+#: then drains the same account cannot double-run anything, because the claim
+#: on each row is its own single-statement race.
 _LEASE_TTL = {"inbox polling": 90, "moments sweep": 15 * 60,
-              "keyword map top-up": 60 * 60, "nightly sweep": 60 * 60}
+              "keyword map top-up": 60 * 60, "nightly sweep": 60 * 60,
+              "job queue": 5 * 60}
 
 
 def _lease_name(context: str, tenant: str = "") -> str:
@@ -1139,6 +1147,18 @@ def _each_tenant(context: str, one, *, include_paused: bool = False) -> dict:
         finally:
             _release(name)
     return out
+
+
+def _queue_one(key: str) -> dict:
+    """Drain one account's queue. The unit `queue_drain_sharded` shards."""
+    from . import jobs
+    return jobs.drain(key, _holder())
+
+
+def queue_drain_sharded() -> dict:
+    from . import jobs
+    jobs.reclaim()
+    return _each_tenant("job queue", _queue_one)
 
 
 def keyword_sync_sharded() -> dict:
@@ -1268,6 +1288,14 @@ def main() -> None:
     _safe(bucket_backfill, "bucket backfill")()
     _safe(backlog_sweep, "backlog sweep")()
     sched = BackgroundScheduler(timezone="America/New_York")
+    # THE QUEUE, drained often. A press in the console enqueues and comes
+    # straight back; this is what picks it up. Frequent because the owner is
+    # looking at the card when they press it — a minute of "queued" reads as
+    # a button that did nothing, which is the whole defect this replaces.
+    # Sharded: the per-row claim in `jobs.claim` is the lease, so both worker
+    # instances drain and neither can run the same job twice.
+    sched.add_job(_safe(queue_drain_sharded, "job queue", sharded=True),
+                  "interval", seconds=20)
     sched.add_job(_safe(poll_all, "inbox polling"), "interval",
                   minutes=config.POLL_INTERVAL_MIN)
     sched.add_job(_safe(approvals.notify_pending, "approval batching"),

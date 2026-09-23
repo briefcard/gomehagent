@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import approvals, config, db
+from . import jobs as _jobs
 
 log = logging.getLogger("web")
 app = FastAPI(title="Saias Operations Assistant")
@@ -488,8 +489,53 @@ def health(key: str = Depends(admin_key)) -> dict:
                  # missing is quiet — images generate and every review reports
                  # "could not run", which is correctly not a pass and is also
                  # not obviously a configuration problem.
-                 "capabilities": _capability_report()})
+                 "capabilities": _capability_report(),
+                 # WHAT THIS PROCESS IS HOLDING, and what is waiting for the
+                 # worker. The heavy creative work moved off this service on
+                 # 2026-09-23 because an instance was restarted under the
+                 # owner mid-session, and "the web is slim now" is a claim
+                 # like any other: it belongs where it can be read, not in a
+                 # commit message.
+                 "memory": _memory_report(),
+                 "queue": _queue_report()})
     return base
+
+
+def _memory_report() -> dict:
+    """What this process holds right now, in megabytes. `rss` is the number
+    Render compares against the plan's limit."""
+    import resource as _res
+    out: dict = {}
+    try:                                    # Linux: the live number
+        for line in open("/proc/self/status", encoding="utf-8"):
+            if line.startswith("VmRSS:"):
+                out["rss_mb"] = round(int(line.split()[1]) / 1024, 1)
+                break
+    except Exception:                                            # noqa: BLE001
+        pass
+    peak = _res.getrusage(_res.RUSAGE_SELF).ru_maxrss
+    # ru_maxrss is kilobytes on Linux and bytes on macOS
+    out["peak_mb"] = round(peak / (1024 * 1024) if peak > 10 ** 7 else peak / 1024, 1)
+    return out
+
+
+def _queue_report() -> dict:
+    """How much work is waiting, and how long the oldest has waited. A queue
+    that only grows means no worker is draining it, which looks exactly like
+    a button that does nothing until you can see this."""
+    from sqlalchemy import func as _f
+    out = {"queued": 0, "running": 0, "oldest_queued_seconds": 0}
+    with db.SessionLocal() as s:
+        for state, n in (s.query(db.JobQueue.state, _f.count(db.JobQueue.id))
+                         .filter(db.JobQueue.state.in_(_jobs.IN_FLIGHT))
+                         .group_by(db.JobQueue.state).all()):
+            out[str(state)] = int(n)
+        row = (s.query(db.JobQueue).filter(db.JobQueue.state == "queued")
+               .order_by(db.JobQueue.created_at.asc()).first())
+        if row is not None and row.created_at:
+            out["oldest_queued_seconds"] = int(
+                (db.utcnow() - db.as_utc(row.created_at)).total_seconds())
+    return out
 
 
 def _capability_report() -> dict:
@@ -749,10 +795,28 @@ async def system_run_now(request: Request, key: str = Depends(admin_key)):
         return _back_to_system(tenant, system, anchor="reports",
                                err="turn the system on first — a check only runs "
                                    "for a system that is on")
-    _run_bg(f"run:{system}", _skill.run, wf["skill"], tenant=tenant, trigger="manual")
+    # ENQUEUED, not threaded. This used to be
+    # `_run_bg(f"run:{system}", ...)`, which ran the work in a daemon thread
+    # inside THIS service and wrote its state to `bg:run:{system}:{tenant}`
+    # — a key nothing ever read, because every reader iterates a literal
+    # tuple (`BG_LABELS` and its siblings) that a per-system label cannot be
+    # a member of. So the button said "running now" and then went silent for
+    # ever, which is the broken-button experience `_run_bg` was itself
+    # written to remove, one layer along. The queue row IS the status now,
+    # it is read on the card below, and a deploy no longer takes the run
+    # with it.
+    from . import jobs as _jobs
+    put = _jobs.enqueue(tenant, "system_run", system_key=system,
+                        label=f"{system} check",
+                        payload={"key": wf["skill"], "trigger": "manual"})
+    if not put.get("ok"):
+        return _back_to_system(tenant, system, anchor="reports",
+                               err=str(put.get("why") or "it could not be queued"))
     return _back_to_system(tenant, system, anchor="reports",
-                           ok="running now — the report appears under Reports "
-                              "when it lands")
+                           ok=(str(put.get("why")) + " — where it has got to is on "
+                               "the card below" if put.get("already") else
+                               "queued — where it has got to is on the card below, "
+                               "and the report lands under Reports when it finishes"))
 
 
 @app.get("/admin/gbp_publish")
@@ -1156,7 +1220,6 @@ async def email_recreate(request: Request, key: str = Depends(admin_key)):
 
     from fastapi.responses import RedirectResponse
 
-    from . import recreate
     if key != config.APPROVAL_SECRET:
         return _signin_first(request)
     form = await request.form()
@@ -1165,13 +1228,12 @@ async def email_recreate(request: Request, key: str = Depends(admin_key)):
     entity = str(form.get("entity", ""))
     if not (tenant and structure):
         arg = ("err", "a brand and a structure are needed")
-    elif str(form.get("reread") or ""):
-        _run_bg("email_recreate", recreate.again, structure, tenant=tenant, entity_key=entity)
-        arg = ("ok", "reading the reference again and recreating — it appears below when it lands")
     else:
-        _run_bg("email_recreate", recreate.run, structure, tenant=tenant, entity_key=entity,
-                seed=f"{structure}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}")
-        arg = ("ok", "recreating — the reference beside ours appears below when it lands")
+        reread = bool(str(form.get("reread") or ""))
+        got = _jobs.enqueue(tenant, "email_recreate", payload={
+            "mode": "again" if reread else "run", "structure": structure, "entity_key": entity,
+            "seed": f"{structure}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}"})
+        arg = _queued(got, "reading the reference again and recreating" if reread else "recreating")
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
 
@@ -1260,7 +1322,7 @@ async def email_reference(request: Request, key: str = Depends(admin_key)):
     be chosen … It shouldn't be so many steps."*"""
     from fastapi.responses import RedirectResponse
 
-    from . import email_structures as _es, recreate
+    from . import email_structures as _es
     if key != config.APPROVAL_SECRET:
         return _signin_first(request)
     form = await request.form()
@@ -1271,9 +1333,9 @@ async def email_reference(request: Request, key: str = Depends(admin_key)):
     elif not url:
         arg = ("err", why)
     else:
-        _run_bg("email_recreate", recreate.swipe, url, tenant=tenant,
-                entity_key=str(form.get("entity", "")))
-        arg = ("ok", "reading the reference and recreating it for this brand — it appears below when it lands")
+        got = _jobs.enqueue(tenant, "email_recreate", payload={
+            "mode": "swipe", "url": url, "entity_key": str(form.get("entity", ""))})
+        arg = _queued(got, "reading the reference and recreating it for this brand")
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
 
@@ -1519,7 +1581,7 @@ def admin_email_structure(key: str = Depends(admin_key), tenant: str = "",
         # is made now if none exists, so the room shows it.
         from . import recreate
         if recreate.latest(id, tenant) is None:
-            _run_bg("email_recreate", recreate.run, id, tenant=tenant)
+            _jobs.enqueue(tenant, "email_recreate", payload={"mode": "run", "structure": id})
     if not ui:
         return {"id": id, "said": said}
     return RedirectResponse(_designs_back(tenant, key, ("ok", said)), 303)
@@ -7370,15 +7432,23 @@ async def assets_decide(request: Request, key: str = Depends(admin_key)):
     if rights == "owned" and layered:
         from . import canva as _canva, hosting as _hosting
         if _canva.which_account(tenant).get("source"):
-            _run_bg("layers", _hosting.layer_kept, tenant, list(layered))
+            from . import jobs as _jobs
+            _jobs.enqueue(tenant, "layers", payload={"asset_ids": list(layered)})
     # AND THEY BECOME THE CLIENT'S. Owner, 2026-08-30: an approved picture
     # belongs on the client's own CMS "so it's accessible to us". Off the
     # request because it is an upload per picture and per crop; reported by
     # the same strip that reports a frame run, so a failure to hand off is not
     # invisible.
     if rights == "owned":
-        from . import hosting as _hosting
-        _run_bg("hosting", _hosting.publish_all, tenant)
+        # QUEUED, not threaded. This moves pictures onto the client's own CMS
+        # one at a time and drops our copy as each lands, so a deploy in the
+        # middle used to leave the rest with us and NOTHING saying how far it
+        # got — the run's own count ("6 moved to the client's site; 2 stayed
+        # with us") existed only in a return value that died with the thread.
+        # The queue keeps the count, and this kind may resume because
+        # `publish_all` skips what is already hosted.
+        from . import jobs as _jobs
+        _jobs.enqueue(tenant, "hosting")
     verb = ("approved for use" if rights == "owned"
             else "kept as reference" if approve else "rejected")
     if action == "reject_batch":
@@ -7425,11 +7495,13 @@ async def board_fill(request: Request, key: str = Depends(admin_key)):
     url, why = pinterest.board_url(str(form.get("url", "")))
     if why:
         return _back_to_brand(tenant, err=why, anchor=f"board-{slug}")
-    _run_bg("boards", pinterest.fill_board, tenant, slug, url)
+    _jobs.enqueue(tenant, "boards", payload={"mode": "fill", "slug": slug, "board": url},
+                  system_key=f"board:{slug}")
     return _back_to_brand(
-        tenant, msg=("reading the Pinterest board in the background — its pins "
-                     "land on the board as reference and the direction is read "
-                     "from them; they appear here when it finishes"),
+        tenant, msg=("queued — a worker reads the Pinterest board within half a "
+                     "minute; its pins land on the board as reference and the "
+                     "direction is read from them, and they appear here when it "
+                     "finishes"),
         anchor=f"board-{slug}")
 
 
@@ -7437,7 +7509,7 @@ async def board_fill(request: Request, key: str = Depends(admin_key)):
 async def board_read(request: Request, key: str = Depends(admin_key)):
     """Read a board's reference pins into direction words, on the owner's
     click — one vision call, never on a schedule."""
-    from . import creative as _cr, kb as kbm
+    from . import kb as kbm
     if key != config.APPROVAL_SECRET:
         return _signin_first(request)
     form = await request.form()
@@ -7445,9 +7517,10 @@ async def board_read(request: Request, key: str = Depends(admin_key)):
     slug = str(form.get("board", "")).strip()
     if slug not in kbm.boards(tenant):
         return _back_to_brand(tenant, err=f"no board named {slug!r}", anchor="board")
-    _run_bg("boards", _cr.read_board_direction, tenant, slug)
-    return _back_to_brand(tenant, msg="reading the board's reference pins into "
-                                      "direction in the background",
+    _jobs.enqueue(tenant, "boards", payload={"mode": "read", "slug": slug},
+                  system_key=f"board:{slug}")
+    return _back_to_brand(tenant, msg="queued — a worker reads the board's "
+                                      "reference pins into direction shortly",
                           anchor=f"board-{slug}")
 
 
@@ -7586,12 +7659,9 @@ async def ad_frames(request: Request, key: str = Depends(admin_key)):
                              default=_kbd.image_model(tenant))
     if not models:
         return _back_to_content(tenant, err=why, anchor="pics")
-    if len(models) == 1:
-        _run_bg("ad_frames", cr.batch, tenant, claim=claim, plates=plates,
-                output_id=output_id, boards=tuple(boards), image_model=models[0], **args)
-    else:
-        _run_bg("ad_frames", cr.batch_each, tenant, models=list(models), claim=claim,
-                plates=plates, output_id=output_id, boards=tuple(boards), **args)
+    _jobs.enqueue(tenant, "ad_frames", payload=dict(
+        models=list(models), claim=claim, plates=plates, output_id=output_id,
+        boards=list(boards), **args), system_key=f"ad:{output_id}")
     return _back_to_content(
         tenant, msg=(f"making {plates * cr.PER_PROMPT} frames"
                      + (f" — one set per model: {', '.join(models)}" if len(models) > 1
@@ -8752,129 +8822,39 @@ def _run_bg(label: str, fn, *args, **kw) -> None:
     threading.Thread(target=_go, daemon=True).start()
 
 
-def _summarise(result) -> str:
-    """The two or three numbers that say whether a run was worth anything.
-
-    AND WHICH SOURCE CAME BACK EMPTY. A run over several sites reported one
-    set of totals, so a landing page that enumerated nothing was invisible
-    behind a website that enumerated plenty: the line read "proposed_count 12
-    · pages_read 40" and the owner had no way to learn the landing page they
-    had just added contributed zero. The per-source report existed in the
-    return value the whole time and no surface rendered it, which is the
-    same shape as a KB rule that never reaches a validator. Absence is not an
-    answer (design rule 12): a source that read nothing has to say so where
-    the run is reported.
-    """
-    if not isinstance(result, dict):
-        return ""
-    if result.get("error"):
-        return f"error: {result['error']}"
-    keep = ("proposed_count", "pages_read", "pages_unchanged", "pages_remaining",
-            "faqs_filed_as_objections", "claims_count", "objections_count",
-            "threads_seen", "added", "updated", "violations", "extractor",
-            "made", "clean")
-    bits = [f"{k} {result[k]}" for k in keep if result.get(k) not in (None, "")]
-    empty = [r.get("label") or r.get("url", "")
-             for r in (result.get("sources") or [])
-             if isinstance(r, dict) and not r.get("pages_found")]
-    if empty:
-        bits.append("READ NOTHING: " + ", ".join(str(e) for e in empty[:4]))
-    lost = _losses(result)
-    if lost:
-        bits.append("LOST: " + " · ".join(lost))
-    # A set's own `note` is where it says what it was drawn from and what
-    # was kept out of the request; a strip that only counted frames would
-    # show a board of reference pins as a board that is working.
-    note = result.get("extractor_note") or (
-        result.get("note") if isinstance(result.get("note"), str) else "") or ""
-    out = " · ".join(bits) + (f" — {note[:300]}" if note else "")
-    # THE FAILURES A RUN COLLECTED, when its own note did not carry them. A
-    # frames run kept every cell's refusal in `errors` and the strip showed
-    # "made 0" with no reason (owner, 2026-09-08). Said once: a note that
-    # already names the first failure is not repeated.
-    errs = ([str(e) for e in result.get("errors") if str(e).strip()]
-            if isinstance(result.get("errors"), (list, tuple)) else [])
-    if errs and errs[0].split(": ", 1)[-1][:60] not in note:
-        out += f" — {len(errs)} error(s): {errs[0][:200]}"
-    return out
+#: THE SUMMARISER MOVED (2026-09-23). It reads what a run returned — the
+#: numbers, the sources that read nothing, the losses, the note, the errors —
+#: and it is now needed in two processes: this one, for the labels still run
+#: as threads, and the worker, for everything on the queue. It lives in
+#: `app.jobs`, which both import and which imports neither.
+_summarise = _jobs.summarise
+_losses = _jobs._losses
+_LOSS_KEYS = _jobs._LOSS_KEYS
 
 
-#: What a run REFUSED, SKIPPED or DROPPED, by the key each producer already
-#: writes it under. `label` is what a person needs to read; `plural` decides
-#: the wording; a value of 0 or an empty container is never mentioned, because
-#: a clean run must stay quiet or the loud ones stop being read.
-_LOSS_KEYS = (
-    ("write_refused_count", "write{s} refused"),
-    ("rejected_for_banned_claim", "rejected for a banned claim"),
-    ("not_verbatim_count", "rejected as not verbatim"),
-    ("pages_skipped", "page{s} skipped"),
-    ("pages_skipped_unchanged", "page{s} unchanged since last scan"),
-    ("truncated_page_count", "page{s} too long to read whole"),
-    ("drafts_skipped", "draft product{s} skipped"),
-    ("skipped_small", "image{s} too small to use"),
-    ("dropped_for_banned_claims", "sentence{s} dropped for a banned claim"),
-)
-
-
-def _losses(result: dict) -> list[str]:
-    """The other half of what a run did.
-
-    Every one of these numbers was already computed and NONE of them reached a
-    surface — `_summarise` kept the gains and dropped the losses, so a harvest
-    that proposed twelve claims and REFUSED TO WRITE FIVE reported "12" and
-    nothing else. `harvest`'s own source says why that matters: "What the
-    writes actually did, as opposed to what was proposed. These are different
-    numbers and conflating them hid a whole class of loss." It hid it here.
-
-    Found 2026-08-28 by the sweep the owner asked for — how many UI units have
-    no piping — which found 30 warning-shaped facts computed and rendered
-    nowhere. This closes the seventeen of them that are run losses.
-
-    `dropped_by_reason` and `skipped_by_reason` are dicts of reason → count, so
-    the WHY leads: "3 no proof, 1 too long" beats "4 dropped" at exactly the
-    moment somebody is deciding whether to care.
-    """
-    out: list[str] = []
-    for key, label in _LOSS_KEYS:
-        v = result.get(key)
-        n = len(v) if isinstance(v, (list, tuple, dict)) else (v or 0)
-        try:
-            n = int(n)
-        except (TypeError, ValueError):
-            continue
-        if n > 0:
-            out.append(f"{n} " + label.format(s="" if n == 1 else "s"))
-    for key in ("dropped_by_reason", "skipped_by_reason"):
-        why = result.get(key)
-        if isinstance(why, dict) and why:
-            top = sorted(why.items(), key=lambda kv: -int(kv[1] or 0))[:3]
-            out.append(", ".join(f"{v} {k}" for k, v in top))
-    # ONE EXAMPLE OF EACH LOSS. "5 writes refused" tells you to care; it does
-    # not tell you what to look at, and the producers already carry the list —
-    # `write_refused`, `skipped_examples`, `truncated_pages`,
-    # `drafts_skipped_examples` were all computed and all unreachable. A count
-    # whose instance you cannot see is a number you can only worry about.
-    for key in ("write_refused", "skipped_examples", "truncated_pages",
-                "drafts_skipped_examples"):
-        rows = result.get(key)
-        if isinstance(rows, (list, tuple)) and rows:
-            first = rows[0]
-            if isinstance(first, dict):
-                # WHAT it was, then WHY — in that order. `why` alone repeats
-                # the aggregate above ("2 banned phrase") and names no
-                # instance, which is the half a person needs to go and look.
-                what = (first.get("claim") or first.get("text")
-                        or first.get("url") or next(iter(first.values()), ""))
-                why = first.get("why") or ""
-                first = f"{what}{f' ({why})' if why else ''}"
-            out.append(f"e.g. {str(first)[:110]}")
-            break
-    return out
+def _queued(got: dict, doing: str) -> tuple:
+    """What a press that queued work says back. ONE sentence-maker, so every
+    room words it the same way and an already-running job says so rather
+    than pretending a second one started."""
+    if not got.get("ok"):
+        return ("err", got.get("why") or "that could not be queued")
+    if got.get("already"):
+        return ("ok", f"{doing} — {got.get('why') or 'it is already running'}; it appears here when it lands")
+    return ("ok", f"{doing} — a worker picks this up within half a minute; it appears here when it lands")
 
 
 def bg_status(label: str, tenant: str) -> dict:
-    """What the last background run of this action did, if anything."""
+    """What the last background run of this action did, if anything.
+
+    THE QUEUE FIRST. A label that is a kind of queued job is answered by the
+    queue, which is the store that also holds what to RUN; `jobs.status`
+    returns this function's own shape so the rooms did not have to change
+    when the heavy work moved to the worker (2026-09-23). A label that has
+    not moved still has its one `Setting` row.
+    """
     import json as _json
+    if label in _jobs.KINDS:
+        return _jobs.status(tenant, label)
     with db.SessionLocal() as s:
         row = s.get(db.Setting, f"bg:{label}:{tenant}")
         try:
@@ -9521,8 +9501,7 @@ def catalog_sync(key: str = Depends(admin_key), tenant: str = "",
     if not tenant:
         return {"error": "name a tenant, e.g. ?tenant=baci"}
     if ui:
-        _run_bg("sync", cs.sync_shopify, tenant, limit=limit,
-                dry_run=bool(report_only))
+        _jobs.enqueue(tenant, "sync", payload={"limit": limit, "dry_run": bool(report_only)})
         return _back_to_content(tenant, "sync")
     return cs.sync_shopify(tenant, limit=limit, dry_run=bool(report_only))
 

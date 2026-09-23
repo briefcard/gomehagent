@@ -285,7 +285,13 @@ def _named_in_strings() -> set:
                 if v.isidentifier():
                     out.add(v)
                 else:
-                    for tok in v.replace("(", " ").replace(".", " ").split():
+                    # ":" joins a module to a function in a dispatch target
+                    # ("app.hosting:publish_all" in `jobs.KINDS`). Without it
+                    # the whole tail is one non-identifier token and the
+                    # function reads as reached by nothing — a live thing
+                    # reported as a corpse, which this function exists to stop.
+                    for tok in (v.replace("(", " ").replace(".", " ")
+                                 .replace(":", " ").split()):
                         if tok.isidentifier():
                             out.add(tok)
     return out

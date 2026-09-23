@@ -85,6 +85,62 @@ def _resolve(dotted, *, is_module=False):
     return obj if callable(obj) else None
 
 
+def _dict_keys(node, fn=None):
+    """The keys of a `dict(a=1, **b)` or `{"a": 1}` node — including the keys
+    of any `**b` spread whose dict is built literally in `fn`, because that
+    is how a route carries an ad's own words into a payload."""
+    keys, spreads = set(), []
+    if isinstance(node, ast.Call) and ast.unparse(node.func) == "dict":
+        keys = {k.arg for k in node.keywords if k.arg}
+        spreads = [k.value for k in node.keywords if k.arg is None]
+    elif isinstance(node, ast.Dict):
+        keys = {ast.unparse(k).strip("\"'") for k in node.keys if k is not None}
+        spreads = [v for k, v in zip(node.keys, node.values) if k is None]
+    else:
+        return None
+    for sp in spreads:
+        if fn is not None and isinstance(sp, ast.Name):
+            keys |= (_literal_keys(fn, sp.id) or set())
+    return keys
+
+
+def _queued_callee(call, ftxt, fn=None):
+    """`(dotted callee, payload keys, accepted names)` for
+    `_jobs.enqueue(tenant, "kind", payload=…)`, else None.
+
+    The kind's registry entry names the function that will be handed the
+    payload: `takes` when a wrapper forwards it, the target otherwise. Both
+    signatures count as accepting, because the wrapper eats its own
+    arguments (which model to draw with, which of three modes) and forwards
+    the rest.
+    """
+    if not ftxt.endswith("enqueue") or len(call.args) < 2:
+        return None
+    if not (isinstance(call.args[1], ast.Constant) and isinstance(call.args[1].value, str)):
+        return None
+    from app import jobs as _jobs
+    spec = _jobs.KINDS.get(call.args[1].value)
+    if not spec:
+        return None
+    payload = next((k.value for k in call.keywords if k.arg == "payload"), None)
+    keys = _dict_keys(payload, fn) if payload is not None else set()
+    if keys is None:
+        return None
+    accepted: set = set()
+    for dotted in (spec.get("takes"), spec["target"]):
+        if not dotted:
+            continue
+        mod, _, fn_ = str(dotted).partition(":")
+        target = _resolve(mod.split(".", 1)[-1] + "." + fn_, is_module=True)
+        if target is not None:
+            try:
+                accepted |= set(inspect.signature(target).parameters)
+            except (TypeError, ValueError):
+                pass
+    mod, _, fn_ = str(spec.get("takes") or spec["target"]).partition(":")
+    return (mod.split(".", 1)[-1] + "." + fn_, set(keys), accepted)
+
+
 def spread_sites():
     """(route, callee, sent, accepted) for every kwargs-spreading call."""
     src = open(os.path.join(ROOT, "app", "web.py")).read()
@@ -100,22 +156,38 @@ def spread_sites():
         for call in [n for n in ast.walk(fn) if isinstance(n, ast.Call)]:
             ftxt = ast.unparse(call.func)
             spread = [k for k in call.keywords if k.arg is None]
-            if ftxt.endswith("_run_bg") and len(call.args) >= 2:
+            queued = _queued_callee(call, ftxt, fn)
+            if queued:
+                # A PRESS THAT QUEUES IS STILL A CALL. The heavy work moved
+                # off the web service on 2026-09-23 and the payload became a
+                # dict in a row — which made every one of these sites
+                # invisible to this walker, `ad_frames` included. The kind
+                # names its target, so the seam is still both-sided: the keys
+                # the route puts in the payload are checked against the
+                # signature that will be handed them, a tick later, in
+                # another process.
+                callee, sent, accepts = queued
+            elif ftxt.endswith("_run_bg") and len(call.args) >= 2:
                 callee = ast.unparse(call.args[1])
+                sent = {k.arg for k in call.keywords if k.arg}
             elif spread:
                 callee = ftxt
+                sent = {k.arg for k in call.keywords if k.arg}
             else:
                 continue
-            sent = {k.arg for k in call.keywords if k.arg}
-            for sp in spread:
-                if isinstance(sp.value, ast.Name):
-                    ks = _literal_keys(fn, sp.value.id)
-                    if ks:
-                        sent |= ks
+            if not queued:
+                for sp in spread:
+                    if isinstance(sp.value, ast.Name):
+                        ks = _literal_keys(fn, sp.value.id)
+                        if ks:
+                            sent |= ks
             head = callee.split(".")[0]
-            is_module = head in aliases
-            if is_module:
+            is_module = queued or head in aliases
+            if not queued and is_module:
                 callee = aliases[head] + callee[len(head):]
+            if queued:
+                out.append((fn.name, callee, sent, accepts))
+                continue
             target = _resolve(callee, is_module=is_module)
             if target is None:
                 continue
@@ -171,9 +243,20 @@ def main() -> int:
             # walker above already treats it so; the first version of this
             # inverse check did not, and reported web.py never passing
             # anything to batch when batch is the second positional of _run_bg.
+            # the owner function is only needed to resolve a `**args` spread
+            # inside a payload, and finding it walks every function in the
+            # file — so look for it ONLY at a call that queues something
+            q = None
+            if ft.endswith("enqueue"):
+                owner_fn = next((f_ for f_ in fns
+                                 if any(n_ is node for n_ in ast.walk(f_))), None)
+                q = _queued_callee(node, ft, owner_fn)
             is_it = (ft.split(".")[-1] == callee) or (
                 ft.endswith("_run_bg") and len(node.args) >= 2
-                and ast.unparse(node.args[1]).split(".")[-1] == callee)
+                and ast.unparse(node.args[1]).split(".")[-1] == callee) or (
+                bool(q) and q[0].split(".")[-1] == callee)
+            if q and is_it:
+                passed |= q[1]
             if is_it:
                 passed |= {kw.arg for kw in node.keywords if kw.arg}
                 for kw in node.keywords:

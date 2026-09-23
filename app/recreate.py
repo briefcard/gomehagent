@@ -34,6 +34,11 @@ ROUNDS = 2
 HTML_MAX = 100_000
 #: Candidates the caster looks at on one sheet — 6 × 4 cells at the reviewer's tier.
 CAST_MAX = 24
+
+#: The side of one cell on the contact sheet, in pixels. ONE definition: the
+#: cutter that shrinks a picture as it arrives and the sheet that pastes it
+#: must agree, or the sheet pastes something it then shrinks again.
+SHEET_CELL = 208
 #: The column the hand-made proof was set at; the composer is told this width.
 COLUMN = 600
 #: Statuses a recreation ends in.
@@ -103,8 +108,16 @@ You have the whole email as one small picture first, then in legible strips top 
 
 Write the brief as JSON with exactly these keys:
 
-"concept": one sentence — what this email IS and does (e.g. "a recipe delivered as a
-  screenshot of the brand's own Instagram post; a pun hook above; shop the product used below").
+"concept": one sentence — what this email IS and DOES, in FORM ONLY (e.g. "a recipe
+  delivered as a screenshot of the brand's own Instagram post; a pun hook above; shop the
+  product used below"). NEVER the reference's product, category, cuisine, season or
+  seasonal theme. "introduces a new pre-seasoned seafood SKU via a Taco Tuesday theme" is
+  the reference's SUBJECT, not its concept — the other brand sells none of that and will
+  be briefed to make it. Write the shape the other brand will fill with its own material:
+  "a single-product launch with a themed hook and a limited-time gift".
+"concept_instance": the reference's own subject in a phrase, for the record only — the
+  product, category or occasion it happened to be about. Recorded so the other brand
+  knows what NOT to carry over, the same way a device records its instance.
 "sections": an array, top to bottom, one object per section:
    {"n": 1,
     "what": what it is, in a phrase (a device if it is one: 'a social post shown as a post:
@@ -148,7 +161,8 @@ Write the brief as JSON with exactly these keys:
    {"beat": "problem" | "evidence" | "reframe" | "proof" | "risk reversal" | "offer" |
             "invitation" | "ask" | "sign-off" (or a word of your own),
     "says": what the beat says, in a phrase (not the words verbatim — they are in
-            reference_text),
+            reference_text; and not the reference's product or theme — the beat's JOB,
+            which the other brand will rest on its own material),
     "does": what it does to the reader — names their disappointment, removes the risk,
             gives permission, earns the ask,
     "rests_on": what the beat needs to be TRUE — a fact, a test, a guarantee, a feeling the
@@ -328,7 +342,7 @@ def _sheet(cells: list[bytes]) -> bytes:
     # sheet on the owner's first real run, 2026-09-15). Six across, four
     # down at 208 px is 1318×882; the sheet is measured with the model's
     # own arithmetic afterwards and shrunk if it would still be refused.
-    cols, cell, pad = 6, 208, 10
+    cols, cell, pad = 6, SHEET_CELL, 10
     rows = max(1, (len(cells) + cols - 1) // cols)
     W, H = cols * (cell + pad) + pad, rows * (cell + pad) + pad
     sheet = Image.new("RGB", (W, H), "#ffffff")
@@ -354,6 +368,28 @@ def _sheet(cells: list[bytes]) -> bytes:
     buf = io.BytesIO()
     sheet.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
+def _cell(blob: bytes, *, cell: int = SHEET_CELL) -> bytes:
+    """One picture cut to its square on the contact sheet, as PNG bytes.
+
+    The cut happens the moment the bytes arrive so the full-size picture is
+    never held beside twenty-three others: a store master decodes to about
+    eight megabytes and the sheet needs twenty kilobytes of it.
+    """
+    import io
+    from PIL import Image
+    try:
+        im = Image.open(io.BytesIO(blob))
+        im.draft("RGB", (cell, cell))          # JPEG: decode small, never full
+        im = im.convert("RGB")
+        im.thumbnail((cell, cell), Image.LANCZOS, reducing_gap=2.0)
+        buf = io.BytesIO()
+        im.save(buf, format="PNG", optimize=True)
+        im.close()
+        return buf.getvalue()
+    except Exception:                                            # noqa: BLE001
+        return b""
 
 
 def _role(sec: dict) -> str:
@@ -427,14 +463,26 @@ def cast(tenant: str, brief_: dict, kit_: dict, *, entity_key: str = "",
         out["none"] = [{"section": s.get("n"), "needs": _role(s) or "a photograph"} for s in slots]
         out["said"].append("no publishable picture on file — every photograph slot is cut")
         return out
-    blobs = [ed._fetch_bounded(p["small"]) or ed._fetch_bounded(p["url"]) for p in cands]
-    keep = [(p, b) for p, b in zip(cands, blobs) if b]
+    # ONE PICTURE IN MEMORY AT A TIME. This built a list of every candidate's
+    # bytes before it drew anything: twenty-four pictures, six megabytes each
+    # allowed, inside the process that also served the console. Each is now
+    # fetched, cut to its cell and dropped.
+    keep, cells = [], []
+    for p in cands:
+        blob = ed._fetch_bounded(p["small"]) or ed._fetch_bounded(p["url"])
+        if not blob:
+            continue
+        cut = _cell(blob)
+        del blob
+        if cut:
+            keep.append(p)
+            cells.append(cut)
     if not keep:
         out["none"] = [{"section": s.get("n"), "needs": _role(s) or "a photograph"} for s in slots]
         out["said"].append("no picture could be fetched for the sheet — every photograph slot is cut")
         return out
-    cands = [p for p, _ in keep]
-    sheet = _sheet([b for _, b in keep])
+    cands = keep
+    sheet = _sheet(cells)
     facts = "\n".join(f'{i + 1}. {p["title"] or "untitled"}' + (f' — {p["kind"]}' if p.get("kind") else "")
                       + (f' — about {p["entity_key"]}' if p.get("entity_key") else "")
                       + (" — a person in it" if p.get("person") else "") for i, p in enumerate(cands))
@@ -1379,12 +1427,30 @@ def blocking(findings) -> list[dict]:
 # 7. THE JUDGE — ours beside the reference; findings, never a score
 # ---------------------------------------------------------------------------
 
+#: The maker declares an HONEST TURN in a comment at the top of its HTML (see
+#: `_COMPOSE_PROMPT`). Nothing read it, so the turn could not reach the judge —
+#: which went on holding the reference's own concept and blocked the email for
+#: not being about it. A brief whose concept named the reference's SUBJECT
+#: ("a new pre-seasoned seafood SKU via a Taco Tuesday theme") therefore had no
+#: winning move: carry the subject over and the brand has no such product, turn
+#: it and the judge calls it not the reference's concept. Both ends of that
+#: squeeze are closed — the brief writes form (above), and a declared turn is
+#: now told to the judge and never blocks.
+_TURNED = re.compile(r"<!--\s*turned\s*:(.*?)-->", re.S | re.I)
+
+
+def turned(html: str) -> str:
+    """What the maker said it turned, or "". The comment is its own record."""
+    m = _TURNED.search(html or "")
+    return " ".join((m.group(1) if m else "").split())[:400]
+
+
 _JUDGE_PROMPT = """Two emails: first the REFERENCE (whole, then its top), then OURS (whole, then its top).
 Ours was made to RECREATE the reference's design for another brand — a different product,
 its own photographs, its own words, its own colours. The designer's brief of the reference:
 concept: %(concept)s
 devices: %(devices)s
-
+%(turned)s
 The pictures are labelled in their top band: REFERENCE, then OURS. Judge OURS — the email
 made for the other brand — as an art director judges a finished email, and answer JSON only:
 {"ours_first_words": the first eight words you can read in OURS, top to bottom — so we know
@@ -1552,7 +1618,7 @@ def _confused(got: dict, brief_: dict) -> str:
 
 
 def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "", material: str = "",
-          notes: str = "") -> dict:
+          notes: str = "", turned_: str = "") -> dict:
     """`{ok, findings, verdict, why, calls}` — ours beside the reference, or
     ours alone when there is no reference. The pictures are stamped and
     labelled, the judge must say what it read in ours, and a judgement that
@@ -1573,7 +1639,11 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {
-        "concept": brief_.get("concept"), "devices": _devices_text(brief_)[:1500], "notes": notes or ""})
+        "concept": brief_.get("concept"), "devices": _devices_text(brief_)[:1500], "notes": notes or "",
+        "turned": (f"THE MAKER TURNED THE CONCEPT, and said so: {turned_}\nThat turn is the "
+                   "design working, not a fault — this brand's material does not carry the "
+                   "reference's subject. Judge OURS against the TURNED concept: the same FORM, "
+                   "resting on what this brand actually has.\n") if turned_ else ""})
         if reference_png else _JUDGE_ALONE})
     calls = 0
     got, mixed = None, ""
@@ -1602,8 +1672,17 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
     verdict = {k: got.get(k) for k in ("same_concept", "devices_in_order", "weight_rhythm", "brand_material",
                                        "would_send", "one_system", "ours_first_words")}
     if verdict.get("same_concept") is False:
-        finds.insert(0, {"code": "judge", "severity": "blocks", "where": "the whole",
-                         "what": "not the reference's concept", "do": "recreate the concept the brief names"})
+        # A DECLARED TURN IS NOT A FAULT. Blocking here is what trapped the
+        # loop: obey a concept naming the reference's own product and the
+        # brand has none of it, turn it and this fired. The turn stays on the
+        # record as a cosmetic finding — visible, never fatal.
+        finds.insert(0, {"code": "judge",
+                         "severity": "cosmetic" if turned_ else "blocks",
+                         "where": "the whole",
+                         "what": ("the concept was turned, and ours follows the turn "
+                                  f"rather than the reference: {turned_}" if turned_
+                                  else "not the reference's concept"),
+                         "do": ("" if turned_ else "recreate the concept the brief names")})
     return {"ok": True, "findings": finds, "verdict": verdict, "why": "", "calls": calls}
 
 
@@ -1768,6 +1847,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
             ref_lines.append(ln)
     material_ = _material(kit_, entity_key)
     best_i, best_n = -1, 10 ** 6
+    last_turn = ""
     for n in range(ROUNDS + 1):
         say(f"round {n}: " + ("writing the email" if n == 0 else "editing to the findings"))
         made = compose(brief_, kit_, cast_, message, tenant=tenant, fitted=fitted, html=raw, findings=findings_prev,
@@ -1777,6 +1857,15 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
             story.append(f"Round {n}: {made.get('why')}.")
             break
         raw = made["html"]                                   # the model's HTML, edited next round
+        # SAY WHAT WAS TURNED. The turn is the honest answer to a reference
+        # about a product this brand does not sell, and it used to happen in
+        # a comment nobody read — so the run log showed the reference's own
+        # subject and nothing about the swap. Recorded once, and again only
+        # if a later round turns it differently.
+        _turn = turned(raw)
+        if _turn and _turn != last_turn:
+            story.append(f"Round {n}: the concept was turned to what this brand has — {_turn}")
+            last_turn = _turn
         html, baked = bake(raw, tenant)
         bake_findings = [{"code": "baked_" + n.split(":", 1)[0], "severity": "blocks", "where": "a baked block",
                           "what": n.split(":", 1)[1].strip()} for n in baked if n.startswith(("clipped:", "unreadable:"))]                      # what is checked, shot, judged and sent
@@ -1794,7 +1883,8 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         if shot.get("ok"):
             put = media.put(tenant, shot["png"], mime="image/png", origin="generated")
             png_id = put.get("id", "") if put.get("ok") else ""
-        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant, material=material_, notes=kit_.get("_notes") or "") if shot.get("ok")
+        judged = (judge(ref_png, shot["png"], brief_, tenant=tenant, material=material_,
+                        notes=kit_.get("_notes") or "", turned_=turned(raw)) if shot.get("ok")
                   else {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0})
         # THE JUDGE IS NOT A LEAK: a finding that carries the reference's own
         # words ("add CRUNCHYYY!!!", "a wire basket like the reference's") would
@@ -1895,6 +1985,31 @@ def again(structure_id: str, tenant: str, *, entity_key: str = "", progress=None
         return {"ok": False, "why": read.get("why")}
     es.file_reference(aid, brief=read["brief"])
     return run(structure_id, tenant, entity_key, seed=f"{structure_id}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}",
+               progress=progress, via="press")
+
+
+def job(tenant: str, *, mode: str = "run", structure: str = "", url: str = "",
+        entity_key: str = "", seed: str = "", progress=None) -> dict:
+    """THE QUEUE'S ONE DOOR INTO THIS MODULE — `app.jobs` calls a kind's target
+    as `fn(tenant=..., **payload)`, and this dispatches to the three ways a
+    recreation starts: a fresh one, a re-read, or a reference pasted as a link.
+
+    It exists so the work runs in the WORKER. Every recreation used to run in
+    a daemon thread inside the web service, where a full-page screenshot
+    decodes to 16 MB and the judge stamps two of them per round — on a 512 MB
+    instance that also serves the console, which is what restarted the
+    instance under the owner on 2026-09-23.
+    """
+    if mode == "swipe":
+        if not url:
+            return {"ok": False, "why": "a reference needs its address"}
+        return swipe(url, tenant, entity_key=entity_key, progress=progress)
+    if not structure:
+        return {"ok": False, "why": "a recreation needs a design to recreate"}
+    if mode == "again":
+        return again(structure, tenant, entity_key=entity_key, progress=progress)
+    return run(structure, tenant, entity_key,
+               seed=seed or f"{structure}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}",
                progress=progress, via="press")
 
 

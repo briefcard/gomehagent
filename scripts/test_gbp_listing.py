@@ -190,13 +190,21 @@ def main() -> int:
     before = systems.stats(row.id)["total"]
     r2 = c.post(f"/admin/system_run_now?key={KEY}",
                 data={"tenant": T, "system": "gbp_listing"}, follow_redirects=False)
-    deadline = time.time() + 8
-    while time.time() < deadline and systems.stats(row.id)["total"] <= before:
-        time.sleep(0.2)
-    ck("pressing 'Run the check now' runs the audit off the request and "
-       "files another report", r2.status_code in (302, 303)
-       and systems.stats(row.id)["total"] > before,
-       f"{r2.status_code} runs {before}->{systems.stats(row.id)['total']}")
+    # THE PRESS ENQUEUES; THE WORKER RUNS IT. It used to be a daemon thread
+    # inside the web service, which a deploy killed mid-run — so this waited
+    # on a sleep and the owner waited on nothing (2026-09-22). Draining here
+    # is exactly what `worker.queue_drain_sharded` does every twenty seconds.
+    from app import jobs as _jobs
+    queued = _jobs.latest(T, system_key="gbp_listing", kind_="system_run")
+    ck("pressing 'Run the check now' queues the audit off the request",
+       r2.status_code in (302, 303) and queued.get("state") == "queued",
+       f"{r2.status_code} {queued.get('state')!r}")
+    _jobs.drain(T, "test-worker")
+    ck("…and the worker draining that queue files another report",
+       systems.stats(row.id)["total"] > before,
+       f"runs {before}->{systems.stats(row.id)['total']}")
+    ck("…and the finished run is on the card, where the button is",
+       _jobs.latest(T, system_key="gbp_listing", kind_="system_run")["state"] == "done")
     plan = c.get(f"/admin/ui?key={KEY}&tab=plan&tenant={T}&sub=strategy").text
     ck("the Plan's strategy page carries LOCAL PRESENCE: the latest score, "
        "the head term the listing never says, and the way to the report",

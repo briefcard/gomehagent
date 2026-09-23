@@ -338,9 +338,18 @@ def main() -> int:
        and "could not be imported" in (part.get("errors") or {}).get("4:5", ""), str(part)[:220])
     FAIL_TITLES.clear()
 
+    # QUEUED, not threaded (2026-09-22). Approving used to schedule the
+    # layering on a daemon thread inside the web service; it is now a row on
+    # the work queue that the worker drains, so a deploy mid-run is reported
+    # rather than silent. The property under test is unchanged — approving
+    # ONE frame asks for its placements exactly once, and asks for nothing
+    # when no Canva is connected — so this watches the new seam.
+    from app import jobs as _jobs
     scheduled: list = []
-    real_bg = web._run_bg
-    web._run_bg = lambda label, fn, *a, **kw: scheduled.append((label, fn, a))
+    real_bg = _jobs.enqueue
+    _jobs.enqueue = (lambda tenant, kind_, **kw:
+                     (scheduled.append((kind_, tenant, kw.get("payload") or {}))
+                      or {"ok": True, "id": "queued", "already": False, "why": ""}))
     from fastapi.testclient import TestClient
     url4 = media.put("baci", png((10, 10, 80)), mime="image/png", origin="generated")["url"]
     aid4 = _frame(url4, "Zodiac · before")
@@ -350,8 +359,9 @@ def main() -> int:
                     data={"tenant": "baci", "action": "approve", "asset_ids": [aid4]},
                     follow_redirects=False)
         lay = [s_ for s_ in scheduled if s_[0] == "layers"]
-        ck("approving a frame schedules its layered placements in the background",
-           len(lay) == 1 and lay[0][1] is hosting.layer_kept and lay[0][2] == ("baci", [aid4]),
+        ck("approving a frame queues its layered placements for the worker",
+           len(lay) == 1 and lay[0][1] == "baci"
+           and lay[0][2].get("asset_ids") == [aid4],
            str([(s_[0], s_[2]) for s_ in scheduled]))
         ck("  and the flat crops are still cut, so the frame has placements even before Canva answers",
            set((_row(aid4).placements or {}).keys()) >= {"4:5", "9:16"})
@@ -370,7 +380,7 @@ def main() -> int:
         ck("  with no Canva connected nothing is scheduled — the account is not told three times per frame",
            not any(s_[0] == "layers" for s_ in scheduled), str([s_[0] for s_ in scheduled]))
     finally:
-        web._run_bg = real_bg
+        _jobs.enqueue = real_bg
     kept = hosting.layer_kept("baci", [aid4])
     ck("  layer_kept reports per frame", kept.get("made") == 3 and kept.get("frames") == 1, str(kept))
 

@@ -86,27 +86,30 @@ def main() -> int:
         s.add(db.Output(id="out-1", tenant="baci", system_key="ad_creative", entity_key="",
                         body="The sign you were born under"))
         s.commit()
-    scheduled: list = []
-    real_bg = web._run_bg
-    web._run_bg = lambda label, fn, *a, **kw: scheduled.append((label, fn, a, kw))
+    # THE PRESS QUEUES (2026-09-23): the model chosen on the form rides in
+    # the payload the worker will hand to `creative.frames_job`.
+    import _queued
+    from app import jobs as _jobs
     from fastapi.testclient import TestClient
-    try:
+    with _queued.spy(_jobs) as scheduled:
         client = TestClient(web.app)
         r = client.post("/admin/ad_frames", params={"key": KEY},
                         data={"tenant": "baci", "output_id": "out-1", "plates": "4",
                               "image_model": "gemini:gemini-3-pro-image"}, follow_redirects=False)
         ck("a chosen model reaches the run",
-           r.status_code == 303 and scheduled and scheduled[-1][1] is creative.batch
-           and scheduled[-1][3].get("image_model") == "gemini:gemini-3-pro-image"
+           r.status_code == 303 and scheduled
+           and scheduled[-1]["payload"].get("models") == ["gemini:gemini-3-pro-image"]
            and "by gemini:gemini-3-pro-image" in unquote(r.headers.get("location", "")),
-           str(scheduled[-1][3].get("image_model") if scheduled else None))
+           str(scheduled[-1]["payload"].get("models") if scheduled else None))
         r = client.post("/admin/ad_frames", params={"key": KEY},
                         data={"tenant": "baci", "output_id": "out-1", "plates": "4", "image_model": "both"},
                         follow_redirects=False)
         ck("  'both' runs one set per model",
-           scheduled[-1][1] is creative.batch_each
-           and scheduled[-1][3].get("models") == [imagegen.MODEL, "gemini:gemini-3-pro-image"]
+           scheduled[-1]["payload"].get("models") == [imagegen.MODEL, "gemini:gemini-3-pro-image"]
            and "one set per model" in unquote(r.headers.get("location", "")))
+        ck("  and which of the two the worker does is decided by the payload, "
+           "in the one door that takes it",
+           creative.frames_job.__doc__ and "one set per model" in creative.frames_job.__doc__)
         n = len(scheduled)
         config.GEMINI_API_KEY = ""
         r = client.post("/admin/ad_frames", params={"key": KEY},
@@ -118,9 +121,7 @@ def main() -> int:
         r = client.post("/admin/ad_frames", params={"key": KEY},
                         data={"tenant": "baci", "output_id": "out-1", "plates": "4"}, follow_redirects=False)
         ck("  no choice is the default",
-           len(scheduled) == n + 1 and scheduled[-1][3].get("image_model") == imagegen.MODEL)
-    finally:
-        web._run_bg = real_bg
+           len(scheduled) == n + 1 and scheduled[-1]["payload"].get("models") == [imagegen.MODEL])
     config.GEMINI_API_KEY = "gk-test"
 
     print("\n— BOTH: ONE SET PER MODEL, TOLD APART ON THE FRAME AND THE CARD —")

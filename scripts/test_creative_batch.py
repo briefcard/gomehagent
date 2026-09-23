@@ -436,30 +436,34 @@ def main() -> int:
            data={"tenant": "eien", "action": "approve",
                  "asset_ids": [keep["asset_id"]]}, follow_redirects=False)
     _kept = next(a for a in _all_assets("eien") if a.id == keep["asset_id"])
-    # AND HANDED IT TO THE CLIENT. `_run_bg` marks "running" before it spawns,
-    # so this is deterministic. Asserted here rather than in test_hosting
-    # because the claim is about the ROUTE: `hosting.publish` can be perfect
-    # and never called.
-    from app.web import bg_status as _bgs
+    # AND HANDED IT TO THE CLIENT. The hand-off is a QUEUE ROW now, not a
+    # thread (2026-09-22), which makes this more deterministic rather than
+    # less: the row exists the moment the route returns. Asserted here rather
+    # than in test_hosting because the claim is about the ROUTE —
+    # `hosting.publish` can be perfect and never called.
+    from app import jobs as _jobs
     ck("approving starts the hand-off to the client's own site",
-       bool(_bgs("hosting", "eien").get("state")),
+       _jobs.latest("eien", kind_="hosting").get("state") == "queued",
        "approved artwork that never leaves our blob store means the client "
        "owns nothing we made for them")
+    ck("  and it is the kind that may be resumed, because publish_all skips "
+       "what is already hosted", _jobs.retryable("hosting"))
     ck("approving cut the other two placements there and then",
        set(_kept.placements or {}) == {"4:5", "9:16"},
        "act where you report — the alternative is a second screen nobody "
        "visits")
 
     print("\n— a run that failed does not look like one still going —")
-    import json as _json
+    # THE STATE LIVES ON THE JOB ROW NOW (2026-09-23): the frames run moved to
+    # the worker, so the row that carries the work carries how it went.
     def _state(state, detail=""):
-        with db.SessionLocal() as sx:
-            k = "bg:ad_frames:eien"
-            row = sx.get(db.Setting, k) or db.Setting(key=k)
-            row.value = _json.dumps({"state": state, "detail": detail,
-                                     "at": db.utcnow().isoformat()})
-            sx.merge(row)
-            sx.commit()
+        jid = _jobs.enqueue("eien", "ad_frames", payload={}, dedupe=False)["id"]
+        if state == "running":
+            _jobs.claim("eien", "test-worker")
+            if detail:
+                _jobs.heartbeat(jid, detail)
+        else:
+            _jobs.finish(jid, state, detail)
 
     # An account where NOTHING has run. `eien` has just approved a frame, so
     # the hand-off label already carries state there — asserting silence on it

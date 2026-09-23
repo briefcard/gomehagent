@@ -81,7 +81,15 @@ OPERATIONS = {"conversations", "touches", "commitments", "outputs",
               "digest_acks", "keyword_serps", "answer_engine_checks",
               # a reference recreated for a brand: the model's email and its
               # rounds — made from what the brand knows, not knowledge itself
-              "email_recreations"}
+              "email_recreations",
+              # work this account asked for and what became of it. OPERATIONS
+              # rather than KNOWLEDGE for the same reason `system_runs` is: it
+              # is a record of what was DONE, and nothing rebuilds it. A row
+              # still `queued` or `running` when an account is cleared is work
+              # about a business that no longer has data to work on, so it
+              # goes with the rest — classified in the change that adds it,
+              # which is the rule the comments above were written for.
+              "job_queue"}
 # `answer_engine_checks` is OPERATIONS: it records what WE observed about the
 # client's site on a date — which crawlers it let in and who it sent — not
 # anything the brand knows about itself. Clearing it costs a re-run of the

@@ -245,25 +245,30 @@ def main() -> int:  # noqa: PLR0915
        n == 1 and after.get("state") == "failed" and "server restarted" in after.get("detail", "")
        and "cell 3 of 8" in after.get("detail", "") and after.get("at") == "2026-09-08T15:36:00"
        and _bg("layers", "baci").get("state") == "done", str(after))
-    with db.SessionLocal() as s:
-        s.merge(db.Setting(key="bg:ad_frames:baci", value=json.dumps(
-            {"state": "running", "detail": "", "at": "2026-09-08T15:36:00"})))
-        s.commit()
+    # THE CARD READS THE JOB ROW (2026-09-23) — the work moved to the worker,
+    # and the row that says what to run is also the row that says how it went.
+    from app import jobs as _jobs
+
+    def _frames_state(state, detail="", tenant="baci"):
+        jid = _jobs.enqueue(tenant, "ad_frames", payload={}, dedupe=False)["id"]
+        if state == "running":
+            _jobs.claim(tenant, "test-worker")
+            if detail:
+                _jobs.heartbeat(jid, detail)
+        else:
+            _jobs.finish(jid, state, detail)
+        return jid
+
+    _frames_state("running")
     card = ui._frames_run("baci")
     ck("the running card gives the honest estimate — minutes per frame, a set per model — and says to reload",
        "three to six" in card and "per model" in card and "reload" in card.lower() and "two to three" not in card)
-    with db.SessionLocal() as s:
-        s.merge(db.Setting(key="bg:ad_frames:baci", value=json.dumps(
-            {"state": "running", "detail": "model 2 of 2 (gemini): cell 3 of 8 — 2 kept", "at": "2026-09-08T15:36:00"})))
-        s.commit()
+    _frames_state("running", "model 2 of 2 (gemini): cell 3 of 8 — 2 kept")
     card2 = ui._frames_run("baci")
     ck("  and shows the run's own progress once it has any",
        "cell 3 of 8" in card2 and "model 2 of 2" in card2 and "three to six" not in card2)
     long = "x" * 900
-    with db.SessionLocal() as s:
-        s.merge(db.Setting(key="bg:ad_frames:baci", value=json.dumps(
-            {"state": "done", "detail": long, "at": "2026-09-08T15:52:00"})))
-        s.commit()
+    _frames_state("done", long)
     ck("  a finished run's whole note is shown, not the first 600 characters",
        long in ui._frames_run("baci"))
 

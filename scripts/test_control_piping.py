@@ -37,10 +37,15 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-#: web.py counts as a surface: it holds the route responses and `_summarise`,
-#: which writes the background status line every tab reads. Leaving it out made
-#: seventeen facts look hidden that a run's own status line now names.
-UI = ("app/admin_ui.py", "app/portal_ui.py", "app/web.py")
+#: web.py counts as a surface: it holds the route responses and the background
+#: status line every tab reads. Leaving it out made seventeen facts look hidden
+#: that a run's own status line now names. `app/jobs.py` counts for the same
+#: reason and by the same sentence: on 2026-09-23 `summarise` and `_losses`
+#: MOVED there, because the line they write is now written in two processes —
+#: this one for the labels still run as threads, the worker for everything on
+#: the queue. The surface is where the words are written, not which file they
+#: used to be in.
+UI = ("app/admin_ui.py", "app/portal_ui.py", "app/web.py", "app/jobs.py")
 
 #: Controls no suite presses. Every one of these was pressed BY HAND on
 #: 2026-08-28 and verified to move real state (asset_add files a photograph,
