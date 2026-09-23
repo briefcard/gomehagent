@@ -269,7 +269,7 @@ ck("Sign out exists in the frame", 'href="/admin/logout"' in badged)
 
 r = c.get(f"/admin/ui?key={KEY}&tab=bogus&tenant={T1}", follow_redirects=False)
 ck("an unknown tab redirects and says so", r.status_code == 303
-   and "tab=content" in r.headers.get("location", "")
+   and "/content" in r.headers.get("location", "")
    and "err=" in r.headers.get("location", ""),
    r.headers.get("location", ""))
 aliased = c.get(f"/admin/ui?key={KEY}&tab=diagnostics&tenant={T1}&sub=systems").text

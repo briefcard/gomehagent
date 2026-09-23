@@ -713,7 +713,7 @@ def main() -> int:
     ck("the owner's word on a picture's kind posts and outranks the reading",
        r.status_code == 303 and next(a for a in kb.assets("baci") if a.id == a_id).reading.get("kind") == "flat-lay")
     r = c.post("/admin/pictures_read?key=s3cret", data={"key": "s3cret", "tenant": "baci"}, follow_redirects=False)
-    ck("reading the unread pictures posts and comes back to Brand", r.status_code == 303 and "tab=brand" in r.headers.get("location", ""))
+    ck("reading the unread pictures posts and comes back to Brand", r.status_code == 303 and "/brand" in r.headers.get("location", ""))
     ck("the door's contract is pinned", shots.BROWSERLESS["free_concurrent"] == 2 and shots._SEM._initial_value == 2 and shots.door()[0] in ("", "local"))
     html_b = admin_ui.render_brand("s3cret", "baci")
     ck("the Brand tab carries the pictures by kind and no palette of roles, no theme preview",

@@ -88,7 +88,7 @@ def main() -> int:
        "keeps working" in gap["why"],
        "otherwise the obvious reading is that Shopify is broken")
     ck("  and points at the page that fixes it",
-       "tab=accounts" in gap["where"], gap["where"]
+       "/accounts" in gap["where"], gap["where"]
        + " — `accounts` is the tab KEY; 'Connections' is only its label, and "
          "a link naming the label lands on no tab at all")
 
@@ -180,9 +180,9 @@ def main() -> int:
     # on no tab and carried no key.
     note = page.split("Not publishing from here yet", 1)[-1].split("</div>", 1)[0]
     ck("  and a way to get there",
-       "Go there" in note and "/admin/ui?tab=accounts&amp;key=" in note,
+       "Go there" in note and '"/admin/storeco/accounts"' in note,
        note[-140:] + " — act where you report: the fix is a click from the "
-       "absence, and a second `?` makes it a click to nowhere")
+       "absence, at an address that names the page and carries no key")
 
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")

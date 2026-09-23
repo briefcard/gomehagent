@@ -16,6 +16,7 @@ import re
 import httpx
 
 from . import config
+from .urls import url as _url
 
 
 def _primary() -> dict:
@@ -349,14 +350,14 @@ def publish_gap(tenant: str) -> dict:
     t = tenants.get(tenant)
     if t is None:
         return {"ok": False, "why": f"No account keyed {tenant!r}.",
-                "fix": "Create it first.", "where": "/admin/ui?tab=accounts"}
+                "fix": "Create it first.", "where": _url(tenant, "accounts")}
     if not (getattr(t, "domain", "") or "").strip():
         return {"ok": False,
                 "why": "This account has no website address on file, so it "
                        "has no site profile at all — every other check is "
                        "downstream of that one.",
                 "fix": "Set the domain on the account.",
-                "where": "/admin/ui?tab=accounts"}
+                "where": _url(tenant, "accounts")}
     connected = credentials.connected_providers(tenant)
     granted = credentials.granted_scopes(tenant)
     for prov in sorted(connected):
@@ -374,14 +375,14 @@ def publish_gap(tenant: str) -> dict:
                             f"article. Everything else on {prov.title()} keeps "
                             f"working."),
                     "fix": f"Reconnect {prov.title()} and approve {need!r}.",
-                    "where": "/admin/ui?tab=accounts"}
+                    "where": _url(tenant, "accounts")}
     profile = get(tenant)
     platform = (profile.get("platform") or "").strip().lower()
     if not platform:
         return {"ok": False,
                 "why": "Nothing that can publish is connected to this account.",
                 "fix": "Connect the store or site.",
-                "where": "/admin/ui?tab=accounts"}
+                "where": _url(tenant, "accounts")}
     if platform not in BACKENDS:
         return {"ok": False,
                 "why": (f"This site is on {platform}, which has no write API "

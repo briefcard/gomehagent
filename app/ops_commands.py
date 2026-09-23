@@ -268,8 +268,9 @@ def _systems_for(tenant: str) -> str:
     from . import systems
     rows = systems.for_tenant(tenant)
     if not rows:
+        from .urls import url as _url
         return (f"No systems installed for *{tenant}* yet.\n"
-                f"Install them from the console: /admin/ui?tab=systems")
+                f"Install them from the console: {_url(tenant, 'systems')}")
     out = []
     for r in rows:
         state = systems.ready(r)

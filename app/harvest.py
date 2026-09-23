@@ -31,6 +31,7 @@ import json
 import re
 
 from . import compliance, db, extract, kb, provenance as prov, tenants
+from .urls import url as _url
 
 _MIN, _MAX = 25, 240
 
@@ -831,7 +832,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "write_refused": write_refused[:15],
         "write_refused_count": len(write_refused),
         "note": ("Proposals land as PENDING claims — invisible to selection "
-                 "until approved at /admin/ui?tab=content. Anything using a "
+                 f"until approved at {_url(tenant, 'content')}. Anything using a "
                  "banned phrase was dropped, not queued. Candidates the tagger "
                  "could not place are proposed untagged and can still be "
                  "approved — approval infers a situation where the classifier "

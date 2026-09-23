@@ -316,7 +316,7 @@ def main() -> int:
     r = c.get(f"/admin/blog_set?key={KEY}&tenant=baci&blog_id=101&back=brand",
               follow_redirects=False)
     ck("choosing one lands back on Brand, not on Plan",
-       r.status_code == 303 and "tab=brand" in r.headers.get("location", "")
+       r.status_code == 303 and "/brand" in r.headers.get("location", "")
        and "#blog" in r.headers.get("location", ""),
        r.headers.get("location", ""))
     ck("  and it is recorded", _recorded() == "101")
@@ -326,13 +326,13 @@ def main() -> int:
     r = c.get(f"/admin/blog_set?key={KEY}&tenant=baci&blog_id=abc&back=brand",
               follow_redirects=False)
     ck("a junk id is refused where it was typed",
-       "tab=brand" in r.headers.get("location", "")
+       "/brand" in r.headers.get("location", "")
        and "err=" in r.headers.get("location", ""), r.headers.get("location", ""))
     ck("  and the old choice survives", _recorded() == "101")
     r = c.get(f"/admin/blog_set?key={KEY}&tenant=baci&blog_id=102",
               follow_redirects=False)
     ck("without `back` it still lands on Plan, as it always did",
-       "tab=plan" in r.headers.get("location", ""), r.headers.get("location", ""))
+       "/plan" in r.headers.get("location", ""), r.headers.get("location", ""))
 
     print()
     if _fail:

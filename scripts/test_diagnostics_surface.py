@@ -125,13 +125,16 @@ def main() -> int:
 
     print("\n— the reader never loses their room —")
     sysv = admin_ui.render_diagnostics("s3cret", "baci", view="systems")
-    hrefs = re.findall(r'href="(/admin/ui\?[^"]+)"', sysv)
+    # The console's addresses are PATHS since 2026-09-23 — `/admin/<account>/
+    # diagnostics?sub=systems&days=…`. The room is still a query parameter,
+    # because a room's filters are a view of a page and not its identity.
+    hrefs = re.findall(r'href="(/admin/[^"]+)"', sysv)
     # This tab's OWN controls, which all carry the window. The sidebar's
     # account switcher is built by `_shell` and carries no `days` — keeping a
     # room across an account switch is a frame question, not this tab's, and
     # widening the assertion to cover it would be testing another surface.
     diag_links = [h for h in hrefs
-                  if "tab=diagnostics" in h and "days=" in h]
+                  if "/diagnostics" in h and "days=" in h]
     ck("the sweep found a real population of links", len(diag_links) > 5,
        str(len(diag_links)))
     # Every link states a room. The rail's own "Overview" link correctly
@@ -147,7 +150,7 @@ def main() -> int:
        f"{len(filters)} filter links")
     ck("the theme toggle keeps it too — a display preference must not cost "
        "the reader their place",
-       "&amp;sub=systems" in sysv)
+       "sub=systems" in sysv)
 
     print("\n— every named gap reaches a tab that can CLEAR it —")
     emitted = {w for _k, _l, w, _n in systems.ATTENTION_KINDS}

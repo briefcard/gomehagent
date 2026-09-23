@@ -23,6 +23,7 @@ with a source is evidence.
 from __future__ import annotations
 
 from . import kb
+from .urls import url as _url
 
 #: The agent may widen the vocabulary this many times per review cycle before
 #: the honest answer stops being "add a tag" and becomes "this account's
@@ -57,7 +58,7 @@ def objection(tenant: str, question: str, answer: str, *,
     return {
         "ok": True, "kind": "objection", "duplicate": already,
         "message": msg.splitlines()[0] if msg else "",
-        "review_at": "/admin/ui?tab=content",
+        "review_at": _url(tenant, "content"),
         # Approval will REFUSE an unscoped objection until the reviewer says
         # whether it is true of one product or of everything. Saying so here
         # turns a confusing rejection later into a decision the agent can
@@ -96,7 +97,7 @@ def claim(tenant: str, text: str, evidence: str, *, source_ref: str = "",
     return {"ok": True, "kind": "claim",
             "duplicate": "Already on file" in msg,
             "message": msg.splitlines()[0] if msg else "",
-            "review_at": "/admin/ui?tab=content"}
+            "review_at": _url(tenant, "content")}
 
 
 def situation(tenant: str, tag: str, description: str, *,

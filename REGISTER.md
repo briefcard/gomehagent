@@ -215,7 +215,6 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`render_systems`**(key, tenant?, msg?, err?, system?, ppage?, sub?, wf?, plan_id?, shelf?) → `str`  ·  from `test_console_controls.py`, `web.py`
 - **`render_workroom`**(key, output_id, art, kw, ap, ok?, err?) → `str`  ·  from `test_article_picture.py`, `test_every_system_draws.py`, `test_publish_gap.py`, `test_queue_approval.py`, `test_refresh_lands.py`, `test_workroom_email.py`, `web.py`
 - **`set_theme`**(value) → `None`  ·  from `web.py`
-- **`url`**(tenant, tab?, *parts, **view) → `str`  ·  from `test_console_routing.py`, `test_plan_tab.py`, `web.py`
 
 ### `answer_engines.py`
 
@@ -1699,6 +1698,10 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`classify_only`**(email, account_alias, tenant?) → `str`  ·  from `email_harvest.py`, `worker.py`
 - **`triage_email`**(email, account_alias, sender_trusted, tenant?) → `dict`  ·  from `test_grounding.py`, `worker.py`
+
+### `urls.py`
+
+- **`url`**(tenant, tab?, *parts, **view) → `str`  ·  from `test_console_routing.py`, `test_plan_tab.py`, `web.py`
 
 ### `usage.py`
 

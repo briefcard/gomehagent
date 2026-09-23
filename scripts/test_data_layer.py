@@ -114,7 +114,7 @@ def main() -> int:
        bool(top) and top in h, top)
     ck("…with the number of situations it releases, so the order is arguable",
        "unblocks" in h)
-    ck("…and a real link to where it is fixed", 'href="/admin/ui?tab=kb' in h)
+    ck("…and a real link to where it is fixed", '/kb' in h and 'href="/admin/' in h)
 
     print("\n— it was a dead end before, and the counts still work —")
     # Retargeted at sub=advanced 2026-08-27 (step 4): the reference content

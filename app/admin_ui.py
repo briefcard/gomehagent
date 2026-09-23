@@ -728,35 +728,7 @@ BG_PICTURE_LABELS = (("ad_frames", "Ad frames"),
 #: it before it can be started at all.
 BG_ALL_LABELS = BG_LABELS + BG_BRAND_LABELS + BG_PICTURE_LABELS
 
-def url(tenant: str, tab: str = "content", *parts, **view) -> str:
-    """THE ONE PLACE A CONSOLE LINK IS BUILT.
-
-    Owner, 2026-09-23, on `/admin/ui?tab=systems&tenant=baci&system=campaign_
-    email&wf=designs&key=…`: *"We need to fix the way we do routing — look at
-    how messy this is … Isn't this ridiculous?"* It was: the path said
-    nothing, four query parameters carried the identity of the page, and the
-    credential rode along beside them.
-
-    The identity of a page goes in the PATH, in the order you would say it —
-    the account, then the tab, then whatever that tab nests:
-
-        /admin/baci/systems/campaign_email/designs
-        /admin/baci/brand
-        /admin/baci/content?page=2
-
-    and the query keeps only what is genuinely a VIEW of that page: a page
-    number, a search, a sort, a flash message. A link built anywhere else is
-    a link that drifts, which is why every caller comes through here.
-    """
-    from urllib.parse import quote, urlencode
-    # "all" rather than the internal `*`: a path segment a person can type,
-    # and the route maps it back. The cross-account view is a place you go on
-    # purpose, so it is named in the URL like everywhere else.
-    who = "all" if (not tenant or tenant == ALL) else tenant
-    path = "/admin/" + "/".join(quote(str(p_), safe="") for p_ in
-                                ([who, tab] + [x for x in parts if x]))
-    q = {k: v for k, v in view.items() if v not in ("", None)}
-    return path + (f"?{urlencode(q)}" if q else "")
+from .urls import ALL, url  # noqa: F401  (the one builder)
 
 
 _TABS = (("content", "Review", "✓"), ("kb", "Knowledge", "◈"),
@@ -801,7 +773,6 @@ def _model_options(selected: str = "") -> str:
 #: frame itself go through `_account`, so the pill above the fold and the
 #: numbers below it cannot disagree -- which they did: the Assurance tab with
 #: no `tenant=` reported every account's checks under the first account's name.
-ALL = "*"          # the deliberate cross-account view, never the default
 
 
 def _account(tenant: str = "") -> tuple[str, object, list]:
@@ -838,8 +809,8 @@ def _blocker_li(key: str, tenant: str, b: str) -> str:
     """
     li = f"<li>{_esc(b)}</li>"
     if b.startswith("not connected:"):
-        li = (f'<li>{_esc(b)} — <a href="/admin/ui?key={_esc(key)}'
-              f'&amp;tab=accounts&amp;tenant={_esc(tenant)}">connect it</a></li>')
+        li = (f'<li>{_esc(b)} — <a href="{_esc(url(tenant, "accounts"))}">'
+              f'connect it</a></li>')
     return li
 
 
@@ -1432,7 +1403,7 @@ def _connections(tenant: str, key: str) -> str:
       {''.join(out)}
       <div class="when">Connect links, sign-in links and the people who may
       use them live on
-      <a href="/admin/ui?tab=accounts&amp;sub=people&amp;tenant={_esc(tenant)}{f'&amp;key={_esc(key)}' if key else ''}">People &amp; links</a>.</div>
+      <a href="{_esc(url(tenant, "accounts", sub="people"))}{f'&amp;key={_esc(key)}' if key else ''}">People &amp; links</a>.</div>
     </details>
     """
 
@@ -1731,10 +1702,7 @@ def render(key: str, tenant: str = "", msg: str = "", err: str = "",
         n_failed = 0
 
     def _sub_href(k: str) -> str:
-        return (f"/admin/ui?tab=accounts"
-                + (f"&amp;sub={k}" if k else "")
-                + f"&amp;tenant={_esc(tenant)}"
-                + (f"&amp;key={_esc(key)}" if key else ""))
+        return _esc(url(tenant, "accounts", **({"sub": k} if k else {})))
 
     strip = '<div class="subtabs">' + "".join(
         f'<a class="subtab{" on" if k == sub else ""}" href="{_sub_href(k)}">'
@@ -2276,9 +2244,7 @@ def _awaiting_strip(key: str, row) -> str:
         return ""
     out = []
     for r in rows:
-        href = (f"/admin/ui?tab=content&amp;sub={_esc(r['sub'])}"
-                f"&amp;tenant={_esc(row.tenant)}"
-                + (f"&amp;key={_esc(key)}" if key else "") + "#proposals")
+        href = _esc(url(row.tenant, "content", sub=r["sub"])) + "#proposals"
         if r["blocks"]:
             label = (f"{r['label']}: nothing on file &mdash; this stops the "
                      f"system")
@@ -2553,9 +2519,8 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
         note = ("" if rows else
                 '<div class="what">no buyer persona is on file — a campaign '
                 'written for everybody is written for nobody. '
-                f'<a href="/admin/ui?tab=kb&amp;sub=audiences'
-                f'&amp;tenant={_esc(tenant)}">Add one on the Knowledge '
-                'tab</a> first.</div>')
+                f'<a href="{_esc(url(tenant, "kb", sub="audiences"))}">'
+                'Add one on the Knowledge tab</a> first.</div>')
         return (f'<div class="f"><label>{label}</label>{req}{note}'
                 f'<select name="{_esc(f["key"])}">{"".join(opts)}</select>'
                 f'</div>')
@@ -2579,9 +2544,8 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
                 # No key= on purpose: this renders inside a helper the key
                 # never reaches, and the console session cookie authenticates
                 # the click — the same reason _sub_href drops it when empty.
-                f'<a href="/admin/ui?tab=content&amp;sub=catalogue'
-                f'&amp;tenant={_esc(tenant)}">catalogue '
-                'sync on the Review tab</a> first</div>')
+                f'<a href="{_esc(url(tenant, "content", sub="catalogue"))}">'
+                'catalogue sync on the Review tab</a> first</div>')
         return (f'<div class="f"><label>{label}</label>{req}{note}'
                 + entity_select(tenant, cur, name=f["key"],
                                 blank="— none — the top catalogue items are "
@@ -2890,23 +2854,23 @@ def _planned_section(key: str, row, ppage: int, plan_id: str = "") -> str:
     </div>"""
 
 
-def _gap_href(where: str, key: str) -> str:
-    """Join a console path to the admin key with the RIGHT separator.
+def _gap_href(where: str, key: str = "") -> str:
+    """The address `sites.publish_gap` names, as a link.
 
-    Every `where` `sites.publish_gap` returns already carries a query string
-    (`/admin/ui?tab=accounts`), and this appended `?key=…` — so the browser
-    parsed ONE parameter, `tab`, whose value was `accounts?key=s3cret`. The
-    "Go there" link landed on no tab and carried no key, which reads as a
-    sign-in bounce rather than as a broken link, so it would have been
-    reported as an auth problem.
+    It used to join the admin key on with a separator worked out by hand —
+    and got it wrong: every `where` already carried a query string
+    (`/admin/ui?tab=accounts`), `?key=` was appended anyway, and the browser
+    parsed ONE parameter whose value was `accounts?key=…`. The link landed on
+    no tab and carried no key, which reads as a sign-in bounce rather than a
+    broken link. Since 2026-09-23 `where` is a PATH built by `urls.url` and
+    the key belongs to the cookie, so there is nothing to join.
 
-    Found by an audit of the assertion that was supposed to cover it: the
-    check greps the whole workroom for `tab=accounts`, and the left-hand nav
-    contains that string on every page whatever the note says. It was green
-    on the broken URL.
+    Found by an audit of the assertion meant to cover it: the check grepped
+    the whole workroom for `tab=accounts`, and the left-hand nav contains
+    that string on every page whatever the note says. It was green on the
+    broken URL.
     """
-    sep = "&amp;" if "?" in str(where or "") else "?"
-    return f"{_esc(where)}{sep}key={_esc(key)}"
+    return _esc(where or "")
 
 
 def _cadence_form(key: str, row, lead: str, propose: str) -> str:
@@ -3642,7 +3606,7 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
     _pg = max(1, min(ppage if sub != "available" else 1, _pages))
     rows = all_rows[(_pg - 1) * SYSTEMS_PAGE:_pg * SYSTEMS_PAGE]
     board_pager = _pager(
-        f"/admin/ui?tab=systems&amp;sub=active&amp;tenant={_esc(tenant)}"
+        f"{_esc(url(tenant, "systems", sub="active"))}"
         + (f"&amp;key={_esc(key)}" if key else ""),
         _pg, total_rows, SYSTEMS_PAGE, "systems")
     # Two queries for the whole board, not five per card (spec §8).
@@ -3707,8 +3671,7 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
     backlog_html = ""
     if backlog:
         _n = sum(a["count"] for a in backlog)
-        _href = ("/admin/ui?tab=diagnostics&amp;view=systems&amp;tenant="
-                 + _esc(tenant) + (f"&amp;key={_esc(key)}" if key else ""))
+        _href = _esc(url(tenant, "diagnostics", view="systems"))
         backlog_html = f"""
         <div class="card">
           <div class="head"><h2>Something needs attention</h2>
@@ -3739,7 +3702,7 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
             # is the one place you meet a system before you own it, so the
             # already-installed entry is exactly where "take me to it"
             # belongs.
-            _wf = (f"/admin/ui?tab=systems&amp;tenant={_esc(tenant)}"
+            _wf = (f"{_esc(url(tenant, "systems"))}"
                    f"&amp;system={_esc(p['key'])}"
                    + (f"&amp;key={_esc(key)}" if key else ""))
             action = (f'<span class="mut">installed &middot; '
@@ -3810,9 +3773,7 @@ def render_systems(key: str, tenant: str = "", msg: str = "", err: str = "",
          if not p["installed"]])
 
     def _sub_href(v: str) -> str:
-        return ("/admin/ui?tab=systems&amp;sub=" + v
-                + f"&amp;tenant={_esc(tenant)}"
-                + (f"&amp;key={_esc(key)}" if key else ""))
+        return _esc(url(tenant, "systems", sub=v))
 
     strip = "" if every else '<div class="subtabs">' + "".join(
         f'<a class="subtab{" on" if v == sub else ""}" href="{_sub_href(v)}">'
@@ -4925,10 +4886,8 @@ def _photo_library(tenant: str, key_: str = "", page: int = 0,
         if n_wait:
             waiting_chip = (
                 f'<span class="chip off">{n_wait} waiting &middot; '
-                f'<a href="/admin/ui?tab=content&amp;sub=pictures&amp;'
-                f'tenant={_esc(tenant)}'
-                + (f'&amp;key={_esc(key_)}' if key_ else "")
-                + '">decide on Review</a></span>')
+                f'<a href="{_esc(url(tenant, "content", sub="pictures"))}">'
+                'decide on Review</a></span>')
 
     if not shots and not marks:
         return ('<div class="card"><div class="head">'
@@ -5210,10 +5169,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
     counts = _kind_counts(tenant)
 
     def _sub_href(k: str) -> str:
-        return (f"/admin/ui?tab=kb"
-                + (f"&amp;sub={k}" if k else "")
-                + f"&amp;tenant={_esc(tenant)}"
-                + (f"&amp;key={_esc(key)}" if key else ""))
+        return _esc(url(tenant, "kb", **({"sub": k} if k else {})))
 
     strip = '<div class="subtabs">' + "".join(
         f'<a class="subtab{" on" if k == sub else ""}" href="{_sub_href(k)}">'
@@ -5297,8 +5253,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
                     f'therefore for nobody in particular.</p>'
                     f'<div class="thread">{_who}</div>'
                     f'<div class="row"><a class="btn sec" '
-                    f'href="/admin/ui?key={_esc(key)}&amp;tab=kb&amp;'
-                    f'sub=audiences&amp;tenant={_esc(tenant)}">'
+                    f'href="{_esc(url(tenant, "kb", sub="audiences"))}">'
                     f'Manage who we write to &rarr;</a></div></div>')
     else:
         who_card = (f'<div class="card"><div class="head">'
@@ -5310,8 +5265,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
                     f'one-to-many work is written for everybody &mdash; which '
                     f'is nobody in particular.</div>'
                     f'<div class="row"><a class="btn" '
-                    f'href="/admin/ui?key={_esc(key)}&amp;tab=kb&amp;'
-                    f'sub=audiences&amp;tenant={_esc(tenant)}">'
+                    f'href="{_esc(url(tenant, "kb", sub="audiences"))}">'
                     f'Add the first one &rarr;</a></div></div>')
 
     # --- claims, split by whether they can actually be used ------------------
@@ -5541,8 +5495,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
     theme_line = (
         f'<p class="mut">What may be ASSERTED lives here. Who the brand is — '
         f'positioning, voice, hard rules — and how its email looks are the '
-        f'<a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;'
-        f'tenant={_esc(tenant)}">Brand tab →</a></p>')
+        f'<a href="{_esc(url(tenant, "brand"))}">Brand tab →</a></p>')
 
     # Anything waiting for a decision is the first thing on the page — the
     # queue lives on Review, but discovering it exists must not require
@@ -5555,8 +5508,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
             f'<span class="chip off">{n_pending} claims</span></div>'
             f'<p class="mut">Proposed claims are invisible to every generator '
             f'until approved. '
-            f'<a href="/admin/ui?key={_esc(key)}&amp;tab=content&amp;'
-            f'sub=claims&amp;tenant={_esc(tenant)}#proposals">'
+            f'<a href="{_esc(url(tenant, "content", sub="claims"))}#proposals">'
             f'Open the review queue →</a></p>'
             f'</div>')
 
@@ -5613,7 +5565,7 @@ def render_kb(key: str, tenant: str = "", err: str = "", msg: str = "",
     {grouping_form}
     {_approval_policy_html((b.approval_policy or {}) if b else {})}
     <p class="mut">Positioning, voice and the hard-rule list moved to the
-    <a href="/admin/ui?key={_esc(key)}&amp;tab=brand&amp;tenant={_esc(tenant)}">Brand
+    <a href="{_esc(url(tenant, "brand"))}">Brand
     tab</a> (owner, 2026-08-21) — identity is the brand's, facts are the
     knowledge base's.</p>
   </details>
@@ -5933,8 +5885,8 @@ def _overlap_strip(key: str, tenant: str) -> str:
                     f'<a class="when" href="/admin/context_retire?key={_esc(key)}'
                     f'&amp;tenant={_esc(tenant)}&amp;id={_esc(sd["id"])}">retire</a>')
         return (f'<span class="chip">claim</span> {_esc(sd["text"][:90])} '
-                f'<a class="when" href="/admin/ui?key={_esc(key)}&amp;tab=kb'
-                f'&amp;tenant={_esc(tenant)}#cl-{_esc(sd["id"])}">open claim</a>')
+                f'<a class="when" href="{_esc(url(tenant, "kb"))}'
+                f'#cl-{_esc(sd["id"])}">open claim</a>')
     rows = "".join(
         f'<li>{_side(p["a"])}<br><span class="when">&mdash; and &mdash;</span>'
         f'<br>{_side(p["b"])} <span class="chip nb">{p["score"]}</span></li>'
@@ -7726,7 +7678,7 @@ def render_content(key: str, tenant: str = "", started: str = "",
     _ppage = max(1, min(page_req, _pages_p))
     _pics_shown = waiting[(_ppage - 1) * PICS_PAGE:_ppage * PICS_PAGE]
     _pics_pager = _pager(
-        f"/admin/ui?tab=content&amp;sub=pictures&amp;tenant={_esc(tenant)}"
+        f"{_esc(url(tenant, "content", sub="pictures"))}"
         + (f"&amp;key={_esc(key)}" if key else ""),
         _ppage, len(waiting), PICS_PAGE, "pictures")
     pic_cards = ""
@@ -7999,8 +7951,7 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
             return s
 
         def _pg(p: int) -> str:
-            return (f"/admin/ui?tab=content&amp;sub=claims"
-                    f"&amp;tenant={_esc(tenant)}&amp;cpage={p}"
+            return (_esc(url(tenant, "content", sub="claims", cpage=p))
                     + _fq("\x00", "\x00") + "#proposals")
         pager = ""
         if pages > 1:
@@ -8019,7 +7970,7 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
                            (e["row"] for e in base) if (p.origin or "")})
         _chips_html = '<div class="filters">' + "".join(
             f'<a class="{"on" if _cf == v else ""}" '
-            f'href="/admin/ui?tab=content&amp;sub=claims&amp;tenant={_esc(tenant)}'
+            f'href="{_esc(url(tenant, "content", sub="claims"))}'
             + _fq(v, "\x00") + f'#proposals">{label}</a>'
             for v, label in _chip_defs) + "</div>"
         _osel = "".join(
@@ -8039,7 +7990,7 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
             <select name="corigin" style="width:auto">
               <option value="">any origin</option>{_osel}</select>
             <button class="sec">Filter</button>
-            {f'<a class="mut" href="/admin/ui?tab=content&amp;sub=claims&amp;tenant={_esc(tenant)}#proposals">clear</a>' if (q or _cf or corigin) else ''}
+            {f'<a class="mut" href="{_esc(url(tenant, "content", sub="claims"))}#proposals">clear</a>' if (q or _cf or corigin) else ''}
           </form>
         </div>
         {f'<div class="when">showing {total_claims} of {total_unfiltered} pending (filtered)</div>' if (q or _cf or corigin) else ''}"""
@@ -8134,7 +8085,7 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
         _pages_c = max(1, -(-len(open_conflicts) // 15))
         _kpage = max(1, min(page_req, _pages_c))
         _conf_pager = _pager(
-            f"/admin/ui?tab=content&amp;sub=conflicts&amp;tenant={_esc(tenant)}"
+            f"{_esc(url(tenant, "content", sub="conflicts"))}"
             + (f"&amp;key={_esc(key)}" if key else ""),
             _kpage, len(open_conflicts), 15, "conflicts")
         conflicts_html = (_conf_pager
@@ -8222,13 +8173,13 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
         _pages_o = max(1, -(-len(_flat) // 15))
         _opage = max(1, min(page_req, _pages_o))
         _oth_pager = _pager(
-            f"/admin/ui?tab=content&amp;sub=other&amp;tenant={_esc(tenant)}"
+            f"{_esc(url(tenant, "content", sub="other"))}"
             + (f"&amp;key={_esc(key)}" if key else ""),
             _opage, len(_flat), 15, "proposals")
         from urllib.parse import quote as _oq
         _oth_chips = '<div class="filters">' + "".join(
             f'<a class="{"on" if _of == v else ""}" '
-            f'href="/admin/ui?tab=content&amp;sub=other&amp;tenant={_esc(tenant)}'
+            f'href="{_esc(url(tenant, "content", sub="other"))}'
             + (f"&amp;q={_esc(_oq(q, safe=''))}" if q else "")
             + (f"&amp;flt={_esc(v)}" if v else "") + f'">{_esc(label)}</a>'
             for v, label in ([("", "all")]
@@ -8339,14 +8290,12 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         _pages_pl = max(1, -(-len(plans_wait) // 15))
         _plpage = max(1, min(page_req, _pages_pl))
         _pl_pager = _pager(
-            f"/admin/ui?tab=content&amp;sub=plans&amp;tenant={_esc(tenant)}"
+            f"{_esc(url(tenant, "content", sub="plans"))}"
             + (f"&amp;key={_esc(key)}" if key else ""),
             _plpage, len(plans_wait), 15, "plans")
 
         def _plan_row(w) -> str:
-            jump = (f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;'
-                    f'tenant={_esc(tenant)}&amp;system={_esc(w["system_key"])}'
-                    f'&amp;ppage={systems.plan_page(tenant, w["system_key"], w["run_id"])}'
+            jump = (f'<a href="{_esc(url(tenant, "systems", w["system_key"], ppage=systems.plan_page(tenant, w["system_key"], w["run_id"])))}'
                     f'#plan-{_esc(w["run_id"])}">')
             if w["need"] == "complete":
                 # A missing field is filled on the workflow card, where the
@@ -8520,7 +8469,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
                   + (f"&amp;flt={_esc(_sf)}" if _sf else ""))
     _ship_chips = '<div class="filters">' + "".join(
         f'<a class="{"on" if _sf == v else ""}" '
-        f'href="/admin/ui?tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}'
+        f'href="{_esc(url(tenant, "content", sub="ship"))}'
         + (f"&amp;q={_esc(_sq(q, safe=''))}" if q else "")
         + (f"&amp;flt={v}" if v else "") + f'">{label}</a>'
         for v, label in (("", "all"), ("campaign", "campaigns"),
@@ -8548,7 +8497,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     # One query for the page, so every row can be named by the thing it is.
     _ship_arts = _artifacts_for(_ship_shown)
     _ship_pager = _pager(
-        f"/admin/ui?tab=content&amp;sub=ship&amp;tenant={_esc(tenant)}"
+        f"{_esc(url(tenant, "content", sub="ship"))}"
         + (f"&amp;key={_esc(key)}" if key else "") + _ship_keep,
         _page, len(ship_rows), SHIP_PAGE, "decisions")
     ship_card = f"""
@@ -8590,7 +8539,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
                    REVIEW_SUBS[0][0])
 
     def _sub_href(k: str) -> str:
-        return (f"/admin/ui?tab=content&amp;sub={k}&amp;tenant={_esc(tenant)}"
+        return (f"{_esc(url(tenant, "content", sub=k))}"
                 + (f"&amp;key={_esc(key)}" if key else ""))
 
     strip = '<div class="subtabs">' + "".join(
@@ -9080,10 +9029,8 @@ def _fix_list(key: str, tenant: str) -> str:
             # tabs. Naming them plainly beats inventing a link that goes
             # somewhere else.
             return f'<span class="mut">{_esc(where)}</span>'
-        return (f'<a class="btn sec" href="/admin/ui?tab={tab}'
-                f'&amp;tenant={_esc(tenant)}'
-                + (f'&amp;key={_esc(key)}' if key else "")
-                + f'">{label} &rarr;</a>')
+        return (f'<a class="btn sec" href="{_esc(url(tenant, tab))}">'
+                f'{label} &rarr;</a>')
 
     if not acts:
         body = (f'<p class="mut">Nothing is blocking this account. It can '
@@ -9363,7 +9310,7 @@ def _dl_base(key: str, tenant: str, sub: str, q: str = "",
     Knowledge under the four-tab contract (owner, 2026-08-27), and the
     machinery serves whichever tab hosts it."""
     from urllib.parse import quote as _q
-    b = f"/admin/ui?tab={_esc(tab)}&amp;sub={_esc(sub)}&amp;tenant={_esc(tenant)}"
+    b = f"{_esc(url(tenant, tab, sub=sub))}"
     if key:
         b += f"&amp;key={_esc(key)}"
     if state:
@@ -9463,10 +9410,8 @@ def _schema_queue(key: str, tenant: str, need: dict) -> str:
         # writer), and the button says which.
         tab, label = _READINESS_WHERE.get(
             str(a.get("where") or "").strip().lower(), ("", ""))
-        ctl = (f'<a class="btn sec" href="/admin/ui?tab={tab}'
-               f'&amp;tenant={_esc(tenant)}'
-               + (f'&amp;key={_esc(key)}' if key else "")
-               + f'">{label} &rarr;</a>' if tab
+        ctl = (f'<a class="btn sec" href="{_esc(url(tenant, tab))}">'
+               f'{label} &rarr;</a>' if tab
                else f'<span class="mut">{_esc(str(a.get("where") or ""))}</span>')
         return (f'<div class="msg"><div><strong>{_esc(fix)}</strong></div>'
                 f'{meta}<div class="row">{ctl}</div></div>')
@@ -9612,7 +9557,7 @@ def _schema_queue(key: str, tenant: str, need: dict) -> str:
     for m in need["mute_info"]:
         mutes_html += (
             f'<div class="msg"><div class="when">{_esc(m.get("proposal", ""))}'
-            f' · <a href="/admin/ui?tab=plan&amp;tenant={_esc(tenant)}'
+            f' · <a href="{_esc(url(tenant, "plan"))}'
             + (f'&amp;key={_esc(key)}' if key else "")
             + '">retire it on Plan &rarr;</a></div></div>')
     if not (need["mutes"] or need["mute_info"]):
@@ -9813,10 +9758,8 @@ def _schema_domain(key: str, tenant: str, sub: str, q: str, state: str,
         if not n:
             return ""
         return (f'<span class="chip off">{n} awaiting review &middot; '
-                f'<a href="/admin/ui?tab=content&amp;sub={review_sub}&amp;'
-                f'tenant={_esc(tenant)}'
-                + (f'&amp;key={_esc(key)}' if key else "")
-                + '">decide on Review</a></span>')
+                f'<a href="{_esc(url(tenant, "content", sub=review_sub))}">'
+                'decide on Review</a></span>')
 
     def _add_fold(title: str, kind: str, fields: str) -> str:
         return f"""
@@ -10203,10 +10146,7 @@ def _schema_map(key: str, tenant: str) -> str:
     rows_sys = _installed_systems(tenant)
 
     def _kb_link(sub: str) -> str:
-        return (f"/admin/ui?tab=kb"
-                + (f"&amp;sub={sub}" if sub else "")
-                + f"&amp;tenant={_esc(tenant)}"
-                + (f"&amp;key={_esc(key)}" if key else ""))
+        return _esc(url(tenant, "kb", **({"sub": sub} if sub else {})))
 
     reads_by_kind: dict[str, int] = {}
     for row in rows_sys:
@@ -10236,12 +10176,12 @@ def _schema_map(key: str, tenant: str) -> str:
     kinds_col += _node(
         f"Hard rules · {len(banned)}",
         f"read by every gate, against every draft — including yours",
-        f"/admin/ui?tab=brand&amp;tenant={_esc(tenant)}"
+        f"{_esc(url(tenant, "brand"))}"
         + (f"&amp;key={_esc(key)}" if key else ""), on=bool(banned))
     kinds_col += _node(
         "Brand voice" + (" · set" if voice else " · not set"),
         "tone and positioning ride every drafter brief",
-        f"/admin/ui?tab=brand&amp;tenant={_esc(tenant)}"
+        f"{_esc(url(tenant, "brand"))}"
         + (f"&amp;key={_esc(key)}" if key else ""), on=voice)
 
     sys_col = ""
@@ -10254,7 +10194,7 @@ def _schema_map(key: str, tenant: str) -> str:
             ("reads: " + ", ".join(dict.fromkeys(needs))
              if needs else "reads no knowledge — runs on connections alone")
             + f" · {row.status}",
-            f"/admin/ui?tab=systems&amp;tenant={_esc(tenant)}"
+            f"{_esc(url(tenant, "systems"))}"
             f"&amp;system={_esc(row.key)}"
             + (f"&amp;key={_esc(key)}" if key else ""),
             on=(row.status == "live"))
@@ -10279,7 +10219,7 @@ def _schema_map(key: str, tenant: str) -> str:
     <div class="flowcol">
       <div class="flowlab">Where a fact enters</div>
       {_node("You — console & Telegram", "adds land approved; edits are re-attestations", _kb_link(""))}
-      {_node("Client intake links", "answers land as proposals", f"/admin/ui?tab=accounts&amp;tenant={_esc(tenant)}" + (f"&amp;key={_esc(key)}" if key else ""))}
+      {_node("Client intake links", "answers land as proposals", f"{_esc(url(tenant, "accounts"))}" + (f"&amp;key={_esc(key)}" if key else ""))}
       {_node("Site crawl & store sync", "candidate facts and catalogue rows — proposals, never silent overwrites")}
       {_node("Sent-mail harvest", "voice and objection candidates from real correspondence")}
     </div>
@@ -10288,7 +10228,7 @@ def _schema_map(key: str, tenant: str) -> str:
       <div class="flowlab">The knowledge, by kind</div>
       {kinds_col}
       <div class="when">proposals wait on
-        <a href="/admin/ui?tab=content&amp;tenant={_esc(tenant)}{f'&amp;key={_esc(key)}' if key else ''}">Review</a>
+        <a href="{_esc(url(tenant, "content"))}{f'&amp;key={_esc(key)}' if key else ''}">Review</a>
         — nothing here is citable until approved</div>
     </div>
     <div class="flowarr">&rarr;</div>
@@ -10304,7 +10244,7 @@ def _schema_map(key: str, tenant: str) -> str:
       <div class="flowlab">Who reads it</div>
       {sys_col}
       <div class="when">what they produce holds on
-        <a href="/admin/ui?tab=content&amp;tenant={_esc(tenant)}{f'&amp;key={_esc(key)}' if key else ''}">Review</a>
+        <a href="{_esc(url(tenant, "content"))}{f'&amp;key={_esc(key)}' if key else ''}">Review</a>
         until you approve it</div>
     </div>
   </div>
@@ -10473,21 +10413,18 @@ def render_schema(key: str, tenant: str = "", sub: str = "", q: str = "",
         from urllib.parse import quote as _uq
 
         from fastapi.responses import RedirectResponse
-        u = f"/admin/ui?tab=kb&sub={_uq(sub)}&tenant={_uq(tenant)}"
-        if state:
-            u += f"&state={_uq(state)}"
-        if q:
-            u += f"&q={_uq(q)}"
+        view = {"state": state, "q": q}
         if page > 1:
-            u += f"&page={page}"
-        return RedirectResponse(u, 303)
+            view["page"] = page
+        return RedirectResponse(
+            url(tenant, "kb", sub=sub, **{k: v for k, v in view.items() if v}), 303)
     if sub not in dict(SCHEMA_SUBS):
         sub = "queue"
 
     need = _schema_needs_you(tenant)
 
     def _sub_href(k: str) -> str:
-        return (f"/admin/ui?tab=schema&amp;sub={k}&amp;tenant={_esc(tenant)}"
+        return (f"{_esc(url(tenant, "schema", sub=k))}"
                 + (f"&amp;key={_esc(key)}" if key else ""))
 
     strip = '<div class="subtabs">' + "".join(
@@ -10579,7 +10516,7 @@ def _navigability_card(key: str, tenant: str) -> str:
         return ('<div class="card"><h3>Can it be navigated</h3>'
                 '<p class="mut">This account&rsquo;s knowledge could not be '
                 'read, so nothing here would be true.</p></div>')
-    _kb = (f'/admin/ui?key={_esc(key)}&amp;tab=kb&amp;tenant={_esc(tenant)}')
+    _kb = (f'{_esc(url(tenant, "kb"))}')
     if n["rotating"]:
         verdict = (f'<div class="note"><strong>Selection is rotating, not '
                    f'choosing.</strong> {n["claims_unnarrowable"]} of '
@@ -10668,8 +10605,7 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     # no way to widen the window from the page is a dead end.
     windows = ('<div class="filters">' + "".join(
         f'<a class="{"on" if days == d else ""}" '
-        f'href="/admin/ui?key={_esc(key)}&amp;tab=assurance&amp;'
-        f'tenant={_esc(tenant)}&amp;days={d}">{lbl}</a>'
+        f'href="{_esc(url(tenant, "assurance", days=d))}">{lbl}</a>'
         for d, lbl in ((1, "24h"), (7, "7d"), (30, "30d"), (90, "90d")))
         + "</div>")
 
@@ -10739,16 +10675,9 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     # passed neither, so the drill-down existed in the model layer and was
     # reachable from nowhere.
     def _drill(system_: str = "", rule_: str = "", gap_: str = "") -> str:
-        bits = ["tab=assurance", f"tenant={_esc(tenant)}", f"days={days}"]
-        if system_:
-            bits.append(f"system={_esc(system_)}")
-        if rule_:
-            bits.append(f"rule={_esc(rule_)}")
-        if gap_:
-            bits.append(f"gap={_esc(gap_)}")
-        if key:
-            bits.append(f"key={_esc(key)}")
-        return "/admin/ui?" + "&amp;".join(bits)
+        view = {"days": days, "system": system_, "rule": rule_, "gap": gap_}
+        return _esc(url(tenant, "assurance",
+                        **{k: v for k, v in view.items() if v}))
 
     catch_rows = "".join(
         f'<tr><td><a href="{_drill(rule_=r)}"><code>{_esc(r)}</code></a></td>'
@@ -10791,10 +10720,9 @@ def render_assurance(key: str, tenant: str = "", days: int = 30,
     _pages = max(1, -(-len(all_catches) // _per))
     a_page = max(1, min(page, _pages))
     got = all_catches[(a_page - 1) * _per:a_page * _per]
-    _pbase = (f"/admin/ui?key={_esc(key)}&amp;tab=assurance&amp;"
-              f"tenant={_esc(tenant)}&amp;days={days}"
-              + (f"&amp;system={_esc(system)}" if system else "")
-              + (f"&amp;rule={_esc(rule)}" if rule else ""))
+    _pbase = _esc(url(tenant, "assurance", days=days,
+                      **({"system": system} if system else {}),
+                      **({"rule": rule} if rule else {})))
     catch_pager = _pager(_pbase, a_page, len(all_catches), _per, "catches")
     # THE COUNT RIDES ON THE SUMMARY. The fold is closed by default now (spec
     # §9: folds fold) and a closed fold that hides its own number is worse
@@ -11081,10 +11009,8 @@ def _systems_check(key: str, tenant: str, days: int, need: list,
                  '<th class="num">runs</th><th class="num">shipped</th>'
                  '<th class="num">blocked</th><th class="num">defective</th>'
                  '<th>last run</th></tr>' + "".join(
-            f'<tr><td><a href="/admin/ui?tab=systems&amp;tenant={_esc(r["tenant"])}'
-            f'&amp;system={_esc(r["key"])}'
-            + (f'&amp;key={_esc(key)}' if key else "")
-            + f'">{_esc(r["name"] or r["key"])}</a>'
+            f'<tr><td><a href="{_esc(url(r["tenant"], "systems", r["key"]))}">'
+            + f'{_esc(r["name"] or r["key"])}</a>'
             + (f'<div class="when">{_esc(r["tenant"])}</div>' if not tenant or tenant == ALL else "")
             + f'</td>'
             f'<td><span class="chip {"on" if r["status"] == "live" else "off"}">'
@@ -11106,10 +11032,8 @@ def _systems_check(key: str, tenant: str, days: int, need: list,
         where_tab, verb = _FIX_WHERE.get(a["where"], ("", ""))
         fix = ""
         if where_tab:
-            fix = (f'<a class="btn sec" href="/admin/ui?tab={_esc(a["where"])}'
-                   f'&amp;tenant={_esc(tenant)}'
-                   + (f'&amp;key={_esc(key)}' if key else "")
-                   + f'">{_esc(where_tab)} &rarr;</a>'
+            fix = (f'<a class="btn sec" href="{_esc(url(tenant, a["where"]))}">'
+                   + f'{_esc(where_tab)} &rarr;</a>'
                    f'<span class="mut">{_esc(verb)}</span>')
         # THE RUNS THEMSELVES. Folded, because twelve examples open at once is
         # the wall of text this page is replacing — but present, because
@@ -11220,12 +11144,11 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
         # back to Overview; `limit` was missing, so a hand-typed one was
         # silently reverted by the next click. Design rule 3 — a decision, a
         # filter or a preference never costs the reader their place.
-        q = {"key": key, "tab": "diagnostics", "tenant": tenant,
-             "days": days, "level": level, "system": system, "live": live,
+        q = {"days": days, "level": level, "system": system, "live": live,
              "sub": view, "limit": limit if limit != 200 else ""}
-        q.update(over)
-        return "/admin/ui?" + "&amp;".join(
-            f"{k}={_esc(v)}" for k, v in q.items() if v not in ("", None))
+        q.update({k: v for k, v in over.items() if k not in ("tab", "tenant", "key")})
+        return _esc(url(over.get("tenant", tenant), over.get("tab", "diagnostics"),
+                        **{k: v for k, v in q.items() if v not in ("", None)}))
 
     windows = "".join(
         f'<a class="{"on" if days == d else ""}" href="{_link(days=d)}">{lbl}</a>'
@@ -11474,15 +11397,13 @@ def render_diagnostics(key: str, tenant: str = "", days: int = 7,
         # dropped the LEVEL filter and the live-refresh setting — so the same
         # page preserved them on one strip and discarded them on the other.
         # `sub` is the console-wide name; `view` stays accepted by the route.
-        bits = [f"tab=diagnostics", f"sub={v}", f"days={days}",
-                f"tenant={_esc(tenant)}"]
-        for name, val in (("system", system), ("level", level),
-                          ("live", live), ("key", key)):
+        q = {"sub": v, "days": days}
+        for name, val in (("system", system), ("level", level), ("live", live)):
             if val:
-                bits.append(f"{name}={_esc(val)}")
+                q[name] = val
         if limit != 200:
-            bits.append(f"limit={limit}")
-        return "/admin/ui?" + "&amp;".join(bits)
+            q["limit"] = limit
+        return _esc(url(tenant, "diagnostics", **q))
 
     need = systems.attention("" if every else tenant, days,
                              system_key=system or "")
@@ -11900,7 +11821,7 @@ def _strategy_section(key: str, tenant: str, days: int) -> str:
     if systems.find(tenant, "gbp_listing") is not None:
         from . import gbp_listing as _gl
         lt = _gl.latest(tenant)
-        _room = (f"/admin/ui?key={_esc(key)}&amp;tab=systems&amp;tenant={_esc(tenant)}"
+        _room = (f"{_esc(url(tenant, "systems"))}"
                  f"&amp;system=gbp_listing&amp;wf=reports")
         if lt.get("audited"):
             _miss = lt.get("missing") or []
@@ -12004,9 +11925,8 @@ def _sort_headers(key: str, tenant: str, sort: str, desc: bool) -> str:
         arrow = (" &darr;" if (col == sort and not desc)
                  else " &uarr;" if col == sort else "")
         out.append(
-            f'<th><a href="/admin/ui?key={_esc(key)}&amp;tab=plan'
-            f'&amp;tenant={_esc(tenant)}&amp;sub=schedule'
-            f'&amp;ssort={col}&amp;sdesc={nxt}#schedule">{label}{arrow}</a></th>')
+            f'<th><a href="{_esc(url(tenant, "plan", sub="schedule", ssort=col, sdesc=nxt))}'
+            f'#schedule">{label}{arrow}</a></th>')
     return "".join(out)
 
 
@@ -13287,19 +13207,18 @@ def _notes_for(rep: dict, uses: dict, tenant: str, vocab: set,
                 if state == "world" else
                 "nothing on file says this — approve a claim carrying the "
                 "source, or cut it"),
-            "href": (f"/admin/ui?tab=kb&amp;tenant={_esc(tenant)}&amp;"
-                     f"sub=claims&amp;q={_esc((claim.get('claim') or '')[:40])}"
+            # ONE BUILDER DOES THE ENCODING. It used to be done by hand here,
+            # percent-encoding and then HTML-escaping so that an "&" in a
+            # claim did not split the parameter and a "#" did not turn the
+            # rest into a fragment — both ordinary in article prose.
+            "href": (_esc(url(tenant, "kb", sub="claims",
+                              q=(claim.get("claim") or "")[:40]))
                      if state == "ok" else
                      # STRAIGHT TO THE DRAFT (owner, 2026-08-29). The proposals
                      # list takes a `q` filter, so this lands on the one row
                      # rather than on a page of everything awaiting review.
-                     f"/admin/ui?tab=content&amp;sub=claims&amp;"
-                     f"tenant={_esc(tenant)}&amp;"
-                     # PERCENT-encoded, then HTML-escaped. Escaping alone
-                     # leaves the raw sentence in a query string, so an "&"
-                     # splits the parameter and a "#" turns the rest into a
-                     # fragment — both ordinary in article prose.
-                     f"q={_esc(_quote(sent['text'][:60]))}#proposals"),
+                     _esc(url(tenant, "content", sub="claims",
+                              q=sent["text"][:60])) + "#proposals"),
             "act": _NOTE_ASK[state],
             "sentence": sent["text"],
             # ALREADY PROPOSED? Without this the card looks identical after
@@ -14387,9 +14306,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                           if not v.get("dropped"))
             kw_line = (f'{_n_live} of {len(batch["variants"])} variant(s) '
                        f'riding · '
-                       f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems&amp;'
-                       f'tenant={_esc(tenant)}&amp;system=ad_creative">its '
-                       f'system</a>')
+                       f'<a href="{_esc(url(tenant, "systems", "ad_creative"))}">'
+                       f'its system</a>')
 
     # --- the lifecycle, as chips: where this artifact IS ------------------
     def _chip(label: str, on: bool) -> str:
@@ -14543,9 +14461,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
                     f'at that rung and no push path consumes the result, so a '
                     f'campaign stops here. To send to {_esc(prov)}, move it '
                     f'down a rung on '
-                    f'<a href="/admin/ui?key={_esc(key)}&amp;tab=systems'
-                    f'&amp;tenant={_esc(tenant)}&amp;system=campaign_email'
-                    f'">the campaign system</a>.')
+                    f'<a href="{_esc(url(tenant, "systems", "campaign_email"))}">'
+                    f'the campaign system</a>.')
             elif _withdrawn:
                 _perm = any(w in _withdrawn.lower() for w in
                             ("can-spam", "address", "merge tags",
@@ -14795,8 +14712,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
         # "no keyword joined" would read as a gap instead of a fact.
         kw_line = (f'for <b>{_esc(kw.phrase)}</b> ({_esc(kw.role or "")}, '
                    f'{_esc(kw.status or "")}) · '
-                   f'<a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;'
-                   f'tenant={_esc(tenant)}">its Plan row</a>'
+                   f'<a href="{_esc(url(tenant, "plan"))}">its Plan row</a>'
                    if kw else "no keyword joined")
 
     def _inp(name, label, value, size=60):
@@ -15177,8 +15093,8 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
     body_html = f"""
 {f'<div class="flash"><div class="ok">{_esc(ok)}</div></div>' if ok else ""}
 {f'<div class="flash"><div class="bad">{_esc(err)}</div></div>' if err else ""}
-<div class="crumb"><a href="/admin/ui?key={_esc(key)}&amp;tab=content&amp;tenant={_esc(tenant)}&amp;sub=ship">&larr; Review</a> ·
-  <a href="/admin/ui?key={_esc(key)}&amp;tab=plan&amp;tenant={_esc(tenant)}">&larr; Plan</a></div>
+<div class="crumb"><a href="{_esc(url(tenant, "content"))}&amp;sub=ship">&larr; Review</a> ·
+  <a href="{_esc(url(tenant, "plan"))}">&larr; Plan</a></div>
 <div class="card">
   <div class="head"><h2>{_esc(title)}</h2><code>{_esc(syskey or "artifact")}</code>
     <span class="mut">{kw_line}</span></div>
@@ -15375,8 +15291,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
 
     _check_gsc = ""
     if _meas.get("ok") is None:
-        _check_gsc = (f' <a href="/admin/ui?key={_esc(key)}&amp;tab=plan'
-                      f'&amp;tenant={_esc(tenant)}&amp;probe=1">'
+        _check_gsc = (f' <a href="{_esc(url(tenant, "plan", probe=1))}">'
                       f'<button class="sec" type="button">Check Search Console '
                       f'now</button></a>')
     _fix_blog = ""

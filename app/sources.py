@@ -25,6 +25,7 @@ description of our history rather than of what any account can use.
 from __future__ import annotations
 
 from . import kb, tenants
+from .urls import url as _url
 
 
 def _needs_domain(tenant: str) -> str:
@@ -160,7 +161,7 @@ def fill(tenant: str, apply: bool = False, budget: int = 40,
             {"field": g["id"], "question": g["q"], "hint": g["hint"]}
             for g in kb.gaps(tenant)],
         "next": (f"Review {sum(waiting.values())} proposals at "
-                 f"/admin/ui?tab=content&tenant={tenant}"
+                 f"{_url(tenant, 'content')}"
                  if sum(waiting.values()) else
                  "Nothing waiting. Answer the questions above with /next."),
         "note": ("Every source files PROPOSALS — nothing here approved anything, "

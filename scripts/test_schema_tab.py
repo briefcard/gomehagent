@@ -107,7 +107,7 @@ def main():
                follow_redirects=False)
     loc = r.headers.get("location", "")
     ck("answering lands back on the queue", r.status_code == 303
-       and "tab=schema" in loc and "sub=queue" in loc, loc)
+       and "/schema" in loc and "sub=queue" in loc, loc)
     filed = [o for o in kb.objections("baci", any_entity=True)
              if "gift-ready" in (o.objection or "")]
     ck("…filed APPROVED through the canonical writer — the next draft can "
@@ -128,7 +128,7 @@ def main():
               f"&value=1.2 litres&back=schema&bsub=queue",
               follow_redirects=False)
     ck("saving the value lands back on the queue",
-       r.status_code == 303 and "tab=schema" in r.headers.get("location", ""),
+       r.status_code == 303 and "/schema" in r.headers.get("location", ""),
        r.headers.get("location", ""))
     ck("…and the gap is closed", not kb.unknowns("baci"))
 
@@ -163,7 +163,7 @@ def main():
                      "back": "schema", "bsub": "queue"},
                follow_redirects=False)
     ck("keep-as-guidance lands back on the queue", r.status_code == 303
-       and "tab=schema" in r.headers.get("location", ""))
+       and "/schema" in r.headers.get("location", ""))
     ck("…and REACHES the prompt channel",
        "shortened the opening" in systems.feedback_block("baci",
                                                          "campaign_email"))
@@ -193,7 +193,7 @@ def main():
     r = c.get(f"/admin/exclude_term?key={KEY}&tenant=baci&term=rental"
               f"&back=schema&bsub=queue", follow_redirects=False)
     ck("a mute-lesson accept lands back on the queue",
-       r.status_code == 303 and "tab=schema" in r.headers.get("location", ""),
+       r.status_code == 303 and "/schema" in r.headers.get("location", ""),
        r.headers.get("location", ""))
     with db.SessionLocal() as s:
         t = s.get(db.Tenant, "baci")
@@ -214,7 +214,7 @@ def main():
               follow_redirects=False)
     ck("the Data layer's old domain address 303s to Knowledge",
        r.status_code == 303
-       and "tab=kb" in r.headers.get("location", "")
+       and "/kb" in r.headers.get("location", "")
        and "sub=claims" in r.headers.get("location", ""),
        r.headers.get("location", ""))
     h = kpage("claims")
@@ -237,7 +237,7 @@ def main():
               follow_redirects=False)
     ck("deciding from the view lands back on the view",
        r.status_code == 303
-       and "tab=kb" in r.headers.get("location", "")
+       and "/kb" in r.headers.get("location", "")
        and "state=awaiting" in r.headers.get("location", ""),
        r.headers.get("location", ""))
 
@@ -251,7 +251,7 @@ def main():
                      "id": victim.id, "back": "kb", "bsub": "claims",
                      "bstate": "removed"}, follow_redirects=False)
     ck("restore lands back on the removed view", r.status_code == 303
-       and "tab=kb" in r.headers.get("location", "")
+       and "/kb" in r.headers.get("location", "")
        and "state=removed" in r.headers.get("location", ""))
     ck("…and the claim is selectable again",
        any(r_.id == victim.id
@@ -288,7 +288,7 @@ def main():
                      "group": "aqua-range", "back": "kb",
                      "bsub": "catalogue"}, follow_redirects=False)
     ck("assigning lands back on the catalogue view", r.status_code == 303
-       and "tab=kb" in r.headers.get("location", ""),
+       and "/kb" in r.headers.get("location", ""),
        r.headers.get("location", ""))
     ck("…and the membership is real",
        "aqua-range" in kb.ancestors("baci", "aqua-plate"))
@@ -297,7 +297,7 @@ def main():
               f"&description=Planning a wedding table&back=kb"
               f"&bsub=situations", follow_redirects=False)
     ck("adding a situation lands back on the view", r.status_code == 303
-       and "tab=kb" in r.headers.get("location", ""))
+       and "/kb" in r.headers.get("location", ""))
     ck("…and the tag exists", "wedding_prep" in kb.situations("baci"))
 
     print("\n--- 5 · grounded output: the fact, working ---")

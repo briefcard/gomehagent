@@ -264,7 +264,7 @@ def main():
     r = c.get(f"/admin/plan_approve?key={KEY}&tenant=baci&id=missing"
               f"&back=content", follow_redirects=False)
     ck("…and the decision lands back on Review's plans queue",
-       r.status_code == 303 and "tab=content" in r.headers.get("location", "")
+       r.status_code == 303 and "/content" in r.headers.get("location", "")
        and "sub=plans" in r.headers.get("location", ""),
        r.headers.get("location", ""))
 
@@ -285,7 +285,8 @@ def main():
               follow_redirects=False)
     loc = r.headers.get("location", "")
     ck("the purge dry-run lands back as a flash, not JSON",
-       r.status_code == 303 and "dry run" in loc.replace("%20", " "), loc[:120])
+       r.status_code == 303
+       and "dry run" in loc.replace("%20", " ").replace("+", " "), loc[:120])
 
     # ---------------------------------------------------------------------
     # A QUEUED DECISION IS CALLED WHAT IT IS (owner, 2026-08-28: real names

@@ -132,7 +132,7 @@ def main() -> int:
               "&segment=NEWSEG&goal=&draft_visual=", follow_redirects=False)
     loc = r.headers.get("location", "")
     ck("redirects back to the new card", r.status_code == 303
-       and "#plan-" in loc and "system=wf_probe" in loc, loc[:90])
+       and "#plan-" in loc and "/systems/wf_probe" in loc, loc[:90])
     # Filed by hand with no date: the creation day is filled in, so this is
     # COMPLETE on arrival rather than parked as incomplete (owner, 2026-08-22).
     ck("…and it is complete, because a hand-filed plan means 'this one, now'",
@@ -197,7 +197,7 @@ def main() -> int:
        str(len(waiting)))
     rv = c.get("/admin/ui?key=s3cret&tab=content&tenant=agency").text
     ck("the Review tab carries the plans card",
-       "Plans awaiting you" in rv and "system=wf_probe" in rv)
+       "Plans awaiting you" in rv and "/systems/wf_probe" in rv)
     # Retargeted 2026-08-27 (step 4): approvable plans decide IN PLACE on
     # Review now — the button replaced the "approve it →" jump; the jump to
     # the card survives as "open its plan →" / "complete it →".
@@ -420,7 +420,7 @@ def main() -> int:
                 follow_redirects=False)
     loc = str(bad.headers.get("location") or "")
     ck("a failed propose carries the account and the system back",
-       "tenant=agency" in loc and "system=not_a_system" in loc, loc[:90])
+       "/agency/systems/not_a_system" in loc, loc[:90])
     ck("…and says what went wrong", "err=" in loc, loc[:90])
 
     # LANDS LAST: filing a proposal changes what the Review tab renders, and

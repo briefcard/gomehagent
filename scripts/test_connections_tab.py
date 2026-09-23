@@ -81,7 +81,7 @@ def main():
               f"&business_model=&ui=1", follow_redirects=False)
     loc = r.headers.get("location", "")
     ck("create-account lands back with a flash, not JSON",
-       r.status_code == 303 and "tab=accounts" in loc and "ok=" in loc, loc)
+       r.status_code == 303 and "/accounts" in loc and "ok=" in loc, loc)
     ck("…and the account exists", tenants.get("acme") is not None)
     r = c.get(f"/admin/tenant_add?key={KEY}&tenant=acme&name=Twice&ui=1",
               follow_redirects=False)

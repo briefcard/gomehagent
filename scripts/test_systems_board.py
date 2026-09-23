@@ -176,8 +176,7 @@ def main() -> int:
                params={"key": "s3cret"}, follow_redirects=False)
     loc = r.headers.get("location", "")
     ck("deciding returns to the system you decided from",
-       "tab=systems" in loc and f"system={one.key}" in loc
-       and "wf=waiting" in loc, loc)
+       f"/systems/{one.key}/waiting" in loc, loc)
 
     # ---- 7. the installer points at what it names ------------------------
     print("\n— the catalogue links at the thing —")

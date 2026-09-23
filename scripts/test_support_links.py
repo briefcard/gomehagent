@@ -181,7 +181,7 @@ def main() -> int:
                data={"tenant": "baci", "cluster": "mid"},
                follow_redirects=False)
     ck("it lands back on the Plan tab", r.status_code == 303
-       and "tab=plan" in r.headers.get("location", ""),
+       and "/plan" in r.headers.get("location", ""),
        r.headers.get("location", "")[:70])
     plans = [p for p in systems.plans("baci", "blog")]
     refs = {(p.ref or "") for p in plans}

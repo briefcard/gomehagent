@@ -412,7 +412,7 @@ def main() -> int:
     r = c.get(f"/admin/plan_mix?key={KEY}&tenant={T}&head=50&body=30&long_tail=30"
               f"&branded=0&buying=0", follow_redirects=False)
     ck("a bad sum is refused where it was typed", r.status_code == 303
-       and "must+sum+to+100" in r.headers.get("location", "")
+       and "must%20sum%20to%20100" in r.headers.get("location", "")
        and "sub=goal" in r.headers.get("location", ""), r.headers.get("location", ""))
     r = c.get(f"/admin/plan_mix?key={KEY}&tenant={T}&use_recommended=1",
               follow_redirects=False)
@@ -427,7 +427,7 @@ def main() -> int:
     r = c.get(f"/admin/plan_reset?key={KEY}&tenant={T}&system=blog",
               follow_redirects=False)
     ck("Reset lands back on the schedule with a sentence",
-       r.status_code == 303 and "Schedule+reset" in r.headers.get("location", "")
+       r.status_code == 303 and "Schedule%20reset" in r.headers.get("location", "")
        and "sub=schedule" in r.headers.get("location", ""), r.headers.get("location", ""))
     r = c.get(f"/admin/plan_reset?key={KEY}&tenant={T}&system=gbp_post",
               follow_redirects=False)

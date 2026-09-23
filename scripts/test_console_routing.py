@@ -136,6 +136,36 @@ def main() -> int:
        "Starlette matches in declaration order: a route added below these "
        "would answer the console instead of itself")
 
+    print("\n— and NOTHING hand-writes a console address any more —")
+    # THE RATCHET. A link built by hand is a link that will still be built by
+    # hand after the next rename — and the address bar drifts back one card at
+    # a time. The population is derived from the source, so a new one fails
+    # here rather than on the owner's screen.
+    import pathlib
+    root = pathlib.Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    offenders = []
+    for f in (root / "app").glob("*.py"):
+        for n, line in enumerate(f.read_text(encoding="utf-8").split("\n"), 1):
+            if "/admin/ui?" not in line:
+                continue
+            bare = line.strip()
+            # A COMMENT MAY QUOTE THE OLD SHAPE — that is history, and the
+            # commit that explains a change has to be allowed to name what it
+            # changed. A tenant or a tab in a LIVE string is the defect.
+            if bare.startswith(("#", "*", "Owner,", "(`", "`")) or '"""' in line:
+                continue
+            if "tab=" in line or "tenant=" in line:
+                offenders.append(f"{f.name}:{n}")
+    ck("no module hand-writes a console link with a tab or an account in it",
+       not offenders, ", ".join(offenders[:6]))
+    ck("  the one exception is the address with no account at all — "
+       "the console, wherever you last were",
+       '"/admin/ui?err="' in (root / "app" / "web.py").read_text(encoding="utf-8"))
+    for f in ("app/admin_ui.py", "app/web.py"):
+        src_ = (root / f).read_text(encoding="utf-8")
+        ck(f"  {f} carries no key into a link either",
+           "key={_esc(key)}&amp;tab=" not in src_ and "?key={key}&tab=" not in src_)
+
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}\n  " + "\n  ".join(_fail))
     return 1 if _fail else 0

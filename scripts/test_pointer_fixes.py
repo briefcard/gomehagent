@@ -56,12 +56,12 @@ def main() -> int:
               f"&back=plan&tenant=ironside", follow_redirects=False)
     loc = r.headers["location"]
     ck("a refused switch-on is a FLASH on the Plan tab, not raw JSON",
-       "tab=plan" in loc and "err=" in loc and "tenant=ironside" in loc, loc[:120])
+       "/ironside/plan" in loc and "err=" in loc, loc[:120])
     r2 = c.get(f"/admin/system_set?key=s3cret&id={row.id}&notes=x",
                follow_redirects=False)
     loc2 = r2.headers["location"]
     ck("a systems-tab save keeps tenant and system",
-       "tenant=ironside" in loc2 and "system=blog" in loc2, loc2[:120])
+       "/ironside/systems/blog" in loc2, loc2[:120])
     ck("and its flash uses the key the dispatcher reads",
        "ok=" in loc2, "the helper wrote msg= for as long as it existed — "
        "every flash it carried rendered nowhere")

@@ -231,7 +231,7 @@ def main() -> int:
                follow_redirects=False)
     ck("saving the choice lands back on the Knowledge tab, and merges into "
        "selection without touching the rest",
-       r.status_code in (302, 303) and "tab=kb" in (r.headers.get("location") or "")
+       r.status_code in (302, 303) and "/kb" in (r.headers.get("location") or "")
        and kb.selection_config(rich).get("entity_grouping") == "collection"
        and kb.selection_config(rich).get("primary_type"),
        str(kb.selection_config(rich)))

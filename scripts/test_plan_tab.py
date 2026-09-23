@@ -256,8 +256,8 @@ def main() -> int:
     _r = _c.get(f"/admin/system_add?key=s3cret&tenant={_no_blog}"
                 f"&system=blog&back=plan")
     ck("  and installing from the Plan tab comes BACK to the Plan tab",
-       _r.status_code == 303 and "tab=plan" in _r.headers.get("location", "")
-       and f"tenant={_no_blog}" in _r.headers.get("location", ""),
+       _r.status_code == 303 and "/plan" in _r.headers.get("location", "")
+       and f"/{_no_blog}/plan" in _r.headers.get("location", ""),
        _r.headers.get("location", "")[:110])
     ck("  …with the row it just made, so the next control is Turn it on",
        systems.find(_no_blog, "blog") is not None

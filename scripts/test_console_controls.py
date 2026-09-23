@@ -188,7 +188,7 @@ def main() -> int:
     r8 = c.get(f"/admin/claim_review?key=s3cret&tenant=ironside&ui=1"
                f"&back=kb&claim_id={cid}&approve=yes", follow_redirects=False)
     ck("deciding returns the reader to the Knowledge tab",
-       "tab=kb" in r8.headers["location"],
+       "/kb" in r8.headers["location"],
        "'a decision must never cost the reader their place' is the route's "
        "own rule; landing on Review broke it the moment a second surface "
        "could decide")
@@ -204,7 +204,7 @@ def main() -> int:
     spage = admin_ui.render_systems("s3cret", "coverings",
                                     system="campaign_email")
     ck("'not connected: esp' carries 'connect it'",
-       "connect it" in spage and "tab=accounts" in spage,
+       "connect it" in spage and "/accounts" in spage,
        "the blocker told the reader what was missing and nothing about "
        "where to fix it")
 

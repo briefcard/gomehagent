@@ -140,7 +140,7 @@ def main() -> int:
                            "value": "ecom_inventory", "ui": "1"},
                    follow_redirects=False)
     ck("saving from the form lands back on the tab with a flash, not JSON",
-       r.status_code == 303 and "tab=accounts" in r.headers.get("location", "")
+       r.status_code == 303 and "/accounts" in r.headers.get("location", "")
        and "ok=" in r.headers.get("location", ""),
        f"{r.status_code} {r.headers.get('location', '')[:60]}")
     with TestClient(app) as cl:

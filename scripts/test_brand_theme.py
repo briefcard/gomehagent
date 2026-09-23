@@ -455,12 +455,12 @@ def main() -> int:  # noqa: PLR0915
                follow_redirects=False)
     loc = r.headers["location"]
     ck("the derive button returns IMMEDIATELY, to the Brand tab",
-       r.status_code == 303 and "tab=brand" in loc and "#voice" in loc)
+       r.status_code == 303 and "/brand" in loc and "#voice" in loc)
     # The anchor goes on LAST. Appending `key=` after `#voice` makes the
     # credential part of the FRAGMENT, which is never sent to the server — it
     # only appeared to work because the console session cookie carried it.
     ck("…with every parameter in the QUERY, not stranded in the fragment",
-       "key=" in loc.split("#")[0] and "key=" not in loc.split("#", 1)[1], loc)
+       "ok=" in loc.split("#")[0] and "=" not in loc.split("#", 1)[1], loc)
     ck("…and it writes no voice, only a proposal",
        (kb.brand("baci").voice or {}).get("tone") == ["assured", "warm"])
 

@@ -1217,9 +1217,7 @@ SABOTAGES = [
     {
         "name": "a_dead_work_id_is_a_bare_page",
         "file": "app/web.py",
-        "find": '        return RedirectResponse("/admin/ui?" + urlencode(\n'
-                '            {k: v for k, v in {"key": key, "tab": "content", "tenant": _t,\n'
-                '                               "err": said}.items() if v}), 303)',
+        "find": '        return RedirectResponse(_console_url(_t, "content", err=said), 303)',
         "replace": '        return HTMLResponse("<h3>No artifact kept for this id.</h3>",\n'
                    '                            status_code=404)  # SABOTAGE',
         "suites": ["test_an_action_never_renders_at_its_own_address.py"],
@@ -7094,9 +7092,11 @@ SABOTAGES = [
     },
     {
         "name": "the_gap_note_links_somewhere_real",
-        "file": "app/admin_ui.py",
-        "find": "    sep = \"&amp;\" if \"?\" in str(where or \"\") else \"?\"",
-        "replace": "    sep = \"?\"  # SABOTAGE",
+        "file": "app/sites.py",
+        "find": '                    "fix": f"Reconnect {prov.title()} and approve {need!r}.",\n'
+                '                    "where": _url(tenant, "accounts")}',
+        "replace": '                    "fix": f"Reconnect {prov.title()} and approve {need!r}.",\n'
+                   '                    "where": ""}  # SABOTAGE',
         "suites": ["test_publish_gap.py"],
         "why": "the fix link becomes `/admin/ui?tab=accounts?key=…`, which "
                "parses as one parameter whose value is `accounts?key=…` — so "

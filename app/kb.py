@@ -4377,7 +4377,7 @@ def purge_harvested(tenant: str, origins: tuple[str, ...] = HARVESTED_ORIGINS,
         "kept": kept, "kept_note": notes,
         "next": order + [
             "/admin/fill?tenant=<account>&apply=1  (re-harvest)",
-            "/admin/ui?tab=content&tenant=<account>  (review — objections now "
+            "/admin/<account>/content  (review — objections now "
             "refuse to approve until you say what each one is true of)",
         ],
     }

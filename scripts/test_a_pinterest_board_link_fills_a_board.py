@@ -233,7 +233,7 @@ def main() -> int:
                               "url": "https://instagram.com/bacimilano"}, follow_redirects=False)
         loc = unquote(r.headers.get("location", ""))
         ck("a link that is not a Pinterest board is refused on the Brand tab, at the board",
-           r.status_code == 303 and "tab=brand" in loc and "not a Pinterest board" in loc
+           r.status_code == 303 and "/brand" in loc and "not a Pinterest board" in loc
            and loc.endswith("#board-lifestyle") and not scheduled, loc[:200])
         r = client.post("/admin/board_fill", params={"key": KEY},
                         data={"tenant": "baci", "board": "lifestyle", "url": BOARD + "?x=1"},

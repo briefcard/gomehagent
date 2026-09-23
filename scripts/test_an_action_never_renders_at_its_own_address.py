@@ -106,7 +106,7 @@ def main() -> int:
     c2.post("/admin/signin", data={"key": "s3cret"})
     r = c2.post("/admin/assets_decide", data={"tenant": "baci", "action": "approve"})
     ck("the action runs and returns to the content tab",
-       r.status_code == 303 and "/admin/ui" in r.headers.get("location", "")
+       r.status_code == 303 and "/content" in r.headers.get("location", "")
        and "signin" not in r.headers.get("location", ""), r.headers.get("location", "")[:60])
 
     print("\n— computed: no console action renders a page at its own address on a bad key —")
@@ -139,7 +139,7 @@ def main() -> int:
     KEY = os.environ["APPROVAL_SECRET"]
     r4 = c.get(f"/admin/work/nothing-was-ever-filed?key={KEY}")
     ck("an unknown id lands on the console, not on a bare page",
-       r4.status_code == 303 and "/admin/ui" in r4.headers.get("location", ""),
+       r4.status_code == 303 and r4.headers.get("location", "").startswith("/admin/"),
        f"{r4.status_code} {r4.headers.get('location', '')[:70]}")
     ck("  and says nothing is filed under it",
        "nothing+is+filed" in r4.headers.get("location", "").replace("%20", "+")
@@ -162,7 +162,7 @@ def main() -> int:
        r5.status_code == 303 and "kept no reviewable artifact" in loc5
        and "ad_copy" in loc5, loc5[:150])
     ck("  and lands the reader on that row's OWN account",
-       "tenant=baci" in loc5, loc5[:150])
+       loc5.startswith("/admin/baci/"), loc5[:150])
 
     print("\n" + ("ALL PASSED" if not _fail else f"{len(_fail)} FAILED: {_fail}"))
     return 1 if _fail else 0

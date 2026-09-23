@@ -85,15 +85,15 @@ def main() -> int:
                     data={"tenant": "baci", "name": "Gift guide"}, follow_redirects=False)
     loc = unquote(r.headers.get("location", ""))
     ck("creating a board returns to the Brand tab, at the boards",
-       r.status_code == 303 and "tab=brand" in loc and loc.endswith("#board")
+       r.status_code == 303 and "/brand" in loc and loc.endswith("#board")
        and "gift-guide" in kb.boards("baci"), loc[:160])
     r = client.post("/admin/board_pin", params={"key": KEY},
                     data={"tenant": "baci", "action": "pin_look", "board": "gift-guide",
                           "asset_ids": [linen]}, follow_redirects=False)
-    ck("  so does pinning", "tab=brand" in unquote(r.headers.get("location", "")))
+    ck("  so does pinning", "/brand" in unquote(r.headers.get("location", "")))
     r = client.post("/admin/board_remove", params={"key": KEY},
                     data={"tenant": "baci", "board": "gift-guide"}, follow_redirects=False)
-    ck("  and removing", "tab=brand" in unquote(r.headers.get("location", ""))
+    ck("  and removing", "/brand" in unquote(r.headers.get("location", ""))
        and "gift-guide" not in kb.boards("baci"))
 
     print("\n— COPY INSTRUCTIONS BY CHANNEL, ON THE BRAND TAB —")

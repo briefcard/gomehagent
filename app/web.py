@@ -273,6 +273,19 @@ async def _console_session(request: Request, call_next):
     return response
 
 
+def _console_url(tenant: str, tab: str = "content", *parts, **view) -> str:
+    """A console address, built where every console address is built.
+
+    `admin_ui.url` is the one builder (2026-09-23) and this is how a route
+    reaches it without importing the whole console module at the top of a
+    file that already imports enough. A redirect that hand-writes
+    `?tab=…&tenant=…` is a redirect that will still be doing it after the
+    next rename, which is the drift `test_console_routing` now refuses.
+    """
+    from . import admin_ui as ui
+    return ui.url(tenant, tab, *parts, **view)
+
+
 def _signin_first(request: Request):
     """Where an action lands when the session is missing: the sign-in door,
     remembering the page the action came from.
@@ -915,12 +928,8 @@ def brand_theme_page(request: Request, key: str = Depends(admin_key),
     from fastapi.responses import RedirectResponse
     if key != config.APPROVAL_SECRET:
         return _signin_first(request)
-    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-    if request.query_params.get("key"):
-        back += f"&key={quote(str(request.query_params['key']))}"
-    if request.query_params.get("ok"):
-        back += f"&ok={quote(str(request.query_params['ok']))}"
-    return RedirectResponse(back, 303)
+    return RedirectResponse(
+        _console_url(tenant, "brand", ok=request.query_params.get("ok", "")), 303)
 
 
 @app.post("/admin/brand_update")
@@ -987,9 +996,9 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
         from . import admin_ui as _aui
         if g not in _aui.GROUPINGS:
             return RedirectResponse(
-                f"/admin/ui?tab=kb&tenant={quote(tenant)}"
-                f"&err={quote(f'{g!r} is not a grouping — one of ' + ', '.join(_aui.GROUPINGS))}",
-                303)
+                _console_url(tenant, "kb",
+                              err=f"{g!r} is not a grouping — one of "
+                                  + ", ".join(_aui.GROUPINGS)), 303)
         fields["selection"] = {**dict(b.selection or {}), "entity_grouping": g}
 
     msgs = []
@@ -999,8 +1008,8 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
         res = kbm.set_brand(tenant, **fields)
         if not res.startswith("Updated"):
             return RedirectResponse(
-                f"/admin/ui?tab={'kb' if from_kb else 'brand'}&tenant={quote(tenant)}"
-                f"&err={quote(res[:200])}#identity", 303)
+                _console_url(tenant, "kb" if from_kb else "brand",
+                              err=res[:200]) + "#identity", 303)
         msgs.append(f"pickers now group by {fields['selection']['entity_grouping']}"
                     if from_kb else
                     ("channel instructions saved — they ride every draft of that "
@@ -1008,8 +1017,8 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
     if from_kb:
         # Back to the tab the control lives on, not the Brand tab.
         return RedirectResponse(
-            f"/admin/ui?tab=kb&tenant={quote(tenant)}"
-            f"&ok={quote(' · '.join(msgs) or 'nothing to change')}", 303)
+            _console_url(tenant, "kb",
+                          ok=" · ".join(msgs) or "nothing to change"), 303)
     # THE BRAND'S DEFAULT IMAGE MODEL (owner, 2026-09-08: every system
     # draws). `kb.set_image_model` is the one writer and refuses "both" and
     # a model without its key by name, so the refusal lands beside the card.
@@ -1018,8 +1027,7 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
         said = kbm.set_image_model(tenant, str(form.get("image_model", "")))
         if not said.startswith("Every system"):
             return RedirectResponse(
-                f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-                f"&err={quote(said[:200])}#model", 303)
+                _console_url(tenant, "brand", err=said[:200]) + "#model", 303)
         msgs.append(said)
     rule = str(form.get("add_banned", "")).strip()
     if rule:
@@ -1033,9 +1041,8 @@ async def brand_update(request: Request, key: str = Depends(admin_key)):
     if drop:
         msgs.append(kbm.remove_banned(tenant, drop)[:160])
     return RedirectResponse(
-        f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-        f"&ok={quote(' · '.join(msgs) or 'nothing to change')}"
-        f"#{'channels' if from_channels else 'model' if from_model else 'identity'}", 303)
+        _console_url(tenant, "brand", ok=" · ".join(msgs) or "nothing to change")
+        + f"#{'channels' if from_channels else 'model' if from_model else 'identity'}", 303)
 
 
 @app.post("/admin/brand_sources")
@@ -1095,11 +1102,8 @@ async def brand_sources(request: Request, key: str = Depends(admin_key)):
         n = res["landing_pages"]
         msgs.append(f"{n} landing page{'' if n == 1 else 's'} on file")
 
-    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-    if msgs:
-        back += f"&ok={quote(' · '.join(msgs))}"
-    if errs:
-        back += f"&err={quote(' · '.join(errs)[:200])}"
+    back = _console_url(tenant, "brand", ok=" · ".join(msgs),
+                        err=" · ".join(errs)[:200])
     return RedirectResponse(back + "#sources", 303)
 
 
@@ -1119,10 +1123,7 @@ async def brand_theme_derive(request: Request, key: str = Depends(admin_key)):
     got = brand_theme.derive(tenant)
     arg = (("ok", "derived — review below") if got.get("ok")
            else ("err", got.get("error", "derive failed")))
-    back = (f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-            f"&{arg[0]}={quote(arg[1])}")
-    if form.get("key"):
-        back += f"&key={quote(str(form['key']))}"
+    back = _console_url(tenant, "brand", **{arg[0]: arg[1]})
     return RedirectResponse(back, 303)
 
 
@@ -1151,8 +1152,8 @@ async def brand_voice_derive(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     if not tenant:
-        return RedirectResponse("/admin/ui?tab=brand"
-                                "&err=pick+an+account+first", 303)
+        return RedirectResponse(
+            _console_url("", "brand", err="pick an account first"), 303)
     _run_bg("voice", vc.derive, tenant)
     # THE ANCHOR GOES ON LAST. The sibling theme routes append `key=` to a
     # fragmentless URL, so copying their shape here put the credential AFTER
@@ -1160,11 +1161,8 @@ async def brand_voice_derive(request: Request, key: str = Depends(admin_key)):
     # a browser click only because the console session cookie was already
     # carrying it; an explicit ?key= URL with no session would have landed on
     # the sign-in door instead. Caught previewing the demo, 2026-08-28.
-    back = (f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-            f"&ok={quote('reading their site — the proposal appears below when it lands')}"
-            f"&derive_voice=1")
-    if form.get("key"):
-        back += f"&key={quote(str(form['key']))}"
+    back = _console_url(tenant, "brand", derive_voice=1,
+                        ok="reading their site — the proposal appears below when it lands")
     return RedirectResponse(back + "#voice", 303)
 
 
@@ -1187,10 +1185,7 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     got = brand_theme.approve(tenant, edits)
     arg = (("ok", "approved" + (" — " + got["note"] if got.get("note") else ""))
            if got.get("ok") else ("err", got.get("error", "approve failed")))
-    back = (f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-            f"&{arg[0]}={quote(arg[1])}")
-    if form.get("key"):
-        back += f"&key={quote(str(form['key']))}"
+    back = _console_url(tenant, "brand", **{arg[0]: arg[1]})
     return RedirectResponse(back, 303)
 
 
@@ -1209,9 +1204,7 @@ async def pictures_read(request: Request, key: str = Depends(admin_key)):
     form = await request.form()
     tenant = str(form.get("tenant", ""))
     got = pictures.read_pictures(tenant)
-    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&ok={quote(got.get('said', 'read'))}"
-    if form.get("key"):
-        back += f"&key={quote(str(form['key']))}"
+    back = _console_url(tenant, "brand", ok=got.get("said", "read"))
     return RedirectResponse(back, 303)
 
 
@@ -1229,9 +1222,7 @@ async def picture_kind(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     said = pictures.set_picture_kind(str(form.get("asset_id", "")), str(form.get("kind", "")))
     arg = ("ok" if "set by hand" in said else "err", said)
-    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&{arg[0]}={quote(arg[1])}"
-    if form.get("key"):
-        back += f"&key={quote(str(form['key']))}"
+    back = _console_url(tenant, "brand", **{arg[0]: arg[1]})
     return RedirectResponse(back, 303)
 
 
@@ -1285,9 +1276,7 @@ async def article_layout(request: Request, key: str = Depends(admin_key)):
         else:
             why = articles.file_pattern(tenant, got["pattern"], source_url=url)
             arg = ("err", why) if why else ("ok", f"every article for this brand is laid out like that now — {got['pattern'].get('name', '')}")
-    back = f"/admin/ui?tab=brand&tenant={quote(tenant)}&{arg[0]}={quote(arg[1])}"
-    if form.get("key"):
-        back += f"&key={quote(str(form.get('key')))}"
+    back = _console_url(tenant, "brand", **{arg[0]: arg[1]})
     return RedirectResponse(back, 303)
 
 
@@ -1321,8 +1310,6 @@ async def creative_note(request: Request, key: str = Depends(admin_key)):
     if back.startswith("/admin/"):
         sep = "&" if "?" in back else "?"
         url = f"{back}{sep}{arg[0]}={quote(arg[1])}"
-        if form.get("key"):
-            url += f"&key={quote(str(form.get('key')))}"
         return RedirectResponse(url, 303)
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
@@ -1783,8 +1770,7 @@ def admin_semrush_balance(key: str = Depends(admin_key), tenant: str = "",
         q = {"ok": f"Semrush has {units:,} API units left"
                    + (f" — {got['halted']}" if got["halted"]
                       else " — the door is open")}
-    return RedirectResponse("/admin/ui?" + urlencode(
-        {"key": key, "tab": "diagnostics", "tenant": tenant, **q}), 303)
+    return RedirectResponse(_console_url(tenant, "diagnostics", **q), 303)
 
 
 @app.get("/health/workers")
@@ -2728,8 +2714,7 @@ def tenant_set(key: str = Depends(admin_key), tenant: str = "", field: str = "",
         arg = (("err", res["error"]) if res.get("error")
                else ("ok", f"{field} saved for {tenant}"))
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&tenant={quote(tenant)}"
-            f"&{arg[0]}={quote(str(arg[1])[:200])}", 303)
+            _console_url(tenant, "accounts", **{arg[0]: str(arg[1])[:200]}), 303)
 
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
@@ -2789,13 +2774,12 @@ def tenant_add(key: str = Depends(admin_key), tenant: str = "", name: str = "",
         # JSON stays for hand calls.
         if not ui:
             return None
-        from urllib.parse import quote as _q
-
         from fastapi.responses import RedirectResponse
-        arg = f"err={_q(err, safe='')}" if err else f"ok={_q(ok, safe='')}"
+        # THE BUILDER ENCODES. Percent-encoding here as well produced
+        # `ok=Acme%2520Co` — a literal % in the sentence the reader is shown.
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&sub=advanced"
-            f"&tenant={_q(to or tenant, safe='')}&{arg}", 303)
+            _console_url(to or tenant, "accounts", sub="advanced",
+                         **({"err": err} if err else {"ok": ok})), 303)
 
     tenant = (tenant or "").strip().lower()
     if not tenant or not tenant.replace("_", "").replace("-", "").isalnum():
@@ -2857,13 +2841,10 @@ def user_add(key: str = Depends(admin_key), chat_id: str = "", name: str = "",
         # dead-end on raw JSON (step 4, spec §11).
         if not ui:
             return None
-        from urllib.parse import quote as _q
-
         from fastapi.responses import RedirectResponse
-        arg = f"err={_q(err, safe='')}" if err else f"ok={_q(ok, safe='')}"
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&sub=advanced"
-            f"&tenant={_q(tenant, safe='')}&{arg}", 303)
+            _console_url(tenant, "accounts", sub="advanced",
+                         **({"err": err} if err else {"ok": ok})), 303)
 
     if role not in ("owner", "client", "freelancer"):
         e = "role must be owner | client | freelancer"
@@ -3104,9 +3085,8 @@ def _console_body(request: Request, key: str, tab: str, tenant: str,
 
         from fastapi.responses import RedirectResponse
         return RedirectResponse(
-            f"/admin/ui?tab=content&tenant={_uq(tenant or '', safe='')}"
-            f"&err={_uq(f'No tab named {tab!r} — landed on Review.', safe='')}",
-            303)
+            _console_url(tenant or "", "content",
+                         err=f"No tab named {tab!r} — landed on Review."), 303)
     q = request.query_params
     return ui.render(link_key, tenant, msg=q.get("ok", ""), err=q.get("err", ""),
                      link=q.get("link", ""), ilink=q.get("ilink", ""),
@@ -3131,7 +3111,7 @@ def kb_add(key: str = Depends(admin_key), tenant: str = "", step: str = "",
     if bp:
         return _back_to_kb(tenant, ok=str(result)[:200], back=bp)
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(f"/admin/ui?key={key}&tab=kb&tenant={tenant}",
+    return RedirectResponse(_console_url(tenant, "kb"),
                             status_code=303)
 
 
@@ -3154,7 +3134,7 @@ def kb_unknown(key: str = Depends(admin_key), tenant: str = "", id: str = "",
     if bp:
         return _back_to_kb(tenant, ok=str(result)[:200], back=bp)
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(f"/admin/ui?key={key}&tab=kb&tenant={tenant}",
+    return RedirectResponse(_console_url(tenant, "kb"),
                             status_code=303)
 
 
@@ -3179,8 +3159,8 @@ def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "",
             from fastapi.responses import RedirectResponse
             from urllib.parse import quote as _q
             return RedirectResponse(
-                f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
-                f"&err={_q(f'unknown account {tenant!r}', safe='')}",
+                _console_url(tenant, "accounts", sub="people",
+                              err=f"unknown account {tenant!r}"),
                 status_code=303)
         return {"error": f"unknown tenant {tenant!r}"}
     token = secrets.token_urlsafe(24)
@@ -3194,8 +3174,8 @@ def intake_new(key: str = Depends(admin_key), tenant: str = "", label: str = "",
         from fastapi.responses import RedirectResponse
         from urllib.parse import quote as _q
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
-            f"&ilink={_q(url, safe='')}", status_code=303)
+            _console_url(tenant, "accounts", sub="people", ilink=url),
+            status_code=303)
     return {"ok": True, "tenant": tenant,
             "url": url,
             "expires_in_days": days,
@@ -3229,8 +3209,8 @@ def intake_revoke(key: str = Depends(admin_key), token: str = "",
                 from fastapi.responses import RedirectResponse
                 from urllib.parse import quote as _q
                 return RedirectResponse(
-                    f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
-                    f"&err={_q('no such intake link', safe='')}", status_code=303)
+                    _console_url(tenant, "accounts", sub="people",
+                                  err="no such intake link"), status_code=303)
             return {"error": "no such link"}
         row.status = "revoked"
         if not tenant:
@@ -3240,9 +3220,9 @@ def intake_revoke(key: str = Depends(admin_key), token: str = "",
         from fastapi.responses import RedirectResponse
         from urllib.parse import quote as _q
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&sub=people&tenant={_q(tenant, safe='')}"
-            f"&ok={_q('Intake link revoked — any copy of it now shows no longer active.', safe='')}",
-            status_code=303)
+            _console_url(tenant, "accounts", sub="people",
+                          ok="Intake link revoked — any copy of it now shows "
+                             "no longer active."), status_code=303)
     return {"ok": True, "revoked": token}
 
 
@@ -3453,7 +3433,7 @@ def oauth_callback(provider: str, request: Request, code: str = "",
                 "started for. Nothing was connected — start again from the "
                 "connect page.</h3>", status_code=400)
     back = (f"/connect/{data['t']}" if data.get("t")
-            else f"/admin/ui?tab=accounts&tenant={quote(data.get('tenant', ''))}")
+            else _console_url(data.get("tenant", ""), "accounts"))
 
     # The user declining is the common non-success and it is not an error.
     if error or not code:
@@ -3645,9 +3625,8 @@ def _plan_back(tenant: str, key: str, msg: str = "", err: str = "",
     # `ok`, not `msg` — the name every other tab's redirect already uses. A
     # second name for one thing is how a message silently stops appearing.
     # `sub` lands the reader back in the room the control was pressed in.
-    return RedirectResponse("/admin/ui?" + urlencode(
-        {k: v for k, v in {"key": key, "tab": "plan", "tenant": tenant,
-                           "sub": sub, "ok": msg, "err": err}.items() if v}), 303)
+    return RedirectResponse(
+        _console_url(tenant, "plan", sub=sub, ok=msg, err=err), 303)
 
 
 @app.get("/admin/blog_set")
@@ -3674,10 +3653,8 @@ def admin_blog_set(key: str = Depends(admin_key), tenant: str = "",
 
     def _land(msg: str = "", err: str = ""):
         if back == "brand":
-            return RedirectResponse("/admin/ui?" + "&".join(
-                f"{k}={quote(v)}" for k, v in
-                (("key", key), ("tab", "brand"), ("tenant", tenant),
-                 ("ok", msg), ("err", err)) if v) + "#blog", 303)
+            return RedirectResponse(
+                _console_url(tenant, "brand", ok=msg, err=err) + "#blog", 303)
         return _plan_back(tenant, key, msg=msg, err=err)
 
     blog_id = (blog_id or "").strip()
@@ -3828,9 +3805,7 @@ def admin_workroom(request: Request, output_id: str,
                 if _found else
                 "nothing is filed under that id — the link is older than the "
                 "row it pointed at, or the account was reset.")
-        return RedirectResponse("/admin/ui?" + urlencode(
-            {k: v for k, v in {"key": key, "tab": "content", "tenant": _t,
-                               "err": said}.items() if v}), 303)
+        return RedirectResponse(_console_url(_t, "content", err=said), 303)
     return HTMLResponse(admin_ui_mod.render_workroom(
         key, output_id, art, kw, ap, ok=ok, err=err))
 
@@ -3850,7 +3825,7 @@ async def admin_article_save(request: Request, key: str = Depends(admin_key)):
         from fastapi.responses import RedirectResponse
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?{arg}", 303)
 
     art, kw, ap = _article_bundle(output_id)
     if art is None:
@@ -3945,7 +3920,7 @@ async def campaign_meta_save(request: Request, key: str = Depends(admin_key)):
     def back(ok: str = "", err: str = ""):
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?{arg}", 303)
 
     if not subject:
         return back(err="an empty subject would push an unnamed campaign — "
@@ -4047,7 +4022,7 @@ async def ad_variant_save(request: Request, key: str = Depends(admin_key)):
     def back(ok: str = "", err: str = ""):
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?{arg}", 303)
 
     art, batch, v, bad = _ad_batch_bundle(output_id, n)
     if bad or v is None:
@@ -4093,7 +4068,7 @@ async def ad_variant_drop(request: Request, key: str = Depends(admin_key)):
     def back(ok: str = "", err: str = ""):
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?{arg}", 303)
 
     art, batch, v, bad = _ad_batch_bundle(output_id, n)
     if bad or v is None:
@@ -4327,7 +4302,7 @@ async def ad_batch_decide(request: Request, key: str = Depends(admin_key)):
     def back(ok: str = "", err: str = ""):
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?{arg}", 303)
 
     art, batch, _v, bad = _ad_batch_bundle(output_id)
     if bad:
@@ -4925,7 +4900,7 @@ def admin_article_published(key: str = Depends(admin_key), output_id: str = "",
     def back(ok: str = "", err: str = ""):
         arg = f"err={quote(err[:300])}" if err else f"ok={quote(ok[:300])}"
         return RedirectResponse(
-            f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg}", 303)
+            f"/admin/work/{quote(output_id)}?{arg}", 303)
 
     url = (url or "").strip()
     if not url.startswith(("http://", "https://")):
@@ -5305,10 +5280,10 @@ def admin_situation_add(key: str = Depends(admin_key), tenant: str = "",
                            ok=(got[:200] + " — claims may carry it now")
                            if ok else "",
                            err="" if ok else got[:300], back=bp)
-    arg = (f"ok={quote(got[:200] + ' — claims may carry it now')}" if ok
-           else f"err={quote(got[:300])}")
     return RedirectResponse(
-        f"/admin/ui?key={quote(key)}&tab=kb&tenant={quote(tenant)}&{arg}", 303)
+        _console_url(tenant, "kb",
+                     **({"ok": got[:200] + " — claims may carry it now"} if ok
+                        else {"err": got[:300]})), 303)
 
 
 @app.get("/admin/keywords_propose")
@@ -5728,7 +5703,7 @@ async def connect_revoke_post(request: Request, key: str = Depends(admin_key)):
     result = cred.revoke(str(form.get("tenant", "")),
                          str(form.get("provider", "")),
                          str(form.get("site", "")))
-    return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(result)}", 303)
+    return RedirectResponse(_console_url("", "accounts", ok=result), 303)
 
 
 @app.post("/admin/connect_save")
@@ -5758,7 +5733,7 @@ async def connect_save(request: Request, key: str = Depends(admin_key)):
     spec = cred.PROVIDERS.get(provider)
     if not spec:
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&err={quote(f'unknown provider {provider}')}",
+            _console_url("", "accounts", err=f'unknown provider {provider}'),
             status_code=303)
 
     meta = {f: str(form.get(f, "")) for f in spec["also"]}
@@ -5768,10 +5743,10 @@ async def connect_save(request: Request, key: str = Depends(admin_key)):
         msg = f"{spec['name']} connected for {tenant}"
         if res.get("detail"):
             msg += f" — {res['detail']}"
-        return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(msg)}",
+        return RedirectResponse(_console_url("", "accounts", ok=msg),
                                 status_code=303)
     return RedirectResponse(
-        f"/admin/ui?tab=accounts&err={quote(spec['name'] + ': ' + res['error'])}",
+        _console_url("", "accounts", err=spec['name'] + ': ' + res['error']),
         status_code=303)
 
 
@@ -5798,9 +5773,9 @@ async def connect_test_post(request: Request, key: str = Depends(admin_key)):
     if r["ok"]:
         msg = (f"{name}{f' ({site})' if site else ''} still works"
                + (f" — {r['detail']}" if r.get("detail") else ""))
-        return RedirectResponse(f"/admin/ui?tab=accounts&ok={quote(msg)}", 303)
+        return RedirectResponse(_console_url("", "accounts", ok=msg), 303)
     return RedirectResponse(
-        f"/admin/ui?tab=accounts&err={quote(f'{name}: ' + r['error'])}", 303)
+        _console_url("", "accounts", err=f'{name}: ' + r['error']), 303)
 
 
 @app.post("/admin/connect_link")
@@ -5824,7 +5799,7 @@ async def connect_link_post(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     if not tn.get(tenant):
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&err={quote(f'unknown tenant {tenant!r}')}", 303)
+            _console_url("", "accounts", err=f'unknown tenant {tenant!r}'), 303)
     try:
         days = max(1, min(365, int(str(form.get("days", "30")) or 30)))
     except ValueError:
@@ -5836,7 +5811,7 @@ async def connect_link_post(request: Request, key: str = Depends(admin_key)):
             expires_at=db.utcnow() + _dt.timedelta(days=days)))
         s.commit()
     url = f"{config.PUBLIC_BASE_URL.rstrip('/')}/connect/{token}"
-    return RedirectResponse(f"/admin/ui?tab=accounts&link={quote(url)}", 303)
+    return RedirectResponse(_console_url(tenant, "accounts", link=url), 303)
 
 
 @app.get("/intake/{token}", response_class=HTMLResponse)
@@ -5911,7 +5886,7 @@ def claim_review(key: str = Depends(admin_key), claim_id: str = "",
 
             from fastapi.responses import RedirectResponse
             return RedirectResponse(
-                f"/admin/ui?key={quote(key)}&tab=kb&tenant={quote(tenant)}", 303)
+                _console_url(tenant, "kb"), 303)
         return _back_to_content(tenant,
                                 anchor=(f"c-{next}" if next else "proposals"),
                                 cpage=cpage)
@@ -6011,25 +5986,19 @@ def _back_to_systems(key: str, msg: str = "", tenant: str = "",
     from urllib.parse import quote
 
     from fastapi.responses import RedirectResponse
-    url = f"/admin/ui?key={key}&tab=systems"
-    if tenant:
-        url += f"&tenant={quote(tenant)}"
-    if system:
-        url += f"&system={quote(system)}"
+    view = {}
     try:
         if int(ppage) > 1:
-            url += f"&ppage={int(ppage)}"
+            view["ppage"] = int(ppage)
     except (TypeError, ValueError):
         pass
-    if msg:
-        # `ok=`, the key the dispatcher actually reads — this helper wrote
-        # `msg=` for as long as it existed, so every flash it ever carried
-        # rendered nowhere. The same one-writer-one-reader mismatch as the
-        # bg-status labels, found by the same sweep.
-        url += f"&ok={quote(msg)}"
-    if err:
-        url += f"&err={quote(err)}"
-    return RedirectResponse(url, status_code=303)
+    # `ok=`, the key the dispatcher actually reads — this helper wrote `msg=`
+    # for as long as it existed, so every flash it ever carried rendered
+    # nowhere. The same one-writer-one-reader mismatch as the bg-status
+    # labels, found by the same sweep.
+    return RedirectResponse(
+        _console_url(tenant, "systems", *( [system] if system else [] ),
+                     ok=msg, err=err, **view), status_code=303)
 
 
 @app.get("/admin/calibrate_classify")
@@ -6862,16 +6831,14 @@ def _back_to_system(tenant: str, system: str, ok: str = "", err: str = "",
     from urllib.parse import quote
 
     from fastapi.responses import RedirectResponse
-    q = f"/admin/ui?tab=systems&tenant={quote(tenant)}&system={quote(system)}"
-    if ok:
-        q += f"&ok={quote(ok)}"
-    if err:
-        q += f"&err={quote(err)}"
+    view = {"ok": ok, "err": err}
     try:
         if int(ppage) > 1:
-            q += f"&ppage={int(ppage)}"
+            view["ppage"] = int(ppage)
     except (TypeError, ValueError):
         pass
+    q = _console_url(tenant, "systems", system,
+                     **{k: v for k, v in view.items() if v})
     if anchor:
         q += f"#{anchor}"
     return RedirectResponse(q, status_code=303)
@@ -7007,9 +6974,8 @@ async def ship_decide(request: Request, key: str = Depends(admin_key)):
         from urllib.parse import quote
 
         from fastapi.responses import RedirectResponse
-        url = (f"/admin/ui?tab=systems&tenant={quote(tenant)}"
-               f"&system={quote(sys_key)}&wf=waiting"
-               f"&ok={quote(str(said)[:400])}")
+        url = _console_url(tenant, "systems", sys_key, "waiting",
+                           ok=str(said)[:400])
         return RedirectResponse(url, 303)
     return _back_to_content(tenant, msg=str(said)[:400], sub="ship",
                             cpage=pg,
@@ -7381,9 +7347,8 @@ async def entity_group_post(request: Request, key: str = Depends(admin_key)):
     def back(msg: str = "", err: str = "") -> RedirectResponse:
         if bp:
             return _back_to_kb(tenant, ok=msg, err=err, back=bp)
-        q = f"&ok={quote(msg)}" if msg else (f"&err={quote(err)}" if err else "")
         return RedirectResponse(
-            f"/admin/ui?tab=kb&tenant={quote(tenant)}{q}#groups", 303)
+            _console_url(tenant, "kb", ok=msg, err=err) + "#groups", 303)
 
     if not tenant or not group:
         return back(err="Pick a group first.")
@@ -8334,10 +8299,11 @@ async def person_save(request: Request, key: str = Depends(admin_key)):
     got = portal.save_person(
         email=str(form.get("email", "")), name=str(form.get("name", "")),
         tenant=tenant, access=str(form.get("access", "read_only")))
-    q = (f"&ok={quote(got['email'] + ' can sign in (' + got['access'].replace('_', ' ') + ')')}"
-         if got.get("ok") else f"&err={quote(got.get('error', ''))}")
-    return RedirectResponse(f"/admin/ui?tab=accounts&tenant={quote(tenant)}{q}#people",
-                            status_code=303)
+    said = (got["email"] + " can sign in ("
+            + got["access"].replace("_", " ") + ")") if got.get("ok") else ""
+    return RedirectResponse(
+        _console_url(tenant, "accounts", ok=said, err="" if got.get("ok")
+                     else got.get("error", "")) + "#people", status_code=303)
 
 
 @app.post("/admin/person_access")
@@ -8360,7 +8326,7 @@ async def person_access(request: Request, key: str = Depends(admin_key)):
     else:
         msg = "unknown action"
     return RedirectResponse(
-        f"/admin/ui?tab=accounts&tenant={quote(tenant)}&ok={quote(msg)}#people",
+        _console_url(tenant, "accounts", ok=msg) + "#people",
         status_code=303)
 
 
@@ -8384,13 +8350,13 @@ def portal_link(key: str = Depends(admin_key), email: str = "",
 
         from fastapi.responses import RedirectResponse
         url = (got or {}).get("url") or (got or {}).get("link") or ""
-        base = (f"/admin/ui?tab=accounts&sub=people"
-                f"&tenant={_q(tenant, safe='')}")
         if url:
-            return RedirectResponse(base + f"&plink={_q(url, safe='')}", 303)
+            return RedirectResponse(
+                _console_url(tenant, "accounts", sub="people", plink=url), 303)
         return RedirectResponse(
-            base + "&err=" + _q(str((got or {}).get("error")
-                                    or "could not mint a link"), safe=""), 303)
+            _console_url(tenant, "accounts", sub="people",
+                         err=str((got or {}).get("error")
+                                 or "could not mint a link")), 303)
     return got
 
 
@@ -8464,10 +8430,10 @@ def verify_tenant(key: str = Depends(admin_key), tenant: str = "",
         from fastapi.responses import RedirectResponse
         _run_bg(f"verify:{tenant}", _run_and_store, tenant)
         return RedirectResponse(
-            f"/admin/ui?tab=accounts&tenant={_q(tenant, safe='')}"
-            + "&ok=" + _q("testing every connection in the background — "
-                          "the per-provider result lands on this card; "
-                          "refresh in a moment", safe=""), 303)
+            _console_url(tenant, "accounts",
+                         ok="testing every connection in the background — "
+                            "the per-provider result lands on this card; "
+                            "refresh in a moment"), 303)
     if not tenant:
         return {"tenants": [tenants.verify(t.key) for t in tenants.all_tenants()]}
     return tenants.verify(tenant)
@@ -8497,11 +8463,7 @@ def _back_to_brand(tenant: str, msg: str = "", err: str = "", anchor: str = ""):
     what happened, said once, and the reader put back at the card."""
     from urllib.parse import quote
     from fastapi.responses import RedirectResponse
-    url = f"/admin/ui?tab=brand&tenant={quote(tenant)}"
-    if msg:
-        url += f"&ok={quote(msg[:200])}"
-    if err:
-        url += f"&err={quote(err[:200])}"
+    url = _console_url(tenant, "brand", ok=msg[:200], err=err[:200])
     if anchor:
         url += f"#{anchor}"
     return RedirectResponse(url, 303)
@@ -8547,26 +8509,17 @@ def _back_to_content(tenant: str, started: str = "", err: str = "",
                     "sync": "catalogue", "purge": "claims"}
     sub = sub or _STARTED_SUB.get(started, "")
 
-    q = f"/admin/ui?tab=content&tenant={tenant}"
-    if sub:
-        q += f"&sub={sub}"
+    view = {"sub": sub, "started": started, "err": err, "ok": msg}
     # The view's filters travel too (owner, 2026-08-27: filtering the claim
     # queue) — a decision that drops the filter costs the reader their
     # place as surely as one that drops the page. By NAME, never echoed.
-    for k, v in (keep or {}).items():
-        if v:
-            q += f"&{quote(str(k), safe='')}={quote(str(v), safe='')}"
-    if started:
-        q += f"&started={started}"
-    if err:
-        q += f"&err={quote(err)}"
-    if msg:
-        q += f"&ok={quote(msg)}"
+    view.update({str(k): v for k, v in (keep or {}).items() if v})
     try:
         if int(cpage) > 1:
-            q += f"&cpage={int(cpage)}"
+            view["cpage"] = int(cpage)
     except (TypeError, ValueError):
         pass
+    q = _console_url(tenant, "content", **{k: v for k, v in view.items() if v})
     if anchor:
         q += f"#{anchor}"
     return RedirectResponse(q, status_code=303)
@@ -8640,9 +8593,8 @@ async def plan_questions(request: Request, key: str = Depends(admin_key)):
 
     def _back(msg: str, ok: bool = False) -> RedirectResponse:
         return RedirectResponse(
-            f"/admin/ui?tab=plan&tenant={quote(tenant)}&sub=progress"
-            f"&key={quote(key)}&{'ok' if ok else 'err'}={quote(msg)}"
-            f"#progress", 303)
+            _console_url(tenant, "plan", sub="progress",
+                         **{"ok" if ok else "err": msg}) + "#progress", 303)
 
     from . import keywords as kwm, planner as plm, systems as sysm
     row = sysm.find(tenant, "blog")
@@ -8690,8 +8642,7 @@ async def plan_supports(request: Request, key: str = Depends(admin_key)):
 
     def _back(msg: str, ok: bool = False) -> RedirectResponse:
         return RedirectResponse(
-            f"/admin/ui?tab=plan&tenant={quote(tenant)}"
-            f"&key={quote(key)}&{'ok' if ok else 'err'}={quote(msg)}", 303)
+            _console_url(tenant, "plan", **{"ok" if ok else "err": msg}), 303)
 
     from . import keywords as kwm, planner as plm, systems as sysm
     row = sysm.find(tenant, "blog")
@@ -8853,23 +8804,12 @@ def _back_to_kb(tenant: str, err: str = "", ok: str = "", anchor: str = "",
     from urllib.parse import quote
 
     from fastapi.responses import RedirectResponse
+    view = {"err": err, "ok": ok}
     if back:
-        q = (f"/admin/ui?tab={quote(back.get('tab') or 'schema')}"
-             f"&tenant={quote(tenant)}")
-        if back.get("sub"):
-            q += f"&sub={quote(back['sub'])}"
-        if back.get("state"):
-            q += f"&state={quote(back['state'])}"
-        if back.get("page"):
-            q += f"&page={quote(back['page'])}"
-        if back.get("q"):
-            q += f"&q={quote(back['q'])}"
-    else:
-        q = f"/admin/ui?tab=kb&tenant={tenant}"
-    if err:
-        q += f"&err={quote(err)}"
-    if ok:
-        q += f"&ok={quote(ok)}"
+        view.update({k: back.get(k) for k in ("sub", "state", "page", "q")
+                     if back.get(k)})
+    q = _console_url(tenant, (back.get("tab") or "schema") if back else "kb",
+                     **{k: v for k, v in view.items() if v})
     if anchor:
         q += f"#{anchor}"
     return RedirectResponse(q, status_code=303)
@@ -9519,8 +9459,9 @@ async def claim_edit(request: Request, key: str = Depends(admin_key)):
         context=str(form.get("context", "")) if form.get("context") is not None else None,
         tags=[str(t) for t in form.getlist("tags")])
     if msg != "Saved." and "catalogue" in msg:
-        return HTMLResponse(f"<h3>{msg}</h3><p><a href='/admin/ui?tab=content"
-                            f"&tenant={tenant}'>Back</a></p>", status_code=400)
+        return HTMLResponse(
+            f"<h3>{msg}</h3><p><a href='{_console_url(tenant, 'content')}'>Back</a></p>",
+            status_code=400)
     if action == "approve":
         # May refuse — an untagged claim cannot be approved, and the tab will
         # still show it with the reason.
@@ -9589,8 +9530,7 @@ def compliance_scan(key: str = Depends(admin_key), tenant: str = "",
         # had just been taken off.
         from fastapi.responses import RedirectResponse as _RR
         from urllib.parse import quote as _qt
-        return _RR(f"/admin/ui?tab=assurance&tenant={_qt(tenant)}"
-                   f"&started=scan", 303)
+        return _RR(_console_url(tenant, "assurance", started="scan"), 303)
     result = compliance.scan(tenant, limit=limit, since=since)
     compliance.record_scan(tenant, result)
     return result

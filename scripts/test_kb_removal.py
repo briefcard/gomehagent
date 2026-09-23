@@ -181,7 +181,7 @@ def main() -> int:
                     data={"key": KEY, "tenant": "baci", "kind": "entity",
                           "id": e2.id}, follow_redirects=False)
     ck("it redirects back to Knowledge with what it did",
-       r.status_code == 303 and "tab=kb" in str(r.headers.get("location")),
+       r.status_code == 303 and "/kb" in str(r.headers.get("location")),
        str(r.headers.get("location"))[:90])
     ck("…and the row is actually gone", e2.key not in keys())
 

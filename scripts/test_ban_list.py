@@ -161,10 +161,10 @@ def main() -> int:
                data={"tenant": "baci", "drop_banned": "made in Italy"},
                follow_redirects=False)
     ck("the lift round-trips through the console and lands on Brand",
-       r.status_code == 303 and "tab=brand" in r.headers["location"]
+       r.status_code == 303 and "/brand" in r.headers["location"]
        and "made in Italy" not in kb.banned_claims("baci"))
     ck("…and the flash says what happened",
-       "no+longer+blocked" in r.headers["location"]
+       "no%20longer%20blocked" in r.headers["location"]
        or "no%20longer%20blocked" in r.headers["location"]
        or "not+blocked" in r.headers["location"], r.headers["location"][:160])
     c.post("/admin/brand_update",

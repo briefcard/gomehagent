@@ -133,7 +133,8 @@ def main() -> int:
        "catches() cannot: it filters on r.caught")
     _page = admin_ui.render_assurance("s3cret", "baci")
     ck("the per-system gap is a link, not a dead number",
-       "gap=reader:not-chosen" in _page, "a number you cannot open is faith")
+       "gap=reader%3Anot-chosen" in _page or "gap=reader:not-chosen" in _page,
+       "a number you cannot open is faith")
     _d = admin_ui.render_assurance("s3cret", "baci", gap="reader:not-chosen")
     ck("  and it opens the runs behind it",
        "Runs that drafted without" in _d and "nobody in particular" in _d,

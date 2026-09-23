@@ -368,9 +368,10 @@ def main() -> int:
     from fastapi.testclient import TestClient
     c = TestClient(web.app)
     r = c.post("/admin/creative_note?key=s3cret", data={"key": "s3cret", "tenant": "baci", "kind": "article",
-                                                        "said": "Put the table above the definitions.", "back": "/admin/ui?tab=systems"}, follow_redirects=False)
+                                                        "said": "Put the table above the definitions.",
+                                                        "back": "/admin/baci/systems"}, follow_redirects=False)
     ck("the note posts from the console, comes back where it was typed, and is kept",
-       r.status_code == 303 and "tab=systems" in r.headers.get("location", "")
+       r.status_code == 303 and "/systems" in r.headers.get("location", "")
        and any("Put the table above" in n["said"] for n in ex.notes("baci", ex.ARTICLE)))
     r = c.post("/admin/creative_note?key=s3cret", data={"key": "s3cret", "tenant": "baci", "kind": "article",
                                                         "drop": "Put the table above the definitions."}, follow_redirects=False)
@@ -409,7 +410,7 @@ def main() -> int:
                               "devices": ["a numbered list"], "voice_of_layout": "tight"}
     r = c.post("/admin/article_layout?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "https://rival.test/a"}, follow_redirects=False)
     ck("pasting an article's address reads its layout once and files it for the brand",
-       r.status_code == 303 and "tab=brand" in r.headers.get("location", "")
+       r.status_code == 303 and "/brand" in r.headers.get("location", "")
        and not ar.pattern("baci").get("default") and ar.pattern("baci")["source_url"] == "https://rival.test/a")
     r = c.post("/admin/article_layout?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "not a url"}, follow_redirects=False)
     ck("a bad address is refused with a sentence", r.status_code == 303 and "err=" in r.headers.get("location", ""))
