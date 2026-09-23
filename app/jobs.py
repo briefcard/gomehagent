@@ -564,8 +564,14 @@ def run_one(job_id: str) -> dict:
     finally:
         stop.set()
     run_id = str((result or {}).get("run_id") or "") if isinstance(result, dict) else ""
-    finish(job_id, "done", _summary(result), run_id=run_id)
-    return {"ok": True, "state": "done", "detail": _summary(result)}
+    # A RUN THAT MADE NOTHING IS NOT DONE. `skill.run` catches its own errors
+    # and returns `status: failed` (or refused/blocked at a gate) rather than
+    # raising, so a campaign email that could not be made landed here as
+    # "ran" with the failure buried in the detail.
+    status = str((result or {}).get("status") or "") if isinstance(result, dict) else ""
+    state = "failed" if status in ("failed", "refused", "blocked") else "done"
+    finish(job_id, state, _summary(result), run_id=run_id)
+    return {"ok": state == "done", "state": state, "detail": _summary(result)}
 
 
 def drain(tenant: str, holder: str, limit: int = 4) -> dict:

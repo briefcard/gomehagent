@@ -239,6 +239,15 @@ def brief_problem(got) -> str:
 # 2. THE KIT — the brand's material, gathered once
 # ---------------------------------------------------------------------------
 
+def _entity_row(e) -> dict:
+    """One product as the maker reads it."""
+    a = getattr(e, "attributes", None) or {}
+    desc = re.sub(r"<[^>]+>", " ", str(getattr(e, "description", "") or ""))
+    return {"key": e.key, "name": e.name, "type": getattr(e, "type", "") or "",
+            "url": str(a.get("url") or ""), "price": str(getattr(e, "price", "") or a.get("price") or ""),
+            "image": str(a.get("image") or ""), "description": _norm(desc)[:1200]}
+
+
 def kit(tenant: str) -> dict:
     """Everything the brand has that an email may be made of. Every item is
     already on file and already approved — this gathers, it invents nothing."""
@@ -246,13 +255,10 @@ def kit(tenant: str) -> dict:
     b = kb.brand(tenant)
     theme = brand_theme.filled(brand_theme.live_theme(tenant) or {})
     voice = (getattr(b, "voice", None) or {}) if b else {}
-    ents = []
-    for e in kb.entities(tenant)[:60]:
-        a = getattr(e, "attributes", None) or {}
-        desc = re.sub(r"<[^>]+>", " ", str(getattr(e, "description", "") or ""))
-        ents.append({"key": e.key, "name": e.name, "type": getattr(e, "type", "") or "",
-                     "url": str(a.get("url") or ""), "price": str(getattr(e, "price", "") or a.get("price") or ""),
-                     "image": str(a.get("image") or ""), "description": _norm(desc)[:1200]})
+    # a SAMPLE of the catalogue for the maker's prompt — the subject of the
+    # send is added by `run` whatever its place, so this cap never decides
+    # which products exist
+    ents = [_entity_row(e) for e in kb.entities(tenant)[:60]]
     pics = []
     for a in kb.assets(tenant):
         if getattr(a, "rights", "") != kb.OWNED or getattr(a, "kind", "image") != "image" or not a.url:
@@ -1789,6 +1795,21 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         story.append(f"Held to what you said about this design: {_ref_note[:120]}")
     if _ex.notes(tenant, _ex.EMAIL):
         story.append(f"Held to what you have said about this brand's emails ({len(_ex.notes(tenant, _ex.EMAIL))} note(s)).")
+    if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
+        # THE SUBJECT IS LOOKED UP IN THE CATALOGUE, NOT IN THE KIT'S SAMPLE.
+        # The kit carries sixty products for the prompt; a store has hundreds,
+        # and until 2026-09-23 any subject past the sixtieth was reported as
+        # "not on file" — Baci's campaign email failed that way on a product
+        # it stocks.
+        from . import kb as _kbx
+        hit = next((e for e in _kbx.entities(tenant, available_only=False)
+                    if e.key == entity_key), None)
+        if hit is not None and getattr(hit, "availability", "available") != "available":
+            story.append(f"{hit.name!r} is on file but not available "
+                         f"({hit.availability}) — an email should not sell it.")
+            return _finish(FAILED, brief=brief_)
+        if hit is not None:
+            kit_["entities"].insert(0, _entity_row(hit))
     if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
         # THE SUBJECT MUST EXIST. The owner's run asked for a key that was not
         # on file and the maker quietly sold a different product (2026-09-17).
