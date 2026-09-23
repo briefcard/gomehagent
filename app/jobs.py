@@ -458,6 +458,11 @@ def _summary(result) -> str:
     items = result.get("items")
     if isinstance(items, list):
         bits.append(f"{len(items)} produced")
+        # the run's result lands where a person decides it; the queue row is
+        # where they will look first now that the press no longer waits
+        if any(isinstance(i, dict) and i.get("disposition") == "needs_approval"
+               for i in items):
+            bits.append("waiting on you")
     for k in ("status", "approval_id"):
         if result.get(k):
             bits.append(f"{k} {result[k]}")

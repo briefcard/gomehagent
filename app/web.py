@@ -7097,7 +7097,7 @@ def plan_run(key: str = Depends(admin_key), id: str = "", tenant: str = "",
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
-    from . import skill, systems
+    from . import systems
     row = systems.find(tenant, system)
     if not row:
         return _back_to_system(tenant, system,
@@ -7108,47 +7108,29 @@ def plan_run(key: str = Depends(admin_key), id: str = "", tenant: str = "",
         if ok.get("error"):
             return _back_to_system(tenant, system, err=ok["error"],
                                    anchor=f"plan-{id}", ppage=ppage)
+    # THE RUN GOES TO THE WORKER. It ran here, inside the request, which is
+    # why "Run now" on a campaign email held the page open for the whole
+    # generation — minutes of model calls and a browser in the process that
+    # serves the console (owner, 2026-09-23: "I still see the website load
+    # forever on an email generation run"). The approval above stays here:
+    # it is instant, and a refusal belongs on the page that asked.
     wf = systems.workflow(row.key)
-    out = skill.run(wf["skill"] or row.key, tenant, trigger="manual",
-                    run_id=id)
-    status = out.get("status", "")
-    if status in ("refused", "blocked"):
-        # The plan is untouched — take_plan refuses before the flip, and a
-        # blocked preflight on a consume files nothing.
-        why = "; ".join(out.get("blocked_on") or [])[:300]
-        return _back_to_system(tenant, system,
-                               err=f"Did not run — {why}",
+    put = _jobs.enqueue(tenant, "system_run", system_key=system,
+                        label=f"{row.name or system} — plan run",
+                        payload={"key": wf["skill"] or row.key,
+                                 "trigger": "manual", "run_id": id},
+                        # Two plans of one system are two runs. A plan is
+                        # consumed once by `take_plan`, so a double press on
+                        # the SAME plan cannot run it twice either way.
+                        dedupe=False)
+    if not put.get("ok"):
+        return _back_to_system(tenant, system, err=put.get("why") or "could not queue it",
                                anchor=f"plan-{id}", ppage=ppage)
-    if status == "failed":
-        why = "; ".join(out.get("blocked_on") or [])[:200]
-        return _back_to_system(tenant, system,
-                               err=f"Ran and FAILED — {why}; the run is on "
-                                   f"the log below", anchor="planned")
-    items = out.get("items") or []
-    # AN ARTICLE RUN LANDS ON THE ARTICLE. The owner ran one, got a
-    # paragraph-long flash whose directions pointed at another tab, and
-    # asked, reasonably: "I published an article and I dont see it. Where
-    # is it?" A run that produces one reviewable thing should put that
-    # thing in front of the person who asked for it — the review page
-    # already says everything the paragraph tried to.
-    art = next((i for i in items if i.get("output_id")
-                and (out.get("skill") == "blog_article")), None)
-    if art and len(items) == 1:
-        from fastapi.responses import RedirectResponse
-        from urllib.parse import quote
-        return RedirectResponse(
-            f"/admin/article/{quote(art['output_id'])}?key={quote(key)}"
-            f"&ok={quote('drafted — this is it; review, edit, and ship it from here')}",
-            303)
-    waiting = any(i.get("disposition") == "needs_approval" for i in items)
-    said = (f"Ran now — {out.get('summary') or status}"
-            + (f" · {len(items)} item(s)" if items else "")
-            + (" — it is in Waiting on you" if waiting else ""))
-    notes = [n for n in (out.get("notes") or []) if "untargeted" in n]
-    if notes:
-        said += " · " + notes[0][:160]
-    return _back_to_system(tenant, system, ok=said,
-                           anchor="waiting" if waiting else "shipped")
+    return _back_to_system(
+        tenant, system, anchor=f"plan-{id}", ppage=ppage,
+        ok=("already running — " if put.get("already") else "queued — ")
+           + "a worker picks it up within half a minute; the bar at the bottom "
+             "of the page shows it, and the result lands in Waiting on you")
 
 
 @app.get("/admin/plan_propose")

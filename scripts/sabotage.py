@@ -38,6 +38,45 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "the_plan_dropdown_forgets_the_rotation",
+        "file": "app/admin_ui.py",
+        "find": '            ok, why = _es.may_use(tenant, st) if tenant else (True, "")\n',
+        "replace": '            ok, why = _es.usable_for(tenant, st) if tenant else (True, "")  # SABOTAGE\n',
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "the plan form offers, enabled, a design the owner took out of "
+               "this brand's rotation on the Designs page — the exact "
+               "inconsistency the owner asked about on 2026-09-23",
+    },
+    {
+        "name": "a_named_design_ignores_the_rotation",
+        "file": "app/email_structures.py",
+        "find": '        ok, why = may_use(tenant, st)\n        if not ok:\n            return {"structure": None, "designated": True,\n',
+        "replace": '        ok, why = True, ""  # SABOTAGE\n        if not ok:\n            return {"structure": None, "designated": True,\n',
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "a plan that names a design this brand took out builds on it "
+               "anyway — the dropdown hides it and a hand-built plan walks "
+               "straight past the decision",
+    },
+    {
+        "name": "taking_one_out_is_not_part_of_the_answer",
+        "file": "app/email_structures.py",
+        "find": '    if structure.get("id") in out_for(tenant):\n',
+        "replace": '    if False:  # SABOTAGE\n',
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "every surface that asks the one question stops hearing the "
+               "brand's own decision — the shelf says out, the draw, the "
+               "dropdown and the plan all say in",
+    },
+    {
+        "name": "blank_claims_random_while_one_design_stands",
+        "file": "app/admin_ui.py",
+        "find": '        blank = (f"the standing choice — {stand_name}" if stand_name else\n',
+        "replace": '        blank = ("the standing choice" if False else\n  # SABOTAGE\n',
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "the plan form says blank means a random draw while every "
+               "campaign of this brand is built on one standing design",
+    },
+    {
         "name": "the_pill_needs_script_to_be_true",
         "file": "app/admin_ui.py",
         "find": '    hidden = "" if got["n_flight"] else " hidden"\n',
@@ -118,14 +157,6 @@ SABOTAGES = [
         "replace": '    _ref_note = ""  # SABOTAGE\n',
         "suites": ['test_the_model_makes_the_email.py'],
         "why": "'why we keep this' becomes decoration on a card — the owner writes what matters about a design and every email built on it is made as if they had said nothing",
-    },
-    {
-        "name": 'taking_one_design_out_takes_it_from_everybody',
-        "file": 'app/email_structures.py',
-        "find": '    taken_out = out_for(tenant)\n',
-        "replace": '    taken_out = set()  # SABOTAGE\n',
-        "suites": ['test_the_designs_shelf.py'],
-        "why": "a design this brand took out keeps being drawn for it — and the only control that worked before was the shared reject, which took the design away from every account at once",
     },
     {
         "name": 'the_filter_chips_count_the_remainder',
@@ -358,14 +389,6 @@ SABOTAGES = [
         "replace": '    designated = designated or ""\n',
         "suites": ['test_the_model_makes_the_email.py'],
         "why": "the owner chooses a design for every campaign and the campaigns keep drawing at random",
-    },
-    {
-        "name": 'a_standing_choice_must_be_in_the_rotation',
-        "file": 'app/email_structures.py',
-        "find": '        if st["review"] != "approved":\n            return f"{st[\'name\']!r} is not in the rotation yet — use it first"\n',
-        "replace": '        if False:\n            return ""\n',
-        "suites": ['test_the_model_makes_the_email.py'],
-        "why": "a design nobody has looked at becomes every campaign\'s design",
     },
     {
         "name": 'an_unattended_ship_is_held_on_a_blocking_finding',

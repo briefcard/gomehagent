@@ -327,11 +327,9 @@ def designate(tenant: str, structure_id: str = "") -> str:
         st = next((r for r in library() if r["id"] == structure_id), None)
         if st is None:
             return "no design with that id"
-        if st["review"] != "approved":
-            return f"{st['name']!r} is not in the rotation yet — use it first"
-        ok, why = usable_for(tenant, st)
+        ok, why = may_use(tenant, st)
         if not ok:
-            return f"{st['name']!r} is not for this brand — {why}"
+            return f"{st['name']!r} is not in the rotation here — {why}"
     from . import kb
     b = kb.ensure_brand(tenant)
     visual = dict(getattr(b, "visual", None) or {})
@@ -367,6 +365,28 @@ def _row(r) -> dict:
 # ---------------------------------------------------------------------------
 # Brand rules, at the moment of use
 # ---------------------------------------------------------------------------
+def may_use(tenant: str, structure: dict) -> tuple[bool, str]:
+    """(True, "") when THIS brand may build on this design, else why not —
+    THE ONE ANSWER every surface gives.
+
+    There were four readers of the question and they disagreed (owner,
+    2026-09-23: "do we have consistency in the designs in rotation in the
+    design tab and the options available in the dropdown?"). The shelf and
+    the random draw knew that a brand can take a design out of its own
+    rotation; the plan's dropdown and a plan that NAMED a design did not, so
+    a design taken out on the shelf was still offered, enabled, on the plan
+    form — and built when chosen. Three conditions, in the order a person
+    would check them, and every caller asks this rather than its own subset.
+    """
+    if structure.get("review") != "approved":
+        return False, ("nobody has chosen it for the library yet"
+                       if structure.get("review") == "proposed" else
+                       "dropped from the library")
+    if structure.get("id") in out_for(tenant):
+        return False, "taken out of this brand's rotation on the Designs page"
+    return usable_for(tenant, structure)
+
+
 def usable_for(tenant: str, structure: dict) -> tuple[bool, str]:
     """"(True, "") when this brand may build on this structure, else why not.
 
@@ -456,11 +476,8 @@ def eligible(tenant: str, *, intent: str = "", fmt: str = "",
     recent_ids = {d for d in (recent_designs or []) if d}
     # WHAT THIS BRAND TOOK OUT. The library is shared and the decision is not
     # (2026-09-23) — "not this one" is a fact about this brand's rotation.
-    taken_out = out_for(tenant)
     out = []
     for st in library(review="approved"):
-        if st["id"] in taken_out:
-            continue
         if intent and st["fits_intents"] and intent not in st["fits_intents"]:
             continue
         if fmt and st["fits_formats"] and fmt not in st["fits_formats"]:
@@ -470,7 +487,7 @@ def eligible(tenant: str, *, intent: str = "", fmt: str = "",
                 continue
         elif signature(st["sequence"]) in recent:
             continue
-        ok, _why = usable_for(tenant, st)
+        ok, _why = may_use(tenant, st)
         if not ok:
             continue
         out.append(st)
@@ -525,14 +542,10 @@ def pick(tenant: str, *, intent: str = "", fmt: str = "",
         if st is None:
             return {"structure": None, "designated": True,
                     "why": f"no structure with id {designated!r} — designed fresh"}
-        if st["review"] != "approved":
-            return {"structure": None, "designated": True,
-                    "why": (f"{st['name']!r} is {st['review']}, not in the rotation — "
-                            f"use it on the Designs page first; designed fresh")}
-        ok, why = usable_for(tenant, st)
+        ok, why = may_use(tenant, st)
         if not ok:
             return {"structure": None, "designated": True,
-                    "why": f"{st['name']!r} is not for this brand — {why}; designed fresh"}
+                    "why": f"{st['name']!r} is not in the rotation here — {why}; designed fresh"}
         return {"structure": st, "designated": True,
                 "why": f"designated: {st['name']}"}
     pool = eligible(tenant, intent=intent, fmt=fmt, recent_shapes=recent_shapes,

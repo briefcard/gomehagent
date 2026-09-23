@@ -243,31 +243,31 @@ def main() -> int:
     v = _view(c, "agency")
     ck("a complete, unapproved plan on shadow offers Approve & run now",
        "Approve &amp; run now" in v)
-    r = c.get(f"/admin/plan_run?key=s3cret&id={p_ag}&tenant=agency"
-              f"&system=wf_probe&ppage=1", follow_redirects=False)
-    v = c.get(r.headers.get("location", "")).text
-    with db.SessionLocal() as s:
-        still = s.get(db.SystemRun, p_ag).stage
+    # THE RUN IS THE WORKER'S (2026-09-23): the press queues and returns; the
+    # same gates decide when a worker runs it, and the verdict is on the job.
+    from app import jobs as _jq
+
+    def _press(extra: str = "") -> tuple:
+        r_ = c.get(f"/admin/plan_run?key=s3cret&id={p_ag}&tenant=agency"
+                   f"&system=wf_probe&ppage=1{extra}", follow_redirects=False)
+        _jq.drain("agency", "test-worker")
+        with db.SessionLocal() as s_:
+            stage_ = s_.get(db.SystemRun, p_ag).stage
+        return r_, stage_, _jq.latest("agency", system_key="wf_probe")
+
+    r, still, job = _press()
     ck("without the approval it refuses through the same gate, and the plan "
-       "is untouched",
-       "Did not run" in v and "approval" in v and still == "planned", still)
-    r = c.get(f"/admin/plan_run?key=s3cret&id={p_ag}&tenant=agency"
-              f"&system=wf_probe&ppage=1&approve=1", follow_redirects=False)
+       "is untouched", still == "planned" and "approval" in job["detail"],
+       f"{still} · {job['detail'][:120]}")
+    r, stage, job = _press("&approve=1")
     loc = r.headers.get("location", "")
-    v = c.get(loc).text
-    with db.SessionLocal() as s:
-        ran = s.get(db.SystemRun, p_ag)
-    import re as _re
-    _flash = _re.search(r'class="flash">(.{0,200})', v)
-    ck("Approve & run consumes THIS plan immediately — the same row, "
-       "terminal", ran.stage == "sent" and "Ran now" in v,
-       f"{ran.stage} · flash={_flash.group(1) if _flash else '?'}")
-    ck("…and the redirect lands where the outcome lives", "#shipped" in loc,
-       loc[-30:])
-    twice = c.get(f"/admin/plan_run?key=s3cret&id={p_ag}&tenant=agency"
-                  f"&system=wf_probe", follow_redirects=True).text
-    ck("a consumed plan cannot run twice",
-       "Did not run" in twice and "not a plan" in twice)
+    ck("Approve & run consumes THIS plan — the same row, terminal",
+       stage == "sent" and job["state"] == "done", f"{stage} · {job['detail'][:100]}")
+    ck("…and the press comes straight back to the plan it named",
+       f"#plan-{p_ag}" in loc and "queued" in loc, loc[-60:])
+    r, _st, job = _press()
+    ck("a consumed plan cannot run twice", "not a plan" in job["detail"],
+       job["detail"][:120])
 
     # ---- measured --------------------------------------------------------
     print("\n— measured: the delta counts, and unmeasured is NAMED —")

@@ -20,6 +20,7 @@ The properties pinned here, in the owner's terms:
     python3 scripts/test_article_review.py
 """
 import os
+import re
 import sys
 import tempfile
 
@@ -434,12 +435,17 @@ def main() -> int:
     r9 = c.get(f"/admin/plan_run?key=s3cret&id={rid}&tenant=sqonly"
                f"&system=blog&approve=1", follow_redirects=False)
     loc = r9.headers.get("location", "")
-    ck("Run now redirects to the review page itself",
-       r9.status_code == 303 and "/admin/article/" in loc, loc[:110])
-    ck("saying plainly that this is it", "this+is+it" in loc.replace("%20", "+"),
-       "a run that produces one reviewable thing puts it in front of the "
-       "person who asked")
-    oid3 = loc.split("/admin/article/")[1].split("?")[0]
+    # THE PRESS RETURNS AT ONCE NOW (2026-09-23) — the run is the worker's.
+    ck("Run now comes straight back and says it is queued",
+       r9.status_code == 303 and "queued" in loc, loc[:110])
+    from app import jobs as _jq
+    _jq.drain("sqonly", "test-worker")
+    room = c.get("/admin/sqonly/jobs", headers={"accept": "text/html"}).text
+    m_ = re.search(r'href="/admin/work/([^"]+)">Open it', room)
+    ck("and when it has run, its row on the queue opens the article it made",
+       bool(m_), "a run that produces one reviewable thing puts it in front of "
+                 "the person who asked")
+    oid3 = m_.group(1) if m_ else ""
     with db.SessionLocal() as s:
         kw3 = (s.query(db.KeywordTarget)
                .filter_by(tenant="sqonly", phrase="event spaces miami").first())

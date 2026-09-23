@@ -971,6 +971,17 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
     flash = (f'<div class="note">{_esc(msg)}</div>' if msg else "") + (
         f'<div class="note err">{_esc(err)}</div>' if err else "")
     got = _j.board(tenant)
+    # the one thing each finished run made, when it made exactly one
+    made: dict = {}
+    run_ids = [j["run_id"] for j in got["done"] if j.get("run_id")]
+    if run_ids:
+        with db.SessionLocal() as s_:
+            outs = (s_.query(db.Output.run_id, db.Output.id)
+                    .filter(db.Output.run_id.in_(run_ids)).all())
+        for rid in run_ids:
+            mine = [oid for r_, oid in outs if r_ == rid]
+            if len(mine) == 1:
+                made[rid] = mine[0]
 
     def _mins(n: int) -> str:
         n = int(n or 0)
@@ -997,6 +1008,14 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
             acts = _act("job_cancel", "Take it off the queue", j["id"])
         elif state in ("interrupted", "failed"):
             acts = _act("job_again", "Run it again", j["id"])
+        elif state == "done" and made.get(j.get("run_id") or ""):
+            # WHAT IT MADE, one click away. The press used to wait and land
+            # on the article itself (owner: "a run that produces one
+            # reviewable thing should put that thing in front of the person
+            # who asked"); now it returns at once, so the finished row does.
+            oid = made[j["run_id"]]
+            acts = f'<a class="btn" href="/admin/work/{_esc(oid)}">Open it &rarr;</a>'
+
         return f"""
       <div class="msg">
         {chip} <b>{_esc(j.get("label") or j["kind"])}</b>
@@ -2756,19 +2775,29 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
         # beside anything it may not — so a person never designates a
         # structure only to be refused after the run. Blank is the default
         # and says what it does: a random draw.
+        # THE SAME ANSWER THE SHELF GIVES (2026-09-23). This list asked its
+        # own subset of the question and missed the per-brand rotation, so a
+        # design taken out on the Designs page was still offered here,
+        # enabled, and built when chosen. It asks `may_use` now, like the
+        # shelf, the random draw and the standing choice.
         from . import email_structures as _es
         cur = str(value or "").strip()
-        rows = _es.library(review="approved")
-        opts = ['<option value="">random from the library</option>']
+        field_label = label
+        standing = _es.standing_designation(tenant) if tenant else ""
+        rows = [r for r in _es.library() if r["review"] != "rejected"]
+        stand_name = next((r["name"] for r in rows if r["id"] == standing), "")
+        blank = (f"the standing choice — {stand_name}" if stand_name else
+                 "a random draw from this brand's rotation")
+        opts = [f'<option value="">{_esc(blank)}</option>']
         for st in rows:
-            ok, why = _es.usable_for(tenant, st) if tenant else (True, "")
-            label = st["name"] + ("" if ok else f" — not for this brand: {why}")
+            ok, why = _es.may_use(tenant, st) if tenant else (True, "")
+            text = st["name"] + ("" if ok else f" — {why}")
             opts.append(f'<option value="{_esc(st["id"])}"'
                         f'{" selected" if st["id"] == cur else ""}'
-                        f'{"" if ok else " disabled"}>{_esc(label[:120])}</option>')
-        return (f'<div class="f"><label>{label}</label>{req}'
-                f'<div class="what">blank = a random draw from the approved '
-                f'structures this brand may use; name one to build on it</div>'
+                        f'{"" if ok else " disabled"}>{_esc(text[:120])}</option>')
+        return (f'<div class="f"><label>{field_label}</label>{req}'
+                f'<div class="what">blank = {_esc(blank)}; name one to build '
+                f'on it — the list is the rotation on the Designs page</div>'
                 f'<select name="{_esc(f["key"])}">{"".join(opts)}</select></div>')
     if f.get("kind") == "flag":
         cur = str(value or "").strip().lower()
@@ -7184,7 +7213,12 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
     items = []
     for st in rows:
         sid = st["id"]
-        ok, why = _es.usable_for(tenant, st)
+        # IN THE ROTATION MEANS `may_use` SAYS YES — the same answer the plan's
+        # dropdown, the random draw and the standing choice give. The shelf
+        # used to call a design "in the rotation" and "not for this brand" on
+        # the same row, and count it in the rotation chip, while the draw
+        # would never pick it.
+        ok, why = _es.may_use(tenant, st)
         last = _rc.latest(sid, tenant)
         states, chips = [], []
         if st["review"] == "proposed":
@@ -7196,15 +7230,15 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
         elif sid in taken_out:
             states.append("out")
             chips.append('<span class="chip off">out of this brand&rsquo;s rotation</span>')
+        elif not ok:
+            states.append("unusable")
+            chips.append(f'<span class="chip off" title="{_esc(why)}">not for this brand</span>')
         elif standing == sid:
             states += ["rotation", "standing"]
             chips.append('<span class="chip on">every campaign uses this</span>')
         else:
             states.append("rotation")
             chips.append('<span class="chip on">in the rotation</span>')
-        if not ok:
-            states.append("unusable")
-            chips.append(f'<span class="chip off" title="{_esc(why)}">not for this brand</span>')
         facts = " &middot; ".join(x for x in (
             _esc(st["source"] or "a reference"),
             (f'used {st["used_count"]}&times;' if st["used_count"] else "never used"),

@@ -210,6 +210,57 @@ def main() -> int:
                data={"tenant": "baci", "id": "nope"},
                         follow_redirects=False).headers.get("location", ""))
 
+    print("\n— ONE answer to 'which designs may this brand use' —")
+    # Owner, 2026-09-23: "Do we have consistency in the designs in rotation in
+    # the design tab and the options available in the dropdown for the brand
+    # when proposing an email plan?" We did not: four readers asked the
+    # question four ways, and the plan's dropdown and a plan that NAMED a
+    # design both missed the per-brand rotation. The population here is
+    # every design in the library, and each surface is read, not assumed.
+    from app import systems as _sy
+    es.designate("baci", "")
+    es.set_out("baci", ids[6], True)             # taken out by this brand
+    lib = es.library()
+    shelf_html = "".join(ui._structures_card(KEY, "baci", view={"page": str(p_)})
+                         for p_ in range(1, 4))
+    shelf_rotation = set()
+    for st in lib:
+        row = shelf_html.split(f"/designs/{st['id']}", 1)
+        if len(row) > 1 and "in the rotation" in row[1][:900].split('class="msg"')[0] \
+                or (len(row) > 1 and "every campaign uses this" in row[1][:900].split('class="msg"')[0]):
+            shelf_rotation.add(st["id"])
+    # the REAL field, read off the workflow the plan form is built from
+    field = next(f for f in _sy.workflow("campaign_email")["plan_fields"]
+                 if f["key"] == "structure")
+    dropdown = ui._plan_field_input(field, "", "baci")
+    offered = {m.group(1) for m in re.finditer(r'<option value="([^"]+)"(?![^>]*disabled)', dropdown)}
+    drawn = {st["id"] for st in es.eligible("baci")}
+    standable = {st["id"] for st in lib if "until you say" in es.designate("baci", st["id"])}
+    es.designate("baci", "")
+    built = {st["id"] for st in lib
+             if (es.pick("baci", designated=st["id"])["structure"] or {}).get("id") == st["id"]}
+    ck("the shelf's rotation IS the random draw",
+       shelf_rotation == drawn, f"shelf {len(shelf_rotation)} · draw {len(drawn)}")
+    ck("  IS what the plan's dropdown offers",
+       offered == drawn, f"offered {len(offered)} · draw {len(drawn)} · "
+       f"extra {sorted(offered - drawn)[:2]}")
+    ck("  IS what can be made the standing choice",
+       standable == drawn, f"standable {len(standable)}")
+    ck("  IS what a plan naming one actually builds on",
+       built == drawn, f"built {len(built)}")
+    ck("a design this brand took out is offered NOWHERE, and says why where it is listed",
+       ids[6] not in offered and "taken out of this brand" in dropdown)
+    ck("  and a plan that names it is refused by name rather than quietly built",
+       "taken out of this brand" in es.pick("baci", designated=ids[6])["why"])
+    es.designate("baci", sorted(drawn)[0])
+    stand = next(st["name"] for st in lib if st["id"] == sorted(drawn)[0])
+    ck("the blank option says what blank DOES — the standing choice when there is one",
+       f"the standing choice — {stand}" in ui._plan_field_input(field, "", "baci"),
+       "it said 'random from the library' while every campaign used one design")
+    es.designate("baci", "")
+    ck("  and a random draw when there is not",
+       "a random draw from this brand" in ui._plan_field_input(field, "", "baci"))
+
     print("\n— the reference's own page —")
     r = c.get(f"/admin/reference?key={KEY}&tenant=baci&id={ids[0]}")
     ck("it opens", r.status_code == 200 and "The four-step story" in r.text)
