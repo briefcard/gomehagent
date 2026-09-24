@@ -130,7 +130,7 @@ def main() -> int:
     from PIL import Image as _Im
     _buf = _io.BytesIO(); _Im.new("RGB", (8, 8), (200, 90, 60)).save(_buf, "JPEG")
     _jpeg = _buf.getvalue()
-    creative._fetch = lambda url: (fetched.append(url) or _jpeg)
+    creative._fetch = lambda url, **_: (fetched.append(url) or _jpeg)
     seen: list = []
 
     class _Reply:

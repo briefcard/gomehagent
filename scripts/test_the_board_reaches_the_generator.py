@@ -100,7 +100,7 @@ PICS = {
 }
 
 
-def _blob(url: str) -> bytes:
+def _blob(url: str, **_) -> bytes:
     if url not in PICS:
         return b""
     colour, mode = PICS[url]

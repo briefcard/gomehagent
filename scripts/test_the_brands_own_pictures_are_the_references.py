@@ -107,7 +107,7 @@ def main() -> int:  # noqa: PLR0915
                       "studio", "look", True)
     front, table, side, look = (png((200, 30, 30, 255), 80, 80), png((30, 200, 30, 255), 400, 300),
                                 png((30, 30, 200, 255), 80, 80), png((90, 90, 90, 255)))
-    creative._fetch = lambda url: {
+    creative._fetch = lambda url, **_: {
         "https://cdn.shopify.com/s/files/plate-front.jpg": front,
         "https://cdn.shopify.com/s/files/plate-table.jpg": table,
         "https://cdn.shopify.com/s/files/plate-side.jpg": side,
@@ -140,7 +140,7 @@ def main() -> int:  # noqa: PLR0915
                  entity_key="zodiac-plate", origin="store_sync", tags=["store-image:4"])
     party = png((10, 10, 10, 255), 300, 300)
     old_fetch = creative._fetch
-    creative._fetch = lambda url: party if url.endswith("plate-party.jpg") else old_fetch(url)
+    creative._fetch = lambda url, **_: party if url.endswith("plate-party.jpg") else old_fetch(url, **_)
     refs3 = creative.board_inputs("baci", "zodiac-plate")
     ck("a photograph where the product cannot be found with confidence is LEFT OUT and said, never sent as the product",
        len(refs3["product"]) == 3

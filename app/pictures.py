@@ -121,9 +121,10 @@ def _fetch_bounded(url: str, *, cap: int = FETCH_MAX) -> bytes:
         return b""
 
 
-def _small_url(url: str) -> str:
-    """A Shopify CDN picture asked for at 600 px — the size a colour read
-    needs and a fraction of the master's bytes."""
+def _small_url(url: str, size: int = 600) -> str:
+    """A Shopify CDN picture asked for at `size` px — 600 for a colour read or
+    a judge, the image model's own input edge for a generation input — and a
+    fraction of the master's bytes either way."""
     u = str(url or "")
     if "cdn.shopify.com" not in u and "/cdn/shop/" not in u:
         return u
@@ -131,7 +132,7 @@ def _small_url(url: str) -> str:
     stem, dot, ext = base.rpartition(".")
     if not dot or len(ext) > 5 or "/" in ext or re.search(r"_\d+x\d*$", stem):
         return u
-    return f"{stem}_600x{dot}{ext}{sep}{query}"
+    return f"{stem}_{int(size)}x{dot}{ext}{sep}{query}"
 
 
 def _tier_edge() -> tuple[str, int]:
@@ -204,7 +205,7 @@ def _image_block(png: bytes) -> dict:
             "transformations": dict(llm.OVERSIZED_IMAGE_ERROR)}
 
 
-def fetch(url: str) -> bytes:
+def fetch(url: str, *, size: int = 600) -> bytes:
     """A picture's bytes, small when the host can serve it small, capped
     either way. THE way anything fetches an image for the model.
 
@@ -215,7 +216,7 @@ def fetch(url: str) -> bytes:
     u = _html.unescape(str(url or "")).strip()
     if not u:
         return b""
-    small = _small_url(u)
+    small = _small_url(u, size)
     return _fetch_bounded(small) or (_fetch_bounded(u) if small != u else b"")
 
 

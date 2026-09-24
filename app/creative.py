@@ -794,11 +794,12 @@ def _for_model(blob: bytes) -> dict | None:
     return pictures.for_model(blob)
 
 
-def _fetch(url: str) -> bytes:
-    """One image, or nothing — small, capped, through `pictures.fetch`. A seam,
-    so the suite never reaches the network."""
+def _fetch(url: str, *, size: int = 600) -> bytes:
+    """One image, or nothing — at `size`, capped, through `pictures.fetch`. A
+    seam, so the suite never reaches the network. 600 for a read; an input to
+    the image model asks for `imagegen.INPUT_MAX_SIDE`, what the model takes."""
     from . import pictures
-    return pictures.fetch(url)
+    return pictures.fetch(url, size=size)
 
 
 #: Commitment kinds whose artifact is ABOUT A THING in the catalogue. The
@@ -1009,10 +1010,14 @@ def generate(tenant: str, *, commitment: dict | None = None,
             rows = [a for a in kbmod.assets(tenant, publishable_only=True)
                     if getattr(a, "entity_key", "") == entity_key and (a.url or "")]
             if rows:
-                import httpx
-                got = httpx.get(rows[0].url, timeout=60, follow_redirects=True)
-                if got.status_code < 400:
-                    source, source_id = got.content, rows[0].id
+                # AT THE SIZE THE IMAGE MODEL USES, capped — this downloaded
+                # the whole original (Baci's masters run to 4724px, 85 MB
+                # decoded) only for `imagegen` to shrink it to 1536; that is
+                # what put the worker over its memory (2026-09-23).
+                from . import imagegen
+                got = _fetch(rows[0].url, size=imagegen.INPUT_MAX_SIDE)
+                if got:
+                    source, source_id = got, rows[0].id
         except Exception:                                        # noqa: BLE001
             source, source_id = b"", ""
     if entity_key and not source:
@@ -2441,7 +2446,7 @@ def board_inputs(tenant: str, entity_key: str, product_id: str = "",
             if not ok:
                 out["excluded"].append({"asset_id": r.id, "role": role, "why": why})
                 continue
-            raw = _fetch(r.url or "")
+            raw = _fetch(r.url or "", size=imagegen.INPUT_MAX_SIDE)
             if role == "product" and out["product"]:
                 # A SECOND VIEW OF THE PRODUCT, cut out of the scene it sits
                 # in — against the packshot that leads (`focused`).

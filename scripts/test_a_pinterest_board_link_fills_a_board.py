@@ -94,7 +94,7 @@ def main() -> int:
     kb.add_board("baci", "Lifestyle", note="tables, daylight")
     kb.add_board("baci", "Studio")
 
-    def _fetch(url):
+    def _fetch(url, **_):
         FETCHED.append(url)
         return PICS.get(url, b"")
     creative._fetch = _fetch

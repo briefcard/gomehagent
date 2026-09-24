@@ -133,7 +133,7 @@ def main() -> int:
     kb.add_board("baci", "Studio")
     kb.set_board_role(next(a.id for a in kb.assets("baci") if "look" in (a.url or "")), "studio", "look", True)
     prod, look = png((200, 30, 30, 255)), png((30, 30, 200, 255))
-    creative._fetch = lambda url: {"https://cdn.example/cup.png": prod, "https://cdn.example/look.png": look}.get(url, b"")
+    creative._fetch = lambda url, **_: {"https://cdn.example/cup.png": prod, "https://cdn.example/look.png": look}.get(url, b"")
     creative.assess = lambda blob, brief, tenant="": {"ok": True, "verdicts": [], "overall": "", "failed": [], "fix": ""}
     creative.product_features = lambda tenant, entity_key, product, **k: {"ok": True, "features": ["a gold rim"], "cached": False}
     creative.compare_product = lambda c, p, f, tenant="", **k: {"ok": True, "match": 96, "differences": [], "same": True,

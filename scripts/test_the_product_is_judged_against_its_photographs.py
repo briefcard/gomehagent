@@ -100,7 +100,7 @@ def main() -> int:
     for a in kb.assets("baci"):
         if "look-" in (a.url or ""):
             kb.set_board_role(a.id, "lifestyle", "look", True)
-    creative._fetch = lambda url: PICS.get(url, b"")
+    creative._fetch = lambda url, **_: PICS.get(url, b"")
     creative.assess = lambda blob, brief, tenant="": {
         "ok": True, "verdicts": [], "overall": "reads right", "failed": [], "fix": ""}
 

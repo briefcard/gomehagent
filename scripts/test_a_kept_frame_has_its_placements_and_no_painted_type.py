@@ -81,7 +81,7 @@ def main() -> int:
     kb.add_board("baci", "Lifestyle")
     kb.set_board_role(next(a.id for a in kb.assets("baci") if "look-1" in (a.url or "")),
                       "lifestyle", "look", True)
-    creative._fetch = lambda url: PICS.get(url, b"")
+    creative._fetch = lambda url, **_: PICS.get(url, b"")
     creative.assess = lambda blob, brief, tenant="": {
         "ok": True, "verdicts": [], "overall": "reads right", "failed": [], "fix": ""}
     creative.product_features = lambda tenant, entity_key, product, **k: {

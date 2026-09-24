@@ -76,7 +76,7 @@ def main() -> int:
         aid = next(a.id for a in kb.assets("baci", publishable_only=False)
                    if a.url == f"https://cdn.example/look-{i}.png")
         kb.set_board_role(aid, "lifestyle", "look", True)
-    creative._fetch = lambda url: PICS.get(url, b"")
+    creative._fetch = lambda url, **_: PICS.get(url, b"")
     creative.assess = lambda blob, brief, tenant="": {
         "ok": True, "verdicts": [], "overall": "reads right", "failed": [], "fix": ""}
     cup = coherence.commit("entity", "zodiac-cup", label="Zodiac Cup")

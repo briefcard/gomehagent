@@ -129,7 +129,7 @@ def main() -> int:  # noqa: PLR0915
                       "studio", "look", True)
     cup_row = next(a for a in kb.assets("baci") if "cup.png" in (a.url or ""))
     prod, look = png((200, 30, 30, 255)), png((30, 30, 200, 255))
-    creative._fetch = lambda url: {"https://cdn.example/cup.png": prod,
+    creative._fetch = lambda url, **_: {"https://cdn.example/cup.png": prod,
                                    "https://cdn.example/look.png": look}.get(url, b"")
     creative.assess = lambda blob, brief, tenant="": {"ok": True, "verdicts": [], "overall": "",
                                                       "failed": [], "fix": ""}
@@ -316,7 +316,7 @@ def main() -> int:  # noqa: PLR0915
     kb.add_asset("baci", "https://cdn.example/plate.png", rights=kb.OWNED, title="plate",
                  subject=kb.OBJECT, entity_key="zodiac-plate", origin="human")
     plate = png((30, 200, 30, 255))
-    creative._fetch = lambda url: {"https://cdn.example/cup.png": prod, "https://cdn.example/look.png": look,
+    creative._fetch = lambda url, **_: {"https://cdn.example/cup.png": prod, "https://cdn.example/look.png": look,
                                    "https://cdn.example/plate.png": plate}.get(url, b"")
     GOOD = ("<h1>Zodiac plates</h1><p>A zodiac plate is a plate with a sign on it, and this "
             "sentence exists so the body is long enough to be an article rather than "
