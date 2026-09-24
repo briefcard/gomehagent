@@ -57,6 +57,16 @@ def _answer(verdicts: dict):
     llm.ask = lambda *a, **k: _R()
 
 
+def _png() -> bytes:
+    """A real picture — the reviewer is handed what `pictures.for_model` makes
+    of the bytes, and three letters are not a picture."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 200, 200)).save(buf, "PNG")
+    return buf.getvalue()
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -105,11 +115,11 @@ def main() -> int:
                                claim="dishwasher safe melamine")
     keys = [c["key"] for c in brief["criteria"]]
     _answer({k: True for k in keys})
-    v = creative.assess(b"PNG", brief, "baci")
+    v = creative.assess(_png(), brief, "baci")
     ck("all-yes is an empty failure list",
        v["ok"] and v["failed"] == [], str(v.get("failed")))
     _answer({**{k: True for k in keys}, "claim_safe": False, "no_text": False})
-    v = creative.assess(b"PNG", brief, "baci")
+    v = creative.assess(_png(), brief, "baci")
     ck("a NO on claim_safe and no_text fails exactly those two",
        sorted(v["failed"]) == ["claim_safe", "no_text"], str(v["failed"]))
     ck("  and the others are not swept in with them",
@@ -123,7 +133,7 @@ def main() -> int:
         text = '{"verdicts": [], "overall": "", "fix": ""}'
 
     llm.ask = lambda purpose, blocks, **k: (seen.append(blocks) or _R2())
-    creative.assess(b"PNG", brief, "baci")
+    creative.assess(_png(), brief, "baci")
     text = " ".join(b.get("text", "") for b in seen[0] if isinstance(b, dict))
     ck("every criterion the brief named is asked",
        all(creative.CRITERIA.get(k, brief and "") [:24] in text

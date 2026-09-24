@@ -11,6 +11,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("worker")
 
 
+class _NotBusyNoise(logging.Filter):
+    """The scheduler warns every 20 seconds that the queue check is "skipped:
+    maximum number of running instances reached" while a long job runs — it
+    is the check waiting for its own worker, and it read like an error in the
+    owner's log. The job's own start/finish lines say what is happening."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "maximum number of running instances reached" not in record.getMessage()
+
+
+logging.getLogger("apscheduler").addFilter(_NotBusyNoise())
+logging.getLogger("apscheduler.scheduler").addFilter(_NotBusyNoise())
+
+
 def is_trusted(sender: str, alias: str = "") -> bool:
     """Is this sender trusted enough for a routine reply to auto-send?
 
@@ -1249,6 +1263,8 @@ def _safe(fn, context: str, *, tenant: str = "", sharded: bool = False):
         finally:
             if not sharded:
                 _release(name)
+    # the log says "job queue", not "_safe.<locals>.wrapped"
+    wrapped.__name__ = wrapped.__qualname__ = context
     return wrapped
 
 

@@ -39,7 +39,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import creative, db, imagegen, kb, kb_seed, media, tenants  # noqa: E402
 
 _fail: list[str] = []
-PNG = b"\x89PNG\r\n\x1a\n" + b"z" * 400
+# A REAL picture. The model is handed what `pictures.for_model` makes of the
+# bytes, which decodes them — a signature followed by filler was sent as
+# `image/png` until 2026-09-23 and is not sent at all now.
+def _real_png() -> bytes:
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (40, 120, 200)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+PNG = _real_png()
 
 
 def ck(label: str, cond, detail: str = "") -> None:

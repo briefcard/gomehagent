@@ -594,9 +594,10 @@ def file_whatsapp_document(media_id: str, filename: str, mime: str,
                 "type": "base64", "media_type": "application/pdf",
                 "data": _b64.standard_b64encode(data).decode()}})
         elif eff_mime.startswith("image/"):
-            blocks.append({"type": "image", "source": {
-                "type": "base64", "media_type": eff_mime,
-                "data": _b64.standard_b64encode(data).decode()}})
+            from . import pictures as _pics
+            blk = _pics.for_model(data)
+            if blk:
+                blocks.append(blk)
     blocks.append({"type": "text", "text": WHATSAPP_FILE_PROMPT.format(
         tree=tree or "(empty)", chat=chat_context[:3000],
         filename=filename, caption=caption or "(none)")})

@@ -1272,6 +1272,8 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `pictures.py`
 
 - **`contact_sheet`**(blob, max_edge) → `bytes`  ·  from `articles.py`, `recreate.py`
+- **`fetch`**(url) → `bytes`  ·  from `creative.py`
+- **`for_model`**(blob) → `dict | None`  ·  from `creative.py`, `kernel.py`, `ops_jobs.py`
 - **`read_picture`**(asset, vision?, fetch?) → `dict`  ·  **from nothing**
 - **`read_pictures`**(tenant, limit?, vision?) → `dict`  ·  from `recreate_once.py`, `web.py`
 - **`set_picture_kind`**(asset_id, kind, by?) → `str`  ·  from `web.py`

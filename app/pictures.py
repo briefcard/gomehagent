@@ -204,6 +204,39 @@ def _image_block(png: bytes) -> dict:
             "transformations": dict(llm.OVERSIZED_IMAGE_ERROR)}
 
 
+def fetch(url: str) -> bytes:
+    """A picture's bytes, small when the host can serve it small, capped
+    either way. THE way anything fetches an image for the model.
+
+    Store image URLs arrive HTML-escaped from the page they were read off
+    (`?v=…&amp;width=3840`), so the literal `&amp;` reached Shopify, the
+    parameter was ignored, and the full-size original came back."""
+    import html as _html
+    u = _html.unescape(str(url or "")).strip()
+    if not u:
+        return b""
+    small = _small_url(u)
+    return _fetch_bounded(small) or (_fetch_bounded(u) if small != u else b"")
+
+
+def for_model(blob: bytes) -> dict | None:
+    """ANY picture as the model takes it — decoded whatever its format,
+    fitted to the reviewer's edge and pixel budget, sent as the PNG it now
+    is. THE way a picture reaches the model.
+
+    `creative` built its own blocks: whole originals, declared `image/png`
+    whatever the bytes were. The API refuses a block whose bytes do not
+    match its type, or that is over five megabytes — four such 400s in one
+    campaign run on 2026-09-23."""
+    if not blob:
+        return None
+    try:
+        _tier, edge = _tier_edge()
+        return _image_block(contact_sheet(blob, edge))
+    except Exception:                                            # noqa: BLE001
+        return None                                  # not a picture
+
+
 def read_picture(asset, *, vision: bool = True, fetch: bool = True) -> dict:
     """The picture's reading — from the row when it has one, else read now
     and STORED ON THE ROW. Colours, size and aspect by arithmetic; the kind

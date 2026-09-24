@@ -535,6 +535,12 @@ def run_one(job_id: str) -> dict:
     if not spec:
         finish(job_id, "failed", f"no such kind of job: {kind_}")
         return {"ok": False, "state": "failed", "detail": f"unknown kind {kind_}"}
+    # WHAT THE WORKER IS DOING, IN ITS LOG. A ten-minute campaign email ran
+    # with nothing in the log but anonymous HTTP lines (owner, 2026-09-23:
+    # "in the worker I'm not seeing the run").
+    import time as _time
+    t0 = _time.monotonic()
+    log.info("job %s: %s for %s — started", job_id[:8], kind_, tenant)
 
     stop = threading.Event()
 
@@ -558,7 +564,8 @@ def run_one(job_id: str) -> dict:
             payload["progress"] = lambda text: heartbeat(job_id, str(text or "")[:600])
         result = fn(tenant=tenant, **payload)
     except Exception as exc:                                     # noqa: BLE001
-        log.exception("job %s (%s) failed", job_id, kind_)
+        log.exception("job %s: %s for %s — failed after %ds", job_id[:8], kind_,
+                      tenant, _time.monotonic() - t0)
         finish(job_id, "failed", f"{exc.__class__.__name__}: {exc}")
         return {"ok": False, "state": "failed", "detail": str(exc)[:300]}
     finally:
@@ -571,6 +578,8 @@ def run_one(job_id: str) -> dict:
     status = str((result or {}).get("status") or "") if isinstance(result, dict) else ""
     state = "failed" if status in ("failed", "refused", "blocked") else "done"
     finish(job_id, state, _summary(result), run_id=run_id)
+    log.info("job %s: %s for %s — %s after %ds: %s", job_id[:8], kind_, tenant,
+             state, _time.monotonic() - t0, _summary(result)[:200])
     return {"ok": state == "done", "state": state, "detail": _summary(result)}
 
 

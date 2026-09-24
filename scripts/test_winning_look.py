@@ -124,7 +124,13 @@ def main() -> int:
     _stub_meta([_ad(1, ctr=9.0, impressions=5000, value=900),
                 _ad(2, ctr=3.0, impressions=5000, value=100)])
     fetched: list = []
-    creative._fetch = lambda url: (fetched.append(url) or b"JPEGBYTES")
+    # a REAL picture: pictures reach the model through `pictures.for_model`,
+    # which decodes them — bytes that are not a picture are not sent at all
+    import io as _io
+    from PIL import Image as _Im
+    _buf = _io.BytesIO(); _Im.new("RGB", (8, 8), (200, 90, 60)).save(_buf, "JPEG")
+    _jpeg = _buf.getvalue()
+    creative._fetch = lambda url: (fetched.append(url) or _jpeg)
     seen: list = []
 
     class _Reply:

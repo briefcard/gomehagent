@@ -217,9 +217,10 @@ def run(role: Role, text: str, attachments: list[dict] | None = None,
                         "type": "base64", "media_type": "application/pdf",
                         "data": _b64.standard_b64encode(att["data"]).decode()}})
                 elif mime.startswith("image/"):
-                    blocks.append({"type": "image", "source": {
-                        "type": "base64", "media_type": mime,
-                        "data": _b64.standard_b64encode(att["data"]).decode()}})
+                    from . import pictures as _pics
+                    blk = _pics.for_model(att["data"])
+                    if blk:
+                        blocks.append(blk)
         blocks.append({"type": "text", "text": text})
         messages.append({"role": "user", "content": blocks})
     else:

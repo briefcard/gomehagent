@@ -631,10 +631,12 @@ def assess(blob: bytes, brief: dict, tenant: str = "") -> dict:
         audience_line=(f"WHO IT IS FOR: {brief['audience']}\n"
                        if brief.get("audience") else ""),
         questions=q)
-    reply = llm.ask("creative_review", [
-        {"type": "image", "source": {"type": "base64", "media_type": "image/png",
-                                     "data": _b64.standard_b64encode(blob).decode()}},
-        {"type": "text", "text": text}], tenant=tenant, max_tokens=700)
+    from . import pictures as _pics
+    blk = _pics.for_model(blob)
+    if blk is None:
+        return {"ok": False, "why": "the bytes are not a picture the reviewer can read"}
+    reply = llm.ask("creative_review", [blk, {"type": "text", "text": text}],
+                    tenant=tenant, max_tokens=700)
     if not getattr(reply, "ok", False):
         # A review that could not run is NOT a pass. Said, and carried.
         return {"ok": False, "why": getattr(reply, "degraded", "")
@@ -705,9 +707,9 @@ def read_board_direction(tenant: str, slug: str, *, limit: int = 8) -> dict:
         blob = _fetch(r.url or "")
         if not blob:
             continue
-        blocks.append({"type": "image",
-                       "source": {"type": "base64", "media_type": imagegen._mime(blob),
-                                  "data": _b64.standard_b64encode(blob).decode()}})
+        blk = _for_model(blob)
+        if blk:
+            blocks.append(blk)
     if not blocks:
         return {"ok": False, "from": 0,
                 "why": "none of the reference pins could be fetched, so there is "
@@ -763,10 +765,10 @@ def learn_winning_look(tenant: str, *, top: int = 3) -> dict:
         blob = _fetch(url)
         if not blob:
             continue
-        import base64 as _b64
-        blocks.append({"type": "image",
-                       "source": {"type": "base64", "media_type": "image/jpeg",
-                                  "data": _b64.standard_b64encode(blob).decode()}})
+        blk = _for_model(blob)
+        if not blk:
+            continue
+        blocks.append(blk)
         used.append({"ad_id": ad["ad_id"], "name": ad["name"],
                      "ctr": ad["ctr"], "roas": ad["roas"]})
     if not blocks:
@@ -787,16 +789,16 @@ def learn_winning_look(tenant: str, *, top: int = 3) -> dict:
     return {"ok": True, **look}
 
 
+def _for_model(blob: bytes) -> dict | None:
+    from . import pictures
+    return pictures.for_model(blob)
+
+
 def _fetch(url: str) -> bytes:
-    """One image, or nothing. A seam, so the suite never reaches the network."""
-    if not url:
-        return b""
-    import httpx
-    try:
-        r = httpx.get(url, timeout=30, follow_redirects=True)
-        return r.content if r.status_code < 400 else b""
-    except Exception:                                            # noqa: BLE001
-        return b""
+    """One image, or nothing — small, capped, through `pictures.fetch`. A seam,
+    so the suite never reaches the network."""
+    from . import pictures
+    return pictures.fetch(url)
 
 
 #: Commitment kinds whose artifact is ABOUT A THING in the catalogue. The
@@ -2114,9 +2116,7 @@ def _product_features_live(tenant: str, entity_key: str, product: list,
             if kept.get("fingerprint") == fp and kept.get("features"):
                 return {"ok": True, "features": list(kept["features"]),
                         "cached": True, "why": ""}
-    content = [{"type": "image", "source": {
-        "type": "base64", "media_type": "image/png",
-        "data": _b64.standard_b64encode(b).decode()}} for b in blobs[:4]]
+    content = [x for x in (_for_model(b) for b in blobs[:4]) if x]
     content.append({"type": "text", "text": _FEATURES_PROMPT})
     reply = llm.ask("creative_review", content, tenant=tenant, max_tokens=500)
     if not getattr(reply, "ok", False):
@@ -2155,9 +2155,7 @@ def _compare_product_live(candidate: bytes, product: list, features: list,
         return {"ok": False, "match": 0, "differences": [], "same": False,
                 "why": "nothing to compare"}
     extra = [b for b in (cast or []) if b][:CAST_INPUTS]
-    content = [{"type": "image", "source": {
-        "type": "base64", "media_type": "image/png",
-        "data": _b64.standard_b64encode(b).decode()}} for b in [candidate] + refs + extra]
+    content = [x for x in (_for_model(b) for b in [candidate] + refs + extra) if x]
     cast_said = (f" The {len(extra)} image(s) after those are photographs of the "
                  f"brand's OTHER products that may appear as supporting pieces."
                  if extra else "")
@@ -2263,9 +2261,7 @@ def _focus_live(blob: bytes, packshot: bytes, *, tenant: str = "") -> dict:
     if not blob or not packshot:
         return {"ok": False, "found": False, "alone": False, "box": None,
                 "confidence": 0, "why": "nothing to compare"}
-    content = [{"type": "image", "source": {
-        "type": "base64", "media_type": "image/png",
-        "data": _b64.standard_b64encode(b).decode()}} for b in (packshot, blob)]
+    content = [x for x in (_for_model(b) for b in (packshot, blob)) if x]
     content.append({"type": "text", "text": _FOCUS_PROMPT})
     reply = llm.ask("creative_review", content, tenant=tenant, max_tokens=300)
     if not getattr(reply, "ok", False):
