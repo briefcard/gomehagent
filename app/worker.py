@@ -11,20 +11,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("worker")
 
 
-class _NotBusyNoise(logging.Filter):
-    """The scheduler warns every 20 seconds that the queue check is "skipped:
-    maximum number of running instances reached" while a long job runs — it
-    is the check waiting for its own worker, and it read like an error in the
-    owner's log. The job's own start/finish lines say what is happening."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return "maximum number of running instances reached" not in record.getMessage()
-
-
-logging.getLogger("apscheduler").addFilter(_NotBusyNoise())
-logging.getLogger("apscheduler.scheduler").addFilter(_NotBusyNoise())
-
-
 def is_trusted(sender: str, alias: str = "") -> bool:
     """Is this sender trusted enough for a routine reply to auto-send?
 
@@ -863,7 +849,7 @@ def systems_tick() -> None:
     """
     import datetime as _dt
 
-    from . import skill, systems
+    from . import jobs, skill, systems
     today = _dt.date.today().isoformat()
     live = ready_count = blocked_count = consumed_count = 0
     for sysrow in systems.all_systems():
@@ -912,22 +898,32 @@ def systems_tick() -> None:
                 if not systems.consumable(prow, sysrow)["ok"]:
                     held += 1
                     continue
-                try:
-                    res = skill.run(wf["skill"] or sysrow.key, sysrow.tenant,
-                                    trigger="schedule", run_id=prow.id)
-                    # A refusal is NOT a consumption. `skill.run` refuses
-                    # before touching the plan (a blocked preflight — no ESP
-                    # wired — or a held gate), and counting that as "ran"
-                    # would skip the evaluation row below, so a system whose
-                    # queue can never drain would file nothing at all and
-                    # read as busy.
-                    if (res or {}).get("status") in ("refused", "blocked"):
-                        held += 1
-                    else:
-                        ran_here += 1
-                except Exception:                                # noqa: BLE001
-                    log.exception("plan consumption failed for %s/%s",
-                                  sysrow.tenant, sysrow.key)
+                # A refusal is NOT a consumption. A blocked preflight (no ESP
+                # wired) would refuse the run before it touched the plan, and
+                # counting that as "ran" would skip the evaluation row below,
+                # so a system whose queue can never drain would file nothing
+                # at all and read as busy. `consumable` above holds the plan's
+                # own gates; this is the skill's.
+                key_ = wf["skill"] or sysrow.key
+                if skill.preflight(key_, sysrow.tenant)["status"] != "ready":
+                    held += 1
+                    continue
+                # THROUGH THE QUEUE, as the Run-now button does. Run inline
+                # here, a scheduled campaign email was on no queue page and in
+                # no count, a deploy killed it silently, and it ran beside a
+                # queued job in the same 512 MB process — the one-job slot
+                # (`jobs.start_next`) never saw it.
+                got = jobs.enqueue(sysrow.tenant, "system_run", system_key=sysrow.key,
+                                   label=f"{sysrow.name or sysrow.key} — scheduled plan run",
+                                   payload={"key": key_, "trigger": "schedule",
+                                            "run_id": prow.id},
+                                   dedupe=False)
+                if got.get("ok"):
+                    ran_here += 1
+                else:
+                    held += 1
+                    log.warning("could not queue plan %s for %s/%s: %s", prow.id,
+                                sysrow.tenant, sysrow.key, got.get("why"))
             if ran_here:
                 consumed_count += ran_here
                 ready_count += 1
@@ -991,7 +987,7 @@ def systems_tick() -> None:
             log.exception("systems tick failed for %s/%s", sysrow.tenant, sysrow.key)
             systems.finish_run(run_id, "failed",
                                error=f"{exc.__class__.__name__}: {str(exc)[:300]}")
-    log.info("systems tick: %d evaluated, %d ready, %d blocked, %d plan(s) consumed",
+    log.info("systems tick: %d evaluated, %d ready, %d blocked, %d plan(s) queued",
              live, ready_count, blocked_count, consumed_count)
 
 
@@ -1072,16 +1068,8 @@ def _holder() -> str:
 #: minute later; short enough that a dead instance does not park a job for a
 #: day. Per-job overrides go in _LEASE_TTL by context string.
 LEASE_TTL_SECONDS = 20 * 60
-#: "job queue" is deliberately short. The drain holds an account's lease
-#: while its jobs run, and `_release` gives it back — so this TTL only
-#: matters when the worker DIES mid-job, which is the exact case the queue
-#: exists for. Five minutes matches `jobs.STALE_AFTER_SECONDS`, so the lease
-#: frees at about the moment the job itself is declared stale; a sibling that
-#: then drains the same account cannot double-run anything, because the claim
-#: on each row is its own single-statement race.
 _LEASE_TTL = {"inbox polling": 90, "moments sweep": 15 * 60,
-              "keyword map top-up": 60 * 60, "nightly sweep": 60 * 60,
-              "job queue": 5 * 60}
+              "keyword map top-up": 60 * 60, "nightly sweep": 60 * 60}
 
 
 def _lease_name(context: str, tenant: str = "") -> str:
@@ -1163,16 +1151,12 @@ def _each_tenant(context: str, one, *, include_paused: bool = False) -> dict:
     return out
 
 
-def _queue_one(key: str) -> dict:
-    """Drain one account's queue. The unit `queue_drain_sharded` shards."""
+def queue_tick() -> dict:
+    """Every twenty seconds, on every instance: give back what dead workers
+    held, then start the oldest waiting job if this instance is free. Never
+    waits on the work — `jobs.start_next` runs it on its own thread."""
     from . import jobs
-    return jobs.drain(key, _holder())
-
-
-def queue_drain_sharded() -> dict:
-    from . import jobs
-    jobs.reclaim()
-    return _each_tenant("job queue", _queue_one)
+    return {"reclaimed": jobs.reclaim(), "started": jobs.start_next(_holder())}
 
 
 def keyword_sync_sharded() -> dict:
@@ -1226,8 +1210,14 @@ def instances_seen(hours: int = 24) -> dict:
         rows = (s.query(db.JobLease)
                 .filter(db.JobLease.last_run_at.isnot(None),
                         db.JobLease.last_run_at >= since).all())
-        holders = sorted({r.last_holder for r in rows if r.last_holder})
-        jobs = len(rows)
+        # AND THE QUEUE, which takes no lease — its lease is the claim on each
+        # row, and the row keeps the holder that ran it.
+        queued = (s.query(db.JobQueue.holder)
+                  .filter(db.JobQueue.started_at >= since,
+                          db.JobQueue.holder != "").all())
+        holders = sorted({r.last_holder for r in rows if r.last_holder}
+                         | {h for (h,) in queued})
+        jobs = len(rows) + len(queued)
     return {"hours": hours, "instances": len(holders), "holders": holders,
             "jobs_run": jobs,
             "verdict": ("parallel" if len(holders) >= 2 else
@@ -1288,7 +1278,24 @@ def weekly_cost_report() -> None:
                                 html=emailfmt.text_to_html(body))
 
 
+def _stop(signum, _frame) -> None:
+    """A deploy stops this process: Render sends SIGTERM and kills it thirty
+    seconds later. The job in hand cannot finish in that time, so its row
+    says so NOW (`jobs.let_go`) instead of reading "running" over a dead
+    process until `reclaim` notices five minutes of silence."""
+    from . import jobs
+    try:
+        got = jobs.let_go(_holder())
+        log.info("stopping on signal %s — gave back %s", signum, got)
+    finally:
+        # `_exit`, not `exit`: the job's thread is mid-call and would be
+        # waited for, past the grace, into the kill this is here to beat.
+        os._exit(0)
+
+
 def main() -> None:
+    import signal
+    signal.signal(signal.SIGTERM, _stop)
     db.init_db()
     # Report what it is actually about to do, per client. "Inboxes: [...]" said
     # nothing about which account each one served, so a mistyped gmail_alias
@@ -1308,9 +1315,9 @@ def main() -> None:
     # straight back; this is what picks it up. Frequent because the owner is
     # looking at the card when they press it — a minute of "queued" reads as
     # a button that did nothing, which is the whole defect this replaces.
-    # Sharded: the per-row claim in `jobs.claim` is the lease, so both worker
-    # instances drain and neither can run the same job twice.
-    sched.add_job(_safe(queue_drain_sharded, "job queue", sharded=True),
+    # Sharded: the per-row claim in `jobs.claim` is the lease, so every
+    # instance ticks and neither can run the same job twice.
+    sched.add_job(_safe(queue_tick, "job queue", sharded=True),
                   "interval", seconds=20)
     sched.add_job(_safe(poll_all, "inbox polling"), "interval",
                   minutes=config.POLL_INTERVAL_MIN)

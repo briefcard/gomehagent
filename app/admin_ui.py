@@ -983,9 +983,7 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
             if len(mine) == 1:
                 made[rid] = mine[0]
 
-    def _mins(n: int) -> str:
-        n = int(n or 0)
-        return f"{n}s" if n < 90 else f"{n // 60}m {n % 60}s"
+    _mins = _jobs.span
 
     def _act(action: str, label: str, job_id: str, cls: str = "sec") -> str:
         return (f'<form method="post" action="/admin/{action}" class="inl">'
@@ -1000,7 +998,9 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
                 f'<span class="chip nb">{_esc(place)}</span>' if state == "queued" else
                 '<span class="chip off">failed</span>' if state == "failed" else
                 f'<span class="chip nb">{_esc(state)}</span>')
-        how_long = (f'{_mins(j.get("ran_for", 0))} so far' if state == "running" else
+        how_long = (f'{_mins(j.get("ran_for", 0))} so far'
+                    + (f' · the last one took {_mins(j["last_took"])}'
+                       if j.get("last_took") else "") if state == "running" else
                     f'waiting {_mins(j.get("waited", 0))}' if state == "queued" else
                     (f'took {_mins(j.get("ran_for", 0))}' if j.get("ran_for") else ""))
         acts = ""
@@ -1039,8 +1039,10 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
   {flight if flight else '<p class="mut">Nothing in the air. A press that starts '
    'something slow — recreating a reference, a set of frames, filling a board, '
    'a catalogue sync — appears here within a few seconds.</p>'}
-  <p class="mut">A worker picks up the next one within half a minute, and runs
-  up to four of this account&rsquo;s jobs a turn.</p>
+  {f'<p class="mut">Each worker runs one job at a time and, when it is free, '
+   f'starts the oldest one waiting — it looks every twenty seconds. Running now, '
+   f'across every account: {got["busy_everywhere"]}.</p>'
+   if got["queued"] else ""}
 </div>
 <div class="card"><div class="head"><h2>What ran</h2>
   <span class="mut">newest first &middot; every run its own row</span></div>
@@ -6458,8 +6460,8 @@ def _frames_run(tenant: str) -> str:
                 f"{when} &mdash; {detail}")
         elif state == "queued":
             chip, says = ("chip", f"{_esc(name)} &mdash; queued"), (
-                "a worker picks this up within about twenty seconds. Reload "
-                "this page to see it start — it does not refresh itself.")
+                "it starts when a worker is free — each runs one job at a time. "
+                "Reload this page to see it start — it does not refresh itself.")
         elif state == "interrupted":
             # NOT dressed as a failure. Nothing raised; the process running it
             # went away, and the answer is to press it again rather than to go

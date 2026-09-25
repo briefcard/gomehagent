@@ -3432,6 +3432,7 @@ def _run_campaign_email(ctx: Context) -> dict:
                  + " / ".join(" → ".join(p.get("shape") or []) or "?"
                               for p in craft["avoid"]))
 
+    ctx.step("writing the message")
     copy, basis, why = draft_campaign(ctx.bundle, seg, goal, craft)
     if copy is None:
         if why:
@@ -3585,6 +3586,8 @@ def _run_campaign_email(ctx: Context) -> dict:
     # leads, its companions follow — so a photograph of the thing this email is
     # about is preferred over a photograph of something that merely happened to
     # be on the shortlist.
+    ctx.step("the hero picture — drawn from the product's photographs and "
+             "judged against them when the boards allow, else chosen")
     hero_got = creative.hero_for_campaign(
         ctx.tenant, segment_key=seg["key"],
         # THE SUBJECT FIRST, then everything this email actually features.
@@ -3720,6 +3723,7 @@ def _run_campaign_email(ctx: Context) -> dict:
                 str(_structure.get("id") or ""), ctx.tenant, _subject, via="campaign",
                 recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
                 seed=str(ctx.run_id or ctx.tenant),
+                progress=lambda text: ctx.step(f"making the email — {text}"),
                 # a picture DRAWN for this send (every system draws) is offered
                 # to the cast beside the brand's own; approved with the email
                 extra_pictures=([{"id": hero_got.get("asset_id"), "url": (hero or {}).get("url", ""),
@@ -3761,16 +3765,34 @@ def _run_campaign_email(ctx: Context) -> dict:
         # anything else, so they are checked with the body, always.
         return (f"{c.get('subject', '')}\n{c.get('preheader', '')}\n" + str(_rec.get("text") or ""))
 
-    to_check = _build(copy)
-
     # CRAFT, checked in code and given ONE chance to be fixed. This is
     # deliberately not the banned-claims loop: compliance blocks forever,
     # craft is advice — except for urgency with nothing behind it, which is a
     # lie told in the client's name and is therefore a block. A second model
     # pass is worth it because the findings are specific enough to act on;
     # a third would be paying for diminishing returns on a taste question.
-    findings = _craft_review(ctx, copy, state["blocks"], craft)
+    #
+    # BEFORE THE BUILD. The check reads the drafter's words and the blocks
+    # they assemble into — plain text, block types, subject and preheader —
+    # all of which exist before the maker runs. Checked after the build, a
+    # rewrite that won threw the built email away and built it again: the
+    # owner's run of 2026-09-23 spent a second ten-minute maker pass so.
+    #
+    # CLEANED AS THE BUILD CLEANS IT (`_undouble`), so a generation stutter
+    # the build removes is not a craft finding that buys a redraft.
+    def _blocks_of(c: dict) -> list:
+        c["subject"] = _undouble(c.get("subject", ""))
+        c["preheader"] = _undouble(c.get("preheader", ""))
+        blocks = _assemble_blocks(
+            c, ents, hero, offered_claims=offered, note=lambda _m: None,
+            fmt=craft.get("format", ""), signatory=theme.get("sender"),
+            default_cta_url=_cta_home, known_urls=_known)[0]
+        _undouble_blocks(blocks)
+        return blocks
+
+    findings = _craft_review(ctx, copy, _blocks_of(copy), craft)
     if findings and basis == "model":
+        ctx.step("rewriting the message to the craft notes")
         again, _b2, _w2 = draft_campaign(
             {**ctx.bundle,
              "rules": {**ctx.bundle.get("rules", {}),
@@ -3780,10 +3802,7 @@ def _run_campaign_email(ctx: Context) -> dict:
             retry = _shape_campaign_copy(again, ctx.note)
             if plan_subject:
                 retry["subject"] = plan_subject
-            left = _craft_review(ctx, retry, _assemble_blocks(
-                retry, ents, hero, offered_claims=offered, note=lambda _m: None,
-                fmt=craft.get("format", ""), signatory=theme.get("sender"),
-                default_cta_url=_cta_home, known_urls=_known)[0], craft)
+            left = _craft_review(ctx, retry, _blocks_of(retry), craft)
             # Keep the rewrite only when it is actually better — and BLOCKS
             # decide that before anything else. The first rule here compared
             # total finding counts, so a retry that removed the one thing
@@ -3795,10 +3814,11 @@ def _run_campaign_email(ctx: Context) -> dict:
             better = (len(now) < len(was)
                       or (len(now) == len(was) and len(left) < len(findings)))
             if better:
-                copy, to_check, findings = retry, _build(retry), left
+                copy, findings = retry, left
                 ctx.note("craft: redrafted once and it came back better"
                          + (f" — {len(was) - len(now)} blocking problem(s) "
                             f"resolved" if len(now) < len(was) else ""))
+    to_check = _build(copy)
     for f in findings:
         ctx.note(f"craft ({f['severity']}): {f['detail']} → {f['fix']}")
 
@@ -3817,6 +3837,7 @@ def _run_campaign_email(ctx: Context) -> dict:
                                 "unsubscribe link native"))
 
     def _repair(previous: str, failures: list) -> str:
+        ctx.step("rewriting the message — the finished email failed a check")
         why = "\n".join(f"- {f['detail']} → {f['fix']}" for f in failures)
         again, _b, _w = draft_campaign(
             {**ctx.bundle,

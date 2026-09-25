@@ -428,6 +428,31 @@ def main() -> int:
        and (rc.latest(sid, "baci") or {}).get("id") and any("THE STORY this email tells" in p for p in compose_seen if "FINDINGS" in p), got.get("note"))
     ck("the run is on file with its picture and no open finding",
        (rc.latest(sid, "baci") or {}).get("status") == rc.SHIPPABLE and rc.latest(sid, "baci")["png"] and not rc.latest(sid, "baci")["findings"])
+
+    print("\n— the render is READ: contrast measured on what the reader sees —")
+    # A line the inline styles cannot see: its colour came from a class and
+    # its ground is the dark section it sits on. The shot reads it as drawn.
+    dark = io.BytesIO()
+    from PIL import Image as _Img
+    _Img.new("RGB", (640, 400), (27, 27, 27)).save(dark, "PNG")
+    read_shot = {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": "",
+                 "texts": [{"text": "Muted words on the dark section", "chars": 31, "color": "rgb(85, 85, 85)",
+                            "opacity": 1, "size": 16, "weight": 400, "family": "Helvetica, Arial, sans-serif",
+                            "rects": [[20, 20, 300, 20]]}],
+                 "grounds": [], "ground": dark.getvalue()}
+    # As the real door does: the render is read only when the maker asks.
+    shots.shoot = lambda html, read=False, **k: (dict(read_shot) if read else
+                                                 {k_: v for k_, v in read_shot.items() if k_ in ("ok", "png", "door", "ms", "why")})
+    judged.clear()
+    got_r = rc.run(sid, "baci", "portofino", seed="read")
+    first = got_r["rounds"][0]["check"]
+    ck("a line the render shows unreadable blocks the round — measured, where the inline styles saw nothing",
+       any(c["code"] == "contrast" and "#555555 on #1b1b1b" in c["what"] and "floor for body text" in c["what"]
+           for c in first), str([c for c in first if "contrast" in c["code"]])[:300])
+    ck("  and the inline-style reading is replaced, not added to",
+       not any(c["code"] == "contrast_unresolved" or (c["code"] == "contrast" and "floor for body text" not in c["what"])
+               for c in first))
+    shots.shoot = lambda html, **k: {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""}
     judged.clear()
     worse = iter([1, 2, 2])
     answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else

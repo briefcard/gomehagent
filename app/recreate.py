@@ -21,6 +21,7 @@ component named on the right-hand side of that table.
 """
 from __future__ import annotations
 
+import functools
 import json
 import re
 from html.parser import HTMLParser
@@ -726,8 +727,9 @@ change the comment and every place that follows from it.
 
 %(story)s
 FINDINGS — a [contrast] finding is closed FIRST and by changing the text colour or the ground
-it sits on to a pair that reads at 4.5:1, never by leaving the palette as it is; the rest in
-the order given.
+it sits on to a pair that reads at the floor it names (4.5:1, 3:1 for large type) — over a
+photograph, by a solid panel or a darker/lighter ground under the words, never by leaving it
+as it is; the rest in the order given.
 %(findings)s
 
 OUTPUT, exactly:
@@ -1295,13 +1297,137 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
 _SYSTEM = re.compile(r"<!--\s*system:(.*?)-->", re.S | re.I)
 
 
-def system_check(html: str) -> list[dict]:
+#: WCAG 2 AA: text reads at 4.5:1 against its ground; LARGE text — 24 px, or
+#: 18.66 px at bold — at 3:1.
+CONTRAST_BODY, CONTRAST_LARGE = 4.5, 3.0
+#: A colour is a COLOUR (not a near-black, near-white or grey — nobody's)
+#: from this much chroma, and it is the brand's or a photograph's when its hue
+#: sits this close to one of theirs: a tint or a shade of it, not a new one.
+CHROMA, HUE_SPREAD = 0.12, 25
+
+
+def render_check(shot: dict, kit_: dict, cast_: dict | None = None) -> list[dict]:
+    """READABILITY AND COHERENCE, measured on the render — what the reader sees.
+
+    `check` reads contrast off the inline styles, and a new design routinely
+    puts its colour where that cannot look: a class in a <style> block, a
+    photograph behind the headline, rgb(), a link left in the browser's blue.
+    `shots.shoot(read=True)` reads each line as the browser drew it — colour,
+    size, weight, face — and shoots the page again with every letter
+    transparent, so the ground under each line is its own pixels. Findings as
+    `check` makes them: a line under the WCAG floor against nine-tenths of its
+    ground, and a colour neither the brand's nor a tone of the photographs
+    cast for this email. The faces and sizes the render shows are held to the
+    composer's declared system by `system_check(seen=shot)`."""
+    import io
+    from PIL import Image, ImageStat
+    from . import palette
+    out: list[dict] = []
+    add = lambda code, sev, where, what: out.append({"code": code, "severity": sev, "where": where, "what": what})  # noqa: E731
+    texts = shot.get("texts") or []
+    ground = Image.open(io.BytesIO(shot["ground"])).convert("RGB") if shot.get("ground") else None
+    said: set = set()
+    for t in texts if ground else []:
+        r, g, b, a = _rgba(t["color"])
+        a *= float(t.get("opacity") or 1)
+        px: list = []
+        spread = 0.0
+        for x, y, w, h in t["rects"][:2]:
+            box = (max(0, int(x)), max(0, int(y)),
+                   min(ground.width, int(x + w) + 1), min(ground.height, int(y + h) + 1))
+            if box[2] > box[0] and box[3] > box[1]:
+                crop = ground.crop(box)
+                spread = max(spread, *ImageStat.Stat(crop).stddev)
+                crop.thumbnail((32, 8))
+                px += list(crop.getdata())
+        if not px:
+            continue
+        ratios = sorted(_ratio(tuple(round(a * c + (1 - a) * q) for c, q in zip((r, g, b), p)), p)
+                        for p in px)
+        ratio = ratios[len(ratios) // 10]
+        large = t["size"] >= 24 or (t["size"] >= 18.66 and t["weight"] >= 700)
+        floor = CONTRAST_LARGE if large else CONTRAST_BODY
+        if ratio >= floor:
+            continue
+        mid = tuple(sorted(c)[len(c) // 2] for c in zip(*px))
+        fg, under = palette.to_hex((r, g, b)), palette.to_hex(mid)
+        if (fg, under) in said:
+            continue
+        said.add((fg, under))
+        add("contrast", "blocks", t["text"][:40],
+            f"{fg} on {under if spread <= 8 else f'a photograph (around {under})'} reads at {ratio:.1f}:1"
+            f" — {floor:g}:1 is the floor for {'large' if large else 'body'} text")
+    theme = kit_.get("theme") or {}
+    ours = [h for h in (theme.get("colors") or {}).values() if isinstance(h, str) and palette.parse(h)]
+    for pick in ((cast_ or {}).get("picks") or {}).values():
+        ours += [h for h in (pick.get("colours") or {}).values() if isinstance(h, str) and palette.parse(h)]
+    ours = sorted({palette.norm(h) for h in ours if _chroma(h) >= CHROMA})
+    # WHAT IS PAINTED: a text colour carried by twenty letters or more, a
+    # ground as big as a button or bigger — a badge-sized chip is not a colour
+    # of the design.
+    used: dict = {}
+    for t in texts:
+        h = palette.to_hex(_rgba(t["color"])[:3])
+        used[h] = used.get(h, 0) + int(t.get("chars") or 0)
+    used = {h: n for h, n in used.items() if n >= 20}
+    for g_ in shot.get("grounds") or []:
+        rgba = _rgba(g_["color"])
+        if rgba[3] >= 0.5 and int(g_.get("area") or 0) >= 2000:
+            h = palette.to_hex(rgba[:3])
+            used[h] = used.get(h, 0) + int(g_["area"])
+    strays = [h for h, _n in sorted(used.items(), key=lambda kv: -kv[1])
+              if _chroma(h) >= CHROMA and not any(_hue_gap(h, o) <= HUE_SPREAD for o in ours)]
+    for h in strays[:3]:
+        add("off_palette", "blocks", "colour",
+            f"{h} is neither the brand's colour nor a tone of its photographs — "
+            + (f"use {', '.join(ours[:4])} or a tint of one" if ours else
+               "this brand and its photographs are neutral here: keep to them"))
+    return out
+
+
+def _rgba(css: str) -> tuple:
+    """`rgb(r, g, b)` / `rgba(r, g, b, a)`, as the browser reports a colour."""
+    v = [float(x) for x in re.findall(r"[\d.]+", css or "")]
+    return (int(v[0]), int(v[1]), int(v[2]), v[3] if len(v) > 3 else 1.0) if len(v) >= 3 else (0, 0, 0, 1.0)
+
+
+def _ratio(fg: tuple, bg: tuple) -> float:
+    a, b = _lum(*fg), _lum(*bg)
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
+@functools.lru_cache(maxsize=65536)
+def _lum(r: int, g: int, b: int) -> float:
+    from . import palette
+    return palette.luminance(palette.to_hex((r, g, b)))
+
+
+def _chroma(h: str) -> float:
+    from . import palette
+    rgb = palette.parse(h) or (0, 0, 0)
+    return (max(rgb) - min(rgb)) / 255
+
+
+def _hue_gap(a: str, b: str) -> float:
+    import colorsys
+    from . import palette
+    ha, hb = (colorsys.rgb_to_hsv(*(c / 255 for c in (palette.parse(x) or (0, 0, 0))))[0] * 360
+              for x in (a, b))
+    d = abs(ha - hb)
+    return min(d, 360 - d)
+
+
+def system_check(html: str, seen: dict | None = None) -> list[dict]:
     """The composer is held to the system IT declared: the sizes it uses are
     its scale, the side insets its inset, the faces its four at most. Not a
     taste rule — its own word. The owner, 2026-09-17: "the padding is
     inconsistent per section so it looks choppy; too much variation in fonts
     and sizes." Baked blocks are pictures by now, so display type set inside
-    them is not counted. `{code, severity, where, what}` findings."""
+    them is not counted. `{code, severity, where, what}` findings.
+
+    With `seen` — a shot read by `shots.shoot(read=True)` — the sizes and
+    faces are the ones the RENDER shows; the inline styles miss a class in a
+    <style> block, and a new design puts its type there."""
     out: list[dict] = []
     m = _SYSTEM.search(html)
     if not m:
@@ -1314,7 +1440,9 @@ def system_check(html: str) -> list[dict]:
     seg = lambda key: (re.search(key + r"\s*:?(.*?)(?:·|\n|$)", decl, re.I | re.S) or [None, ""])[1]  # noqa: E731
     scale = [x for x in nums(seg("scale")) if x >= 8]     # "display=72 / headline=40 …" or "72/40/32/24/16/12"
     inset = nums(seg("inset"))[:1]
-    used_sizes = sorted({int(float(x)) for x in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", body) if float(x) > 2})
+    texts = (seen or {}).get("texts")
+    used_sizes = (sorted({round(t["size"]) for t in texts if t["size"] > 2}) if texts is not None else
+                  sorted({int(float(x)) for x in re.findall(r"font-size:\s*(\d+(?:\.\d+)?)px", body) if float(x) > 2}))
     if scale:
         stray = [x for x in used_sizes if not any(abs(x - d) <= 1 for d in scale)]
         if len(stray) >= 2:
@@ -1340,7 +1468,8 @@ def system_check(html: str) -> list[dict]:
                     "what": f"side insets {', '.join(map(str, distinct))} px — the system declares {inset[0]}; the column "
                             f"content sits on {inset[0]}, a card may have one inner inset, nothing else"})
     faces = {re.split(r"\s*,", f.strip().strip("'\""))[0].strip("'\" ").lower()
-             for f in re.findall(r"font-family:\s*([^;\"]+)", body)}
+             for f in ([t["family"] for t in texts] if texts is not None else
+                       re.findall(r"font-family:\s*([^;\"]+)", body))}
     if len(faces) > 3:
         out.append({"code": "system_faces", "severity": "blocks", "where": "type",
                     "what": f"{len(faces)} faces in use ({', '.join(sorted(faces))}) — three at most: the brand's heading "
@@ -1909,8 +2038,17 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         told = truth(_Walk_words(html), material_, tenant=tenant)
         calls += told.get("calls", 0)
-        checks = checks + told["findings"] + bake_findings + system_check(html) + story_check(html, story_, kit_)
-        shot = shots.shoot(_inline_media(html))
+        shot = shots.shoot(_inline_media(html), read=True)
+        checks = checks + told["findings"] + bake_findings + system_check(html, seen=shot) + story_check(html, story_, kit_)
+        if "texts" in shot:
+            # MEASURED ON THE RENDER where it could be read, in place of what
+            # the inline styles could say about contrast — they miss classes,
+            # photographs and rgb(), which is where a new design puts colour.
+            checks = ([f for f in checks if f["code"] not in ("contrast", "contrast_unresolved")]
+                      + render_check(shot, kit_, cast_))
+            shot.pop("ground", None)
+        elif shot.get("read_why"):
+            story.append(shot["read_why"] + " — contrast was read off the inline styles.")
         png_id = ""
         if shot.get("ok"):
             put = media.put(tenant, shot["png"], mime="image/png", origin="generated")

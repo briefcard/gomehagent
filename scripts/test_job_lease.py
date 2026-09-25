@@ -217,12 +217,16 @@ def main() -> int:
     # it red for being right. The claim is that every registration names a
     # wrapper the worker defines AND every wrapper is registered.
     wrappers = set(re.findall(r'^def (\w+_sharded)\(\) -> dict:', src, re.M))
+    # THE ONE EXCEPTION, and why: the queue tick runs on every instance with no
+    # lease of its own because the claim on each ROW is the lease
+    # (`jobs.claim`, one statement decides) — test_job_queue runs it.
+    per_account = [r for r in sharded_regs if r != "queue_tick"]
     ck("every sharded registration names a wrapper, and every wrapper is registered",
-       set(sharded_regs) == wrappers and len(sharded_regs) == len(set(sharded_regs)),
+       set(per_account) == wrappers and len(sharded_regs) == len(set(sharded_regs)),
        f"registered {sorted(sharded_regs)} vs defined {sorted(wrappers)}")
     ck("  and each wrapper calls _each_tenant",
        all(re.search(r'def ' + w + r'\(\) -> dict:\n(?:.*\n){0,3}.*_each_tenant\(', src)
-           for w in sharded_regs),
+           for w in per_account),
        "a wrapper that loops itself is the job-level lease wearing a new name")
 
     # ---- the worker-local sweeps are units now --------------------------

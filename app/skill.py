@@ -265,6 +265,8 @@ class Context:
     thin: list = field(default_factory=list)
     items: list = field(default_factory=list)
     notes: list = field(default_factory=list)
+    #: The queue's `progress` writer when a person is watching; see `step`.
+    progress: object = None
 
     # -- reading -----------------------------------------------------------
 
@@ -283,6 +285,14 @@ class Context:
     def note(self, text: str) -> None:
         """Something the operator should see that is not an output."""
         self.notes.append(text)
+
+    def step(self, text: str) -> None:
+        """What the run is doing NOW, for whoever is watching it — the queue
+        hands `run` a `progress` writer and its text lands on the job's card.
+        A twenty-minute run with nothing on the card looked the same as a
+        dead one. Nobody watching (a scheduled run): nothing happens."""
+        if self.progress:
+            self.progress(text)
 
     # -- writing -----------------------------------------------------------
 
@@ -760,7 +770,7 @@ def preflight(key: str, tenant: str) -> dict:
 
 
 def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
-        run_id: str = "", **params) -> dict:
+        run_id: str = "", progress=None, **params) -> dict:
     """Run one skill for one account. The only entry point.
 
     Everything a caller needs to decide what happens next is in the return:
@@ -993,7 +1003,8 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
                 "run_id": run_id}
 
     ctx = Context(tenant=tenant, skill=sk, bundle=bundle, params=params,
-                  run_id=run_id, autonomy=pre["autonomy"], thin=thin)
+                  run_id=run_id, autonomy=pre["autonomy"], thin=thin,
+                  progress=progress)
     for gap in thin:
         ctx.note(f"working without: {gap}")
     if thin:

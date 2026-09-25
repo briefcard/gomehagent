@@ -253,7 +253,11 @@ def enqueue(tenant: str, kind_: str, *, payload: dict | None = None,
 # ---------------------------------------------------------------------------
 
 def claim(tenant: str, holder: str) -> str:
-    """Take the oldest queued job for one account, or "" — ONE statement decides.
+    """Take the oldest queued job, or "" — ONE statement decides.
+
+    For one account, or with `tenant=""` for ANY active account: the worker's
+    tick takes whatever has waited longest, so an account never waits behind
+    another account's turn.
 
     The row is selected and then claimed by an UPDATE whose WHERE clause
     still says `queued`, so two workers issuing it in the same instant get
@@ -263,9 +267,10 @@ def claim(tenant: str, holder: str) -> str:
     """
     now = db.utcnow()
     with db.SessionLocal() as s:
-        row = (s.query(db.JobQueue)
-               .filter(db.JobQueue.tenant == tenant, db.JobQueue.state == "queued")
-               .order_by(db.JobQueue.created_at.asc()).first())
+        q = (s.query(db.JobQueue).filter(db.JobQueue.state == "queued",
+                                         db.JobQueue.tenant == tenant)
+             .order_by(db.JobQueue.created_at.asc()) if tenant else _line(s))
+        row = q.first()
         if row is None:
             return ""
         got = s.execute(
@@ -277,6 +282,15 @@ def claim(tenant: str, holder: str) -> str:
                     attempts=db.JobQueue.attempts + 1, detail=""))
         s.commit()
         return row.id if got.rowcount == 1 else ""
+
+
+def _line(s):
+    """THE LINE the workers take from: queued jobs of active accounts, oldest
+    first. `claim` takes its head; the queue page numbers positions in it."""
+    active = s.query(db.Tenant.key).filter(db.Tenant.status == "active")
+    return (s.query(db.JobQueue)
+            .filter(db.JobQueue.state == "queued", db.JobQueue.tenant.in_(active))
+            .order_by(db.JobQueue.created_at.asc()))
 
 
 def heartbeat(job_id: str, detail: str | None = None) -> None:
@@ -316,36 +330,63 @@ def reclaim() -> dict:
     a kind declared retryable goes back on the queue, and one that is not
     stops as `interrupted` and says so, which is a different sentence from
     "failed" and leads to a different action.
+
+    What is left for this after `let_go`: a worker that was KILLED, not
+    stopped — out of memory, or past its shutdown grace — and so never said
+    what it held. Five minutes of silence is the only sign.
     """
     cut = db.utcnow() - dt.timedelta(seconds=STALE_AFTER_SECONDS)
-    out = {"retried": 0, "interrupted": 0}
     with db.SessionLocal() as s:
-        stale = (s.query(db.JobQueue)
-                 .filter(db.JobQueue.state == "running",
-                         db.JobQueue.heartbeat_at < cut).all())
-        for row in stale:
-            was = row.holder or "a worker"
-            if retryable(row.kind):
-                row.state = "queued"
-                row.holder = ""
-                row.leased_until = None
-                row.detail = (f"{was} stopped before it finished (a deploy does "
-                              f"that) — queued again, attempt {int(row.attempts or 0) + 1}")
-                out["retried"] += 1
-            else:
-                row.state = "interrupted"
-                row.finished_at = db.utcnow()
-                row.leased_until = None
-                row.detail = (
-                    f"{was} stopped while this was running — a deploy does that. "
-                    "It was not started again on its own, because this job can "
-                    "spend a model call and file an approval, and doing that "
-                    "twice for one press is worse than waiting. Press it again "
-                    "when you want it."
-                    + (f" Last progress: {row.detail}" if row.detail else ""))
-                out["interrupted"] += 1
-        if stale:
-            s.commit()
+        return _give_back(s, s.query(db.JobQueue)
+                          .filter(db.JobQueue.state == "running",
+                                  db.JobQueue.heartbeat_at < cut).all())
+
+
+def let_go(holder: str) -> dict:
+    """A worker that is being STOPPED gives back what it holds, now.
+
+    Render stops a worker on every deploy (SIGTERM, then a kill thirty
+    seconds later). A campaign email takes twenty minutes, so the job cannot
+    finish in the grace; what it can do is say so. Without this the row read
+    "running now" for five more minutes over a process that no longer
+    existed, until `reclaim` noticed the silence. `{retried, interrupted}`.
+    """
+    with db.SessionLocal() as s:
+        return _give_back(s, s.query(db.JobQueue)
+                          .filter(db.JobQueue.state == "running",
+                                  db.JobQueue.holder == holder).all(),
+                          stopped=True)
+
+
+def _give_back(s, rows: list, *, stopped: bool = False) -> dict:
+    """The one disposition for a job whose worker is gone: a retryable kind
+    queued again, any other `interrupted` with its own re-run control."""
+    out = {"retried": 0, "interrupted": 0}
+    how = ("was stopped by a deploy or a restart" if stopped else
+           "stopped answering — its process was killed (running out of memory "
+           "does that)")
+    for row in rows:
+        was = row.holder or "a worker"
+        if retryable(row.kind):
+            row.state = "queued"
+            row.holder = ""
+            row.leased_until = None
+            row.detail = (f"{was} {how} before this finished — queued again, "
+                          f"attempt {int(row.attempts or 0) + 1}")
+            out["retried"] += 1
+        else:
+            row.state = "interrupted"
+            row.finished_at = db.utcnow()
+            row.leased_until = None
+            row.detail = (
+                f"{was} {how} while this was running. It was not started again "
+                "on its own, because this job can spend a model call and file "
+                "an approval, and doing that twice for one press is worse than "
+                "waiting. Press it again when you want it."
+                + (f" Last progress: {row.detail}" if row.detail else ""))
+            out["interrupted"] += 1
+    if rows:
+        s.commit()
     return out
 
 
@@ -583,11 +624,48 @@ def run_one(job_id: str) -> dict:
     return {"ok": state == "done", "state": state, "detail": _summary(result)}
 
 
-def drain(tenant: str, holder: str, limit: int = 4) -> dict:
-    """Claim and run this account's queued jobs. `{ran, ids}`.
+#: ONE JOB AT A TIME PER WORKER PROCESS. Memory is the limit, not CPU: a
+#: worker has 512 MB, about 130 of them the app itself, and a campaign email
+#: with its pictures takes most of the rest. Two instances, two jobs at once.
+_SLOT = threading.Lock()
 
-    Bounded per tick so one account with a long queue cannot hold a worker
-    away from the accounts after it in the shard.
+
+def start_next(holder: str) -> str:
+    """Start the oldest waiting job on its own thread, if this process is free.
+
+    The id started, or "" when this process is busy or nothing is waiting.
+    Returns at once. The worker's tick used to RUN the job inside itself, so a
+    twenty-minute campaign email left that worker unable to pick anything else
+    up — or to give back a dead sibling's job — until it finished.
+    """
+    if not _SLOT.acquire(blocking=False):
+        return ""
+    try:
+        job_id = claim("", holder)
+    except Exception:
+        _SLOT.release()
+        raise
+    if not job_id:
+        _SLOT.release()
+        return ""
+
+    def _run() -> None:
+        try:
+            run_one(job_id)
+        finally:
+            _SLOT.release()
+
+    threading.Thread(target=_run, name=f"job-{job_id[:8]}", daemon=True).start()
+    return job_id
+
+
+def drain(tenant: str, holder: str, limit: int = 4) -> dict:
+    """Claim and run this account's queued jobs HERE, one after another.
+    `{ran, ids}`.
+
+    The same `claim` and `run_one` as `start_next`, without the thread — for a
+    caller that needs the result before it returns (the suites stand it in for
+    the worker).
     """
     ran, ids = 0, []
     for _ in range(max(1, limit)):
@@ -666,6 +744,12 @@ def status(tenant: str, kind_: str) -> dict:
             "says": got["says"], "attempts": got["attempts"]}
 
 
+def span(n: int) -> str:
+    """Seconds as a person reads them: `45s`, `6m 10s`."""
+    n = int(n or 0)
+    return f"{n}s" if n < 90 else f"{n // 60}m {n % 60}s"
+
+
 def board(tenant: str, *, done: int = 12) -> dict:
     """WHAT THIS ACCOUNT HAS IN THE AIR, for the pill in the frame and the
     queue room it clicks into.
@@ -685,6 +769,12 @@ def board(tenant: str, *, done: int = 12) -> dict:
         rows = (s.query(db.JobQueue).filter(db.JobQueue.tenant == tenant)
                 .order_by(db.JobQueue.created_at.asc()).all())
         running, queued, fin = [], [], []
+        took: dict = {}
+        # A POSITION IN THE WORKERS' LINE, not this account's: they take the
+        # oldest job of any account, so one press behind three of another
+        # account's is fourth.
+        place = {jid: i + 1 for i, (jid,) in
+                 enumerate(_line(s).with_entities(db.JobQueue.id))}
         for r in rows:
             got = as_dict(r)
             if r.state == "running":
@@ -692,15 +782,26 @@ def board(tenant: str, *, done: int = 12) -> dict:
                 running.append(got)
             elif r.state == "queued":
                 got["waited"] = _secs(r.created_at)
-                got["position"] = len(queued) + 1
+                got["position"] = place.get(r.id, len(queued) + 1)
                 queued.append(got)
             else:
                 got["ran_for"] = (int((db.as_utc(r.finished_at)
                                        - db.as_utc(r.started_at)).total_seconds())
                                   if r.finished_at and r.started_at else 0)
+                if r.state == "done" and got["ran_for"]:
+                    took[(r.kind, r.system_key or "")] = got["ran_for"]
                 fin.append(got)
+        # HOW LONG THE LAST ONE TOOK, so "3m so far" has something to be
+        # read against — a campaign email is minutes, not seconds.
+        for got in running:
+            got["last_took"] = took.get((got["kind"], got["system_key"]), 0)
         fin.reverse()
         fin = fin[:max(0, done)]
+        # WHAT A WAITING JOB IS WAITING FOR: every worker's slot, whichever
+        # account filled it. "Queued" beside nothing running is a job about to
+        # start; beside two twenty-minute runs, it is not.
+        busy = (s.query(db.JobQueue)
+                .filter(db.JobQueue.state == "running").count())
     n = len(running) + len(queued)
     if not n:
         says = ""
@@ -710,7 +811,7 @@ def board(tenant: str, *, done: int = 12) -> dict:
         if n > 1:
             says += f" · {n - 1} more waiting"
     return {"running": running, "queued": queued, "done": fin,
-            "n_flight": n, "says": says}
+            "n_flight": n, "says": says, "busy_everywhere": busy}
 
 
 def cancel(job_id: str) -> str:

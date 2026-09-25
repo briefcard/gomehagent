@@ -137,8 +137,8 @@ def main() -> int:
     said = jobs.latest("baci", system_key="gbp_listing")
     ck("a job that can spend a model call is NOT re-run on its own",
        said["state"] == "interrupted" and "not started again" in said["says"], said["says"])
-    ck("  and it says a deploy did it, and what to do", "deploy" in said["detail"]
-       and "again" in said["detail"], said["detail"][:90])
+    ck("  and it says its worker went silent, and what to do", "stopped answering"
+       in said["detail"] and "again" in said["detail"], said["detail"][:90])
     ck("  which is a different sentence from a failure — they need different things",
        said["says"] != jobs.as_dict(None).get("says"))
 
@@ -297,15 +297,8 @@ def main() -> int:
     ck("  and a mode with nothing to work on is refused rather than guessed",
        not _rc.job("baci", mode="run")["ok"] and not _rc.job("baci", mode="swipe")["ok"])
 
-    print("\n— the worker drains it, and both instances may —")
-    wsrc = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "app", "worker.py"), encoding="utf-8").read()
-    ck("the drain is registered through the lease wrapper",
-       bool(re.search(r'_safe\(queue_drain_sharded, "job queue", sharded=True\)', wsrc)))
-    ck("  sharded, so the second instance adds throughput instead of skipping",
-       "def queue_drain_sharded() -> dict:" in wsrc and "_each_tenant(\"job queue\"" in wsrc)
-    ck("  and the system_run kind is the one that is never retried silently",
-       jobs.KINDS["system_run"]["retryable"] is False)
+    print("\n— the system_run kind is the one that is never retried silently —")
+    ck("system_run is not retryable", jobs.KINDS["system_run"]["retryable"] is False)
 
     ran.clear()
     jobs.enqueue("baci", "_t_ok", system_key="drained")
@@ -313,6 +306,82 @@ def main() -> int:
     ck("a drain claims and runs what is waiting", drained["ran"] >= 1 and len(ran) >= 1,
        str(drained))
     ck("  and stops when the queue is empty", jobs.drain("baci", "instance-A")["ran"] == 0)
+
+    print("\n— the worker's tick starts work and comes straight back —")
+    # The tick used to RUN the job inside itself: a twenty-minute campaign
+    # email left that worker unable to take anything else for twenty minutes.
+    import threading
+    import time
+    from app import tenants
+    tenants.seed()
+    with db.SessionLocal() as s:          # the sections above leave rows open
+        s.query(db.JobQueue).filter(db.JobQueue.state.in_(("queued", "running"))) \
+            .update({"state": "done"}, synchronize_session=False)
+        s.commit()
+    gate = threading.Event()
+
+    def _hold(tenant, **kw):
+        gate.wait(10)
+        return {"status": "sent", "items": [1]}
+
+    jobs.KINDS["_t_hold"] = {"what": "a long test job", "target": "t:hold",
+                             "retryable": False}
+    jobs._resolve = lambda target: {"t:work": _work, "t:boom": _boom,
+                                    "t:hold": _hold}[target]
+
+    def _until(job_id, state):
+        for _ in range(100):
+            if _state(job_id) == state:
+                return True
+            time.sleep(0.05)
+        return False
+
+    long_ = jobs.enqueue("baci", "_t_hold", system_key="long")["id"]
+    behind = jobs.enqueue("eien", "_t_ok", system_key="behind")["id"]
+    t0 = time.monotonic()
+    got = worker.queue_tick()
+    ck("the tick starts the oldest waiting job and returns at once",
+       got["started"] == long_ and time.monotonic() - t0 < 5
+       and _state(long_) == "running", str(got))
+    ck("  a worker already running one starts nothing more — one job per "
+       "process, because memory is the limit",
+       worker.queue_tick()["started"] == "" and _state(behind) == "queued")
+    gate.set()
+    ck("  the job runs to its end on its own thread", _until(long_, "done"))
+    for _ in range(100):
+        if not jobs._SLOT.locked():
+            break
+        time.sleep(0.05)
+    ck("  and the next tick takes what waited — another account's job, oldest first",
+       worker.queue_tick()["started"] == behind and _until(behind, "done"))
+
+    print("\n— a deploy stops the worker: what it held says so at once —")
+    held = jobs.enqueue("baci", "_t_ok", system_key="stopped")["id"]
+    jobs.claim("baci", "instance-B")
+    redo = jobs.enqueue("baci", "_t_retry", system_key="stopped-safe")["id"]
+    jobs.claim("baci", "instance-B")
+    other = jobs.enqueue("baci", "_t_ok", system_key="elsewhere")["id"]
+    jobs.claim("baci", "instance-C")
+    calls = []
+    real_exit, real_let_go = worker.os._exit, jobs.let_go
+    worker.os._exit = lambda code: calls.append(("exit", code))
+    jobs.let_go = lambda holder: calls.append(("let_go", holder)) or real_let_go(holder)
+    real_holder = worker._holder
+    worker._holder = lambda: "instance-B"
+    try:
+        worker._stop(15, None)
+    finally:
+        worker.os._exit, jobs.let_go, worker._holder = real_exit, real_let_go, real_holder
+    ck("the stop signal gives back what this worker holds, then exits",
+       calls == [("let_go", "instance-B"), ("exit", 0)], str(calls))
+    said = jobs.latest("baci", system_key="stopped")
+    ck("  the job it held is interrupted now, not five minutes from now",
+       said["state"] == "interrupted", said["state"])
+    ck("  and says a deploy stopped it, and to press again",
+       "deploy" in said["detail"] and "again" in said["detail"], said["detail"][:90])
+    ck("  a job that is safe to repeat goes straight back on the queue",
+       _state(redo) == "queued")
+    ck("  and another worker's job is not touched", _state(other) == "running")
 
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")

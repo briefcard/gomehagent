@@ -425,6 +425,14 @@ def media(blob_id: str):
         "X-Content-Type-Options": "nosniff"})
 
 
+def _jobs_running() -> int:
+    try:
+        with db.SessionLocal() as s:
+            return s.query(db.JobQueue).filter(db.JobQueue.state == "running").count()
+    except Exception:                                            # noqa: BLE001
+        return -1
+
+
 @app.get("/health")
 def health(key: str = Depends(admin_key)) -> dict:
     """Liveness, and WHICH BUILD is answering.
@@ -455,7 +463,11 @@ def health(key: str = Depends(admin_key)) -> dict:
             # was an import side effect nothing on the web path performed.
             # The registry self-loads now, and this is the curl that proves
             # it per process rather than per incident.
-            "skills": _skill_count()}
+            "skills": _skill_count(),
+            # WHETHER A DEPLOY NOW WOULD STOP SOMEBODY'S RUN. A push restarts
+            # the worker and the job in hand is lost; this is read before a
+            # push. A count names no account, so it needs no key.
+            "jobs_running": _jobs_running()}
     if key != config.APPROVAL_SECRET:
         return base                     # liveness + build identity, no roster
     from . import channel
@@ -7059,8 +7071,9 @@ def plan_run(key: str = Depends(admin_key), id: str = "", tenant: str = "",
     return _back_to_system(
         tenant, system, anchor=f"plan-{id}", ppage=ppage,
         ok=("already running — " if put.get("already") else "queued — ")
-           + "a worker picks it up within half a minute; the bar at the bottom "
-             "of the page shows it, and the result lands in Waiting on you")
+           + "it starts when a worker is free (each runs one job at a time); the "
+             "bar at the bottom of the page shows it, and the result lands in "
+             "Waiting on you")
 
 
 @app.get("/admin/plan_propose")
@@ -8763,7 +8776,8 @@ def _queued(got: dict, doing: str) -> tuple:
         return ("err", got.get("why") or "that could not be queued")
     if got.get("already"):
         return ("ok", f"{doing} — {got.get('why') or 'it is already running'}; it appears here when it lands")
-    return ("ok", f"{doing} — a worker picks this up within half a minute; it appears here when it lands")
+    return ("ok", f"{doing} — queued; it starts when a worker is free (each runs one "
+                  f"job at a time), and it appears here when it lands")
 
 
 @app.get("/admin/fill")

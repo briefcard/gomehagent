@@ -90,7 +90,7 @@ SABOTAGES = [
     {
         "name": "a_queued_job_does_not_know_its_place",
         "file": "app/jobs.py",
-        "find": '                got["position"] = len(queued) + 1\n',
+        "find": '                got["position"] = place.get(r.id, len(queued) + 1)\n',
         "replace": '                got["position"] = 1  # SABOTAGE\n',
         "suites": ["test_the_queue_is_visible.py"],
         "why": "every waiting job says it is next, so three behind a long "
@@ -207,10 +207,18 @@ SABOTAGES = [
         "why": "'Read the reference again' quietly recreates from the old reading instead, so a design whose READING was wrong can never be corrected and the owner presses a button that cannot do what it says",
     },
     {
+        "name": 'large_type_is_held_to_the_body_floor',
+        "file": 'app/recreate.py',
+        "find": '        floor = CONTRAST_LARGE if large else CONTRAST_BODY\n',
+        "replace": '        floor = CONTRAST_BODY  # SABOTAGE\n',
+        "suites": ['test_the_render_is_read.py'],
+        "why": "a big headline that reads at 3:1 is blocked as if it were body copy, so every round is spent darkening display type that already reads — and the edits that matter wait behind it",
+    },
+    {
         "name": 'a_stopped_run_restarts_itself_and_spends_again',
         "file": 'app/jobs.py',
-        "find": '            if retryable(row.kind):\n',
-        "replace": '            if True:  # SABOTAGE\n',
+        "find": '        if retryable(row.kind):\n',
+        "replace": '        if True:  # SABOTAGE\n',
         "suites": ['test_job_queue.py'],
         "why": "a run a deploy stopped is started again on its own, so a system run that had already called the model and filed an approval does both a second time — one press becomes two approvals, and the owner approving both sends twice",
     },
@@ -3960,8 +3968,8 @@ SABOTAGES = [
     {
         "name": 'the_capability_report_needs_the_key',
         "file": 'app/web.py',
-        "find": '            "skills": _skill_count()}',
-        "replace": '            "skills": _skill_count(),\n            "capabilities": _capability_report()}  # SABOTAGE',
+        "find": '            "jobs_running": _jobs_running()}',
+        "replace": '            "jobs_running": _jobs_running(),\n            "capabilities": _capability_report()}  # SABOTAGE',
         "suites": ['test_console_auth.py'],
         "why": 'the infrastructure report moves to the unauthenticated half, so a landing page that promises each client sees only their own workspace starts naming what the service is wired to',
     },

@@ -193,7 +193,8 @@ def main() -> int:
     # THE PRESS ENQUEUES; THE WORKER RUNS IT. It used to be a daemon thread
     # inside the web service, which a deploy killed mid-run — so this waited
     # on a sleep and the owner waited on nothing (2026-09-22). Draining here
-    # is exactly what `worker.queue_drain_sharded` does every twenty seconds.
+    # stands in for the worker's tick (`worker.queue_tick` → `jobs.start_next`),
+    # which runs the same `claim` and `run_one` on a thread.
     from app import jobs as _jobs
     queued = _jobs.latest(T, system_key="gbp_listing", kind_="system_run")
     ck("pressing 'Run the check now' queues the audit off the request",

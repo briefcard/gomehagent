@@ -324,8 +324,11 @@ def main() -> int:
     calls = []
     real_run = skill.run
     skill.run = lambda *a, **k: calls.append((a, k)) or {"status": "empty"}
+    from app import jobs as _jobs
     try:
         worker.systems_tick()
+        # The tick QUEUES each due plan; the worker's queue runs it.
+        _jobs.drain("agency", "test-worker")
     finally:
         skill.run = real_run
     consumed_ids = {k.get("run_id") for _a, k in calls}
@@ -345,6 +348,7 @@ def main() -> int:
     skill.run = lambda *a, **k: calls.append((a, k)) or {"status": "empty"}
     try:
         worker.systems_tick()
+        _jobs.drain("agency", "test-worker")
     finally:
         skill.run = real_run
     check("on approve_all an unapproved plan is HELD, not run", not calls)

@@ -77,8 +77,15 @@ def door() -> tuple[str, str]:
 
 
 def shoot(html: str, *, width: int = WIDTH, scale: int = SCALE,
-          full: bool = True) -> dict:
+          full: bool = True, read: bool = False) -> dict:
     """`{ok, png, door, ms, why}` — the email as a browser shows it, whole.
+
+    `read=True` also READS the render, in the same session: `texts` — every
+    visible line of text as the browser drew it (colour, size, weight, face,
+    where) — `grounds`, the background colours painted, and `ground`, the
+    page shot again with every letter transparent, so the pixels under each
+    line are its real ground, photograph or gradient included
+    (`recreate.seen` measures contrast and coherence from them).
 
     `set_content` rather than a URL: the HTML is unpublished at judge time and
     nothing of it should sit on a public address to be photographed. Fonts
@@ -94,7 +101,7 @@ def shoot(html: str, *, width: int = WIDTH, scale: int = SCALE,
         return {"ok": False, "png": b"", "door": which, "ms": 0,
                 "why": "every browser slot is busy — try again"}
     try:
-        return _shoot(html, which, width=width, scale=scale, full=full, t0=t0)
+        return _shoot(html, which, width=width, scale=scale, full=full, t0=t0, read=read)
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "png": b"", "door": which,
                 "ms": int((time.monotonic() - t0) * 1000),
@@ -103,7 +110,8 @@ def shoot(html: str, *, width: int = WIDTH, scale: int = SCALE,
         _SEM.release()
 
 
-def _shoot(html: str, which: str, *, width: int, scale: int, full: bool, t0: float) -> dict:
+def _shoot(html: str, which: str, *, width: int, scale: int, full: bool, t0: float,
+           read: bool = False) -> dict:
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
         if which == "browserless":
@@ -120,10 +128,70 @@ def _shoot(html: str, which: str, *, width: int, scale: int, full: bool, t0: flo
             except Exception:                                    # noqa: BLE001
                 pass
             png = page.screenshot(full_page=full, type="png")
+            seen = _read(page, width) if read and png else {}
         finally:
             browser.close()
     return {"ok": bool(png), "png": png, "door": which,
-            "ms": int((time.monotonic() - t0) * 1000), "why": "" if png else "an empty picture"}
+            "ms": int((time.monotonic() - t0) * 1000), "why": "" if png else "an empty picture",
+            **seen}
+
+
+#: Every visible run of text, as drawn. A run the reader cannot see is left
+#: out: no box, hidden, faded to nothing, under 6 px (the preheader tricks),
+#: or covered where it sits (a clipped `max-height:0` block paints nothing).
+_READ_JS = r"""() => {
+  const texts = [], grounds = [];
+  const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let n;
+  while ((n = walk.nextNode())) {
+    const t = n.nodeValue.replace(/\s+/g, " ").trim();
+    if (!/[\p{L}\p{N}]/u.test(t)) continue;
+    const el = n.parentElement, cs = getComputedStyle(el);
+    if (cs.visibility !== "visible" || parseFloat(cs.fontSize) < 6) continue;
+    let op = 1;
+    for (let e = el; e; e = e.parentElement) op *= parseFloat(getComputedStyle(e).opacity);
+    if (op < 0.1) continue;
+    const r = document.createRange(); r.selectNodeContents(n);
+    const rects = [...r.getClientRects()].filter(q => q.width >= 2 && q.height >= 2)
+      .map(q => [q.left, q.top, q.width, q.height]);
+    if (!rects.length) continue;
+    const q = rects[0], hit = document.elementFromPoint(q[0] + q[2] / 2, q[1] + q[3] / 2);
+    if (!hit || !(el.contains(hit) || hit.contains(el))) continue;
+    texts.push({text: t.slice(0, 60), chars: t.length, color: cs.color, opacity: op,
+                size: parseFloat(cs.fontSize), weight: parseInt(cs.fontWeight) || 400,
+                family: cs.fontFamily, rects: rects.slice(0, 3)});
+  }
+  for (const el of document.body.querySelectorAll("*")) {
+    const bg = getComputedStyle(el).backgroundColor, b = el.getBoundingClientRect();
+    if (bg && bg !== "transparent" && !/, 0\)$/.test(bg) && b.width * b.height >= 400)
+      grounds.push({color: bg, area: Math.round(b.width * b.height)});
+  }
+  return {texts, grounds};
+}"""
+
+_NO_TEXT = ("*, *::before, *::after, *::marker { color: transparent !important; "
+            "-webkit-text-fill-color: transparent !important; text-shadow: none !important; "
+            "text-decoration-color: transparent !important; }")
+
+
+def _read(page, width: int) -> dict:
+    """The render READ, beside the picture. The viewport is opened to the
+    page's height first, so every line is on screen for `elementFromPoint`
+    and the coordinates are the page's. The ground shot is at CSS scale —
+    a quarter of the pixels, the same coordinates.
+
+    ADDITIVE: a read that fails says why and the picture still stands — the
+    judge must not lose its look because the measuring did."""
+    try:
+        h = int(page.evaluate("document.documentElement.scrollHeight") or 1000)
+        page.set_viewport_size({"width": width, "height": max(1000, min(h, 16000))})
+        got = page.evaluate(_READ_JS)
+        page.add_style_tag(content=_NO_TEXT)
+        ground = page.screenshot(full_page=True, type="png", scale="css")
+        return {"texts": got.get("texts") or [], "grounds": got.get("grounds") or [],
+                "ground": ground}
+    except Exception as e:                                        # noqa: BLE001
+        return {"read_why": f"the render could not be read: {type(e).__name__}: {str(e)[:160]}"}
 
 
 def shoot_fragment(head: str, fragment: str, *, width: int = 600, scale: int = SCALE) -> dict:
