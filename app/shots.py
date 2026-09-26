@@ -141,6 +141,9 @@ def _shoot(html: str, which: str, *, width: int, scale: int, full: bool, t0: flo
 #: or covered where it sits (a clipped `max-height:0` block paints nothing).
 _READ_JS = r"""() => {
   const texts = [], grounds = [];
+  const _paints = e => e instanceof SVGElement ? !(e instanceof SVGSVGElement) && e.tagName !== "g"
+    : e.tagName === "IMG" || getComputedStyle(e).backgroundImage !== "none"
+      || !/^(transparent|rgba\(.*, 0\))$/.test(getComputedStyle(e).backgroundColor);
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let n;
   while ((n = walk.nextNode())) {
@@ -155,18 +158,33 @@ _READ_JS = r"""() => {
     const rects = [...r.getClientRects()].filter(q => q.width >= 2 && q.height >= 2)
       .map(q => [q.left, q.top, q.width, q.height]);
     if (!rects.length) continue;
-    const q = rects[0], hit = document.elementFromPoint(q[0] + q[2] / 2, q[1] + q[3] / 2);
-    if (!hit || !(el.contains(hit) || hit.contains(el))) continue;
+    // Five points along each of the first two lines. Where the run is not in
+    // the stack at all it is not drawn there (a clipped preheader: hidden, not
+    // covered); where something PAINTED sits above it — a shape, a picture, a
+    // box with a ground — it is COVERED there.
+    let seen = 0, under = 0;
+    for (const q of rects.slice(0, 2))
+      for (const f of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+        const stack = document.elementsFromPoint(q[0] + q[2] * f, q[1] + q[3] / 2), i = stack.indexOf(el);
+        if (i < 0) continue;
+        seen++;
+        if (stack.slice(0, i).some(_paints)) under++;
+      }
+    if (!seen) continue;
     texts.push({text: t.slice(0, 60), chars: t.length, color: cs.color, opacity: op,
                 size: parseFloat(cs.fontSize), weight: parseInt(cs.fontWeight) || 400,
-                family: cs.fontFamily, rects: rects.slice(0, 3)});
+                family: cs.fontFamily, rects: rects.slice(0, 3), covered: under / seen});
   }
   for (const el of document.body.querySelectorAll("*")) {
     const bg = getComputedStyle(el).backgroundColor, b = el.getBoundingClientRect();
     if (bg && bg !== "transparent" && !/, 0\)$/.test(bg) && b.width * b.height >= 400)
       grounds.push({color: bg, area: Math.round(b.width * b.height)});
   }
-  return {texts, grounds};
+  const dividers = [...document.querySelectorAll("img[data-divider]")].map(i => {
+    const b = i.getBoundingClientRect();
+    return {colors: i.dataset.divider, rect: [b.left, b.top, b.width, b.height]};
+  });
+  return {texts, grounds, dividers};
 }"""
 
 _NO_TEXT = ("*, *::before, *::after, *::marker { color: transparent !important; "
@@ -189,7 +207,7 @@ def _read(page, width: int) -> dict:
         page.add_style_tag(content=_NO_TEXT)
         ground = page.screenshot(full_page=True, type="png", scale="css")
         return {"texts": got.get("texts") or [], "grounds": got.get("grounds") or [],
-                "ground": ground}
+                "dividers": got.get("dividers") or [], "ground": ground}
     except Exception as e:                                        # noqa: BLE001
         return {"read_why": f"the render could not be read: {type(e).__name__}: {str(e)[:160]}"}
 
@@ -230,6 +248,10 @@ def shoot_fragment(head: str, fragment: str, *, width: int = 600, scale: int = S
                 # last letter on the owner's run, 2026-09-17, through three
                 # edit rounds), and type set at 8 px is unreadable on a phone.
                 try:
+                    # the whole block on screen, so every point can be asked
+                    # what is on top of it
+                    tall = int(page.evaluate("document.body.scrollHeight") or 400)
+                    page.set_viewport_size({"width": width, "height": max(400, min(tall, 4000))})
                     measured = page.evaluate("""() => {
                         const t = document.querySelector('body > table');
                         if (!t) return {};
@@ -252,8 +274,30 @@ def shoot_fragment(head: str, fragment: str, *, width: int = 600, scale: int = S
                             const r = document.createRange(); r.selectNodeContents(m);
                             for (const rect of r.getClientRects()) if (rect.right > right) right = rect.right;
                         }
+                        // words a drawn shape (or other words) sits ON: on top
+                        // at some of their points and not at others
+                        const covered = [];
+                        const paints = e => e instanceof SVGElement ? !(e instanceof SVGSVGElement) && e.tagName !== "g"
+                            : e.tagName === "IMG" || getComputedStyle(e).backgroundImage !== "none"
+                              || !/^(transparent|rgba\\(.*, 0\\))$/.test(getComputedStyle(e).backgroundColor);
+                        const w3 = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+                        let k;
+                        while ((k = w3.nextNode())) {
+                            const words = k.textContent.trim();
+                            if (!words) continue;
+                            const el = k.parentElement, r = document.createRange();
+                            r.selectNodeContents(k);
+                            let under = 0;
+                            for (const q of [...r.getClientRects()].slice(0, 2))
+                                for (const f of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+                                    const stack = document.elementsFromPoint(q.left + q.width * f, q.top + q.height / 2);
+                                    const i = stack.indexOf(el);
+                                    if (i > 0 && stack.slice(0, i).some(paints)) under++;
+                                }
+                            if (under) covered.push(words.slice(0, 40));
+                        }
                         return {overflow: Math.round(Math.max(0, right - box.right)),
-                                box: Math.round(box.width), smallest_px: smallest};
+                                box: Math.round(box.width), smallest_px: smallest, covered};
                     }""") or {}
                 except Exception:                                # noqa: BLE001
                     measured = {}

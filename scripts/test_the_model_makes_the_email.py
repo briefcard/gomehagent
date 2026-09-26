@@ -453,6 +453,29 @@ def main() -> int:
        not any(c["code"] == "contrast_unresolved" or (c["code"] == "contrast" and "floor for body text" not in c["what"])
                for c in first))
     shots.shoot = lambda html, **k: {"ok": True, "png": png(640, 2000), "door": "local", "ms": 5, "why": ""}
+
+    print("\n— a section edge is NAMED and drawn by code; a shape on words is found —")
+    # Owner, 2026-09-26: a hand-drawn wave shipped unclosed (a diagonal across
+    # the section) and a drawn star sat on the "FOR YOU:" label.
+    def _compose_edges(prompt):
+        text_ = prompt[-1]["text"] if isinstance(prompt, list) else prompt
+        if text_.startswith("You are the writer. Before a line"):
+            return _compose(prompt)
+        return reply_email(email_html(bake=True, extra="<!--divider: wave #9b3c1c #f4e8d3--><!--divider: blob #9b3c1c #f4e8d3-->"))
+    answers["email_compose"] = _compose_edges
+    real_frag = shots.shoot_fragment
+    shots.shoot_fragment = lambda head, frag, **k: {"ok": True, "png": png(600, 200), "door": "local", "why": "",
+                                                    "covered": ["Set the scene!"]}
+    judged.clear()
+    got_e = rc.run(sid, "baci", "portofino", seed="edges")
+    codes = [c["code"] for c in got_e["rounds"][0]["check"]]
+    ck("a named wave is drawn by code and placed as a picture, the marker gone",
+       'data-divider="#9b3c1c #f4e8d3"' in (got_e.get("html") or "") and "divider: wave" not in (got_e.get("html") or ""))
+    ck("  a divider that cannot be drawn blocks the round, naming the shapes there are",
+       any(c["code"] == "baked_divider" and "wave, curve" in c["what"] for c in got_e["rounds"][0]["check"]), str(codes))
+    ck("  and words a baked shape sits on block the round", "baked_covered" in codes, str(codes))
+    shots.shoot_fragment = real_frag
+    answers["email_compose"] = _compose
     judged.clear()
     worse = iter([1, 2, 2])
     answers["email_judge"] = lambda prompt: ({"fabricated": []} if prompt[-1]["text"].startswith("The words of an email") else

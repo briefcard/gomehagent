@@ -207,6 +207,14 @@ SABOTAGES = [
         "why": "'Read the reference again' quietly recreates from the old reading instead, so a design whose READING was wrong can never be corrected and the owner presses a button that cannot do what it says",
     },
     {
+        "name": 'a_section_edge_is_left_open',
+        "file": 'app/dividers.py',
+        "find": '    ImageDraw.Draw(im).polygon([(0, 0), (w, 0)] + edge[::-1], fill=palette.parse(above))\n',
+        "replace": '    ImageDraw.Draw(im).polygon(edge + [(w, 0)], fill=palette.parse(above))  # SABOTAGE\n',
+        "suites": ['test_the_render_is_read.py'],
+        "why": "the edge is drawn open, so the fill runs back to its start in a straight line — the diagonal across the navy section the owner saw on 2026-09-26",
+    },
+    {
         "name": 'large_type_is_held_to_the_body_floor',
         "file": 'app/recreate.py',
         "find": '        floor = CONTRAST_LARGE if large else CONTRAST_BODY\n',

@@ -105,6 +105,70 @@ def main() -> int:
     ck("sizes off the declared scale are caught from the render",
        "system_scale" in [f["code"] for f in rc.system_check(html, seen={"texts": sizes})])
 
+    print("\n— a section edge drawn by code is one closed shape —")
+    # The owner's diagonal (2026-09-26): an edge left unclosed fills back to
+    # its start in a straight line, so down some columns the colours flip
+    # back — above, below, above. A closed shape turns once, top to bottom.
+    from app import dividers, palette
+
+    def turns(png, above, below) -> int:
+        im = Image.open(io.BytesIO(png)).convert("RGB")
+        a, b = palette.parse(above), palette.parse(below)
+        gap = sum(abs(x - y) for x, y in zip(a, b))
+        worst = 0
+        for x in range(0, im.width, 7):
+            seq = []
+            for y in range(im.height):
+                p = im.getpixel((x, y))
+                da, db = sum(abs(i - j) for i, j in zip(p, a)), sum(abs(i - j) for i, j in zip(p, b))
+                if min(da, db) < gap / 3:
+                    seq.append("a" if da < db else "b")
+            flips = sum(1 for i in range(1, len(seq)) if seq[i] != seq[i - 1])
+            worst = max(worst, flips if seq and seq[0] == "a" and seq[-1] == "b" else 99)
+        return worst
+
+    ck("every shape turns from the ground above to the ground below exactly once, in every column",
+       all(turns(dividers.draw(sh, "#29325a", "#f4f1ec"), "#29325a", "#f4f1ec") == 1 for sh in dividers.SHAPES),
+       str({sh: turns(dividers.draw(sh, "#29325a", "#f4f1ec"), "#29325a", "#f4f1ec") for sh in dividers.SHAPES}))
+    from PIL import ImageDraw
+    broken = Image.new("RGB", (1200, 96), (244, 241, 236))
+    ImageDraw.Draw(broken).polygon([(x, 20 + 18 * ((x // 150) % 2)) for x in range(0, 1201, 50)] + [(1200, 0)],
+                                   fill=(41, 50, 90))
+    b_ = io.BytesIO()
+    broken.save(b_, "PNG")
+    ck("  and an edge left open — the diagonal the owner saw — fails the same measure",
+       turns(b_.getvalue(), "#29325a", "#f4f1ec") > 1)
+    from app import media
+    real_put = media.put
+    media.put = lambda tenant, blob, **k: {"ok": True, "id": "d1", "url": "http://x/media/d1.png"}
+    try:
+        html, notes = dividers.place('<td><!--divider: wave #29325a #F4F1EC--></td><td><!--divider: blob #fff #000--></td>', "t")
+    finally:
+        media.put = real_put
+    ck("a named edge becomes its picture, with the grounds it joins",
+       'data-divider="#29325a #f4f1ec"' in html and "divider: wave" not in html, html[:160])
+    ck("  and a shape there is not is refused by name, left as it was",
+       any(n.startswith("divider:") and "wave, curve, slant" in n for n in notes) and "divider: blob" in html)
+
+    print("\n— a divider meets its grounds; words are never under a shape —")
+    seam = Image.new("RGB", (640, 300), (244, 241, 236))
+    seam.paste((41, 50, 90), (0, 0, 640, 100))                 # a navy section, cream below
+    s_ = io.BytesIO()
+    seam.save(s_, "PNG")
+
+    def edge(colours):
+        return rc.render_check({"texts": [], "grounds": [], "ground": s_.getvalue(),
+                                "dividers": [{"colors": colours, "rect": [20, 100, 600, 48]}]}, kit_, cast_)
+    ck("a divider named by the grounds it joins leaves no seam", not edge("#29325a #f4ede0"), str(edge("#29325a #f4ede0")))
+    got = edge("#c8102e #f4f1ec")
+    ck("  one named by another colour is a seam, and says which side",
+       [f["code"] for f in got] == ["divider_seam"] and "above it is #29325a" in got[0]["what"], str(got))
+    ck("words a drawn shape sits on are found",
+       [f["code"] for f in measured([{**line("Body copy that reads", "rgb(51, 51, 51)", 20, 40), "covered": 0.4}])]
+       == ["covered"])
+    ck("  and words clear of every shape are not",
+       not measured([{**line("Body copy that reads", "rgb(51, 51, 51)", 20, 40), "covered": 0}]))
+
     print()
     print("ALL GREEN" if not _fail else f"FAILED: {len(_fail)}")
     return 1 if _fail else 0

@@ -27,7 +27,7 @@ import re
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
-from . import config, db
+from . import config, db, dividers
 
 #: Rounds: the first, then up to this many edits. The hand-made proof took two.
 ROUNDS = 2
@@ -683,6 +683,14 @@ RULES
   outside a baked block is a defect — social links are text, an icon is baked or left out.
 - Type: outside baked blocks use email-safe stacks only (Georgia; Helvetica/Arial; Impact,
   'Arial Black' for a heavy display line; 'Brush Script MT', cursive for a script).
+- SECTION EDGES: a shaped edge between two grounds — a wave, a curve, a slant, a zigzag, a
+  scallop — is NEVER drawn by you (no SVG path, no clip-path, no border trick). Write
+  <!--divider: SHAPE ABOVE BELOW--> alone in a full-width cell with no padding
+  (<tr><td style="padding:0;font-size:0;line-height:0">…</td></tr>): SHAPE one of wave, curve,
+  slant, zigzag, scallop; ABOVE and BELOW the hex grounds of the two sections it joins. It is
+  drawn to the column's width and placed for you. A straight edge needs no divider.
+- A drawn shape — a badge, a star, a sticker — sits beside words or behind them, never over
+  them: every letter is read where it lands, and a letter under a shape is a defect.
 - BAKED BLOCKS: a display headline, a script line, a device with icons — anything that needs
   a web font or inline SVG — goes inside <!--bake-->…<!--/bake-->: exactly one complete
   <table width="…">, no links inside, TYPE AND DRAWN SHAPES ONLY: never a photograph (no
@@ -1017,6 +1025,9 @@ def bake(html: str, tenant: str) -> tuple[str, list[str]]:
         if shot.get("overflow"):
             notes.append(f"clipped: the baked block '{words[:40]}' is {shot['overflow']} px wider than its "
                          f"{shot.get('box', '?')} px box — its type must be smaller or its box wider")
+        if shot.get("covered"):
+            notes.append(f"covered: '{shot['covered'][0]}' in the baked block '{words[:40]}' is partly under "
+                         f"a drawn shape — move the shape off the words, or the words off the shape")
         if shot.get("smallest_px") and float(shot["smallest_px"]) < 11:
             notes.append(f"unreadable: type at {float(shot['smallest_px']):.0f} px in the baked block "
                          f"'{words[:40]}' — 11 px is the floor for a phone")
@@ -1357,6 +1368,27 @@ def render_check(shot: dict, kit_: dict, cast_: dict | None = None) -> list[dict
         add("contrast", "blocks", t["text"][:40],
             f"{fg} on {under if spread <= 8 else f'a photograph (around {under})'} reads at {ratio:.1f}:1"
             f" — {floor:g}:1 is the floor for {'large' if large else 'body'} text")
+    for t in texts:
+        if float(t.get("covered") or 0) > 0 and ("covered", t["text"][:40]) not in said:
+            said.add(("covered", t["text"][:40]))
+            add("covered", "blocks", t["text"][:40],
+                "partly under a drawn shape or other words — move one off the other")
+    # A DIVIDER MEETS ITS GROUNDS: the edge is drawn from the two colours it
+    # was named with, and a name that is not the ground beside it leaves a
+    # visible seam at the divider's top or bottom.
+    for d in (shot.get("dividers") or []) if ground else []:
+        named = str(d.get("colors") or "").split()
+        x, y, w, h = d["rect"]
+        for side, want, top in zip(("above", "below"), named[:2], (y - 3, y + h + 1)):
+            box = (int(x + w * 0.1), int(top), int(x + w * 0.9), int(top) + 2)
+            if box[1] < 0 or box[3] > ground.height or box[2] <= box[0]:
+                continue
+            px = list(ground.crop(box).getdata())
+            meets = tuple(sorted(c)[len(c) // 2] for c in zip(*px))
+            if max(abs(a - b) for a, b in zip(meets, palette.parse(want) or meets)) > 24:
+                add("divider_seam", "blocks", "divider",
+                    f"the divider is drawn from {want} but the ground {side} it is {palette.to_hex(meets)} "
+                    f"— name it by the two grounds it joins")
     theme = kit_.get("theme") or {}
     ours = [h for h in (theme.get("colors") or {}).values() if isinstance(h, str) and palette.parse(h)]
     for pick in ((cast_ or {}).get("picks") or {}).values():
@@ -2027,11 +2059,14 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         if _turn and _turn != last_turn:
             story.append(f"Round {n}: the concept was turned to what this brand has — {_turn}")
             last_turn = _turn
-        html, baked = bake(raw, tenant)
+        html, drawn = dividers.place(raw, tenant, COLUMN)
+        html, baked = bake(html, tenant)
+        baked = drawn + baked
         bake_findings = [{"code": "baked_" + n.split(":", 1)[0], "severity": "blocks", "where": "a baked block",
-                          "what": n.split(":", 1)[1].strip()} for n in baked if n.startswith(("clipped:", "unreadable:"))]                      # what is checked, shot, judged and sent
+                          "what": n.split(":", 1)[1].strip()}
+                         for n in baked if n.startswith(("clipped:", "unreadable:", "covered:", "divider:"))]                      # what is checked, shot, judged and sent
         for b_ in baked:
-            if not b_.startswith("baked:"):
+            if not b_.startswith(("baked:", "drawn:")):
                 story.append(b_ + ".")
         copy_.update(subject=made.get("subject") or copy_.get("subject", ""),
                      preheader=made.get("preheader") or copy_.get("preheader", ""))
