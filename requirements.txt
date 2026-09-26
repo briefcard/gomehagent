@@ -7,7 +7,10 @@ uvicorn>=0.30
 # it fails only on the one code path, in production. Every form POST on the
 # console (and the client connect page) needs it.
 python-multipart>=0.0.9
-sqlalchemy>=2.0
+# <2.1: SQLAlchemy 2.1 made psycopg 3 the driver for a plain postgresql:// URL, and
+# this app ships psycopg2 — the 2026-09-25 deploy fetched 2.1.1 and every process
+# died on import ("No module named 'psycopg'"). Moving to 2.1 is its own change.
+sqlalchemy>=2.0,<2.1
 psycopg2-binary>=2.9
 google-api-python-client>=2.140
 google-auth>=2.34
