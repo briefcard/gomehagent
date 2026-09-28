@@ -240,6 +240,21 @@ def brief_problem(got) -> str:
 # 2. THE KIT — the brand's material, gathered once
 # ---------------------------------------------------------------------------
 
+def place_subject(kit_: dict, tenant: str, entity_key: str):
+    """THE SUBJECT IS LOOKED UP IN THE CATALOGUE, NOT IN THE KIT'S SAMPLE.
+    The kit carries sixty products for the prompt; a store has hundreds, and
+    a subject past the sixtieth was reported as "not on file" — Baci's
+    campaign email failed that way on a product it stocks (2026-09-23), and
+    the article writer on 2026-09-28. The catalogue record, placed first in
+    the kit when the sample left it out; None when no such product is on file."""
+    from . import kb as _kbx
+    hit = next((e for e in _kbx.entities(tenant, available_only=False)
+                if e.key == entity_key), None) if entity_key else None
+    if hit is not None and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
+        kit_.setdefault("entities", []).insert(0, _entity_row(hit))
+    return hit
+
+
 def _entity_row(e) -> dict:
     """One product as the maker reads it."""
     a = getattr(e, "attributes", None) or {}
@@ -1958,20 +1973,11 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     if _ex.notes(tenant, _ex.EMAIL):
         story.append(f"Held to what you have said about this brand's emails ({len(_ex.notes(tenant, _ex.EMAIL))} note(s)).")
     if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
-        # THE SUBJECT IS LOOKED UP IN THE CATALOGUE, NOT IN THE KIT'S SAMPLE.
-        # The kit carries sixty products for the prompt; a store has hundreds,
-        # and until 2026-09-23 any subject past the sixtieth was reported as
-        # "not on file" — Baci's campaign email failed that way on a product
-        # it stocks.
-        from . import kb as _kbx
-        hit = next((e for e in _kbx.entities(tenant, available_only=False)
-                    if e.key == entity_key), None)
+        hit = place_subject(kit_, tenant, entity_key)
         if hit is not None and getattr(hit, "availability", "available") != "available":
             story.append(f"{hit.name!r} is on file but not available "
                          f"({hit.availability}) — an email should not sell it.")
             return _finish(FAILED, brief=brief_)
-        if hit is not None:
-            kit_["entities"].insert(0, _entity_row(hit))
     if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
         # THE SUBJECT MUST EXIST. The owner's run asked for a key that was not
         # on file and the maker quietly sold a different product (2026-09-17).

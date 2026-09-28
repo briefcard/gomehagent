@@ -545,8 +545,15 @@ def _summary(result) -> str:
     for k in ("status", "approval_id"):
         if result.get(k):
             bits.append(f"{k} {result[k]}")
+    # THE RUN'S OWN ACCOUNT FIRST. A skill says in one line why it stopped
+    # ("not drafted (no product with the key … on file)"); the first NOTE was
+    # shown instead, and on a blog run that made nothing it was a warning about
+    # the reader — the owner asked why, and the reason was two notes down.
+    said = str(result.get("summary") or "").strip()
     notes = result.get("notes")
-    if isinstance(notes, list) and notes:
+    if said:
+        bits.append(said[:200])
+    elif isinstance(notes, list) and notes:
         bits.append(str(notes[0])[:200])
     # A CREATIVE RUN IS NOT A SKILL RUN. It reports what it drew, what it
     # kept out and which cell the API refused — and none of that is in the

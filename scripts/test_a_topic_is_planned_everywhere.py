@@ -83,6 +83,7 @@ def main() -> int:
     ck("the article supports the cluster, on the map's keyword, at the topic's angle",
        b.get("keyword") == "holiday table setting" and b.get("cluster") == "entertaining"
        and b.get("role") == "support" and "Holiday entertaining" in b.get("angle", ""), str(b))
+    ck("  written for the reader the card named — not for everybody", b.get("audience_key") == "hosts", str(b))
     e = fields("campaign_email")
     ck("the email carries the topic as its goal, and its real end as its deadline",
        "Holiday entertaining" in e.get("goal", "") and "2026-12-24" in e.get("deadline", "")

@@ -762,12 +762,12 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
     """Brief → story → write → check → shoot → judge → edit, best kept.
     Returns everything the card and the runner need; stores nothing but the
     pattern (a Phase 3 seam wires this into `blog_article` and the ledger)."""
-    from .recreate import kit as _kit
+    from .recreate import kit as _kit, place_subject
     story: list[str] = []
     calls = 0
     say = progress or (lambda t: None)
     kit_ = _kit(tenant)
-    if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
+    if entity_key and place_subject(kit_, tenant, entity_key) is None:
         return {"ok": False, "status": FAILED, "note": f"no product with the key {entity_key!r} on file", "rounds": []}
     pat = pattern(tenant)
     from . import exemplars as _ex

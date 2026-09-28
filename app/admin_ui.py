@@ -15384,7 +15384,7 @@ def _topic_card(key: str, tenant: str) -> str:
   <div class="f"><label>Starts</label><input type="date" name="starts">
     <label>Ends</label><input type="date" name="ends"></div>
   {pick("entity_key", "entity", "Feature (optional)")}
-  {pick("audience_key", "audience", "Written for — emails and ads need it")}
+  {pick("audience_key", "audience", "Written for — emails and ads need it; the article reads it too")}
   {pick("segment", "segment", "Email list — emails need it")}
   <div class="f"><label>Keyword</label>
     <input name="keyword" placeholder="blank: the closest keyword in the map below"></div>

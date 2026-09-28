@@ -593,6 +593,12 @@ CATALOG = {
                 # alone, so nothing changes for an article about one thing.
                 dict(key="entity_keys", label="Also about (comma-separated)",
                      required=False, kind="entity_list"),
+                # WHO THE ARTICLE IS WRITTEN FOR — `blog_article` has always taken
+                # it, and without it a run says "written for everybody and
+                # therefore for nobody"; a topic's article now names its reader
+                # (2026-09-28).
+                dict(key="audience_key", label="Written for (optional)",
+                     required=False, kind="audience"),
                 # WHY THIS ONE IS BEING WRITTEN AGAIN. A refresh plan is an
                 # ordinary blog plan whose keyword already has a live page,
                 # and this is the difference between the two: the reading

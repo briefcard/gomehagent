@@ -79,7 +79,7 @@ def plan(tenant: str, *, topic: str, angle: str = "", starts: str = "", ends: st
     about = f"{topic} — {angle.strip()}" if angle.strip() else topic
     fields = {
         "blog": {"keyword": phrase, "cluster": found.get("cluster", ""), "role": "support",
-                 "angle": about, "entity_key": entity_key},
+                 "angle": about, "entity_key": entity_key, "audience_key": audience_key},
         "campaign_email": {"segment": segment, "audience_key": audience_key, "goal": about,
                            "entity_key": entity_key,
                            "deadline": f"{topic} ends {ends}" if ends else ""},

@@ -297,6 +297,15 @@ def main() -> int:
     ck("  and a mode with nothing to work on is refused rather than guessed",
        not _rc.job("baci", mode="run")["ok"] and not _rc.job("baci", mode="swipe")["ok"])
 
+    print("\n— a run that made nothing leads with why —")
+    said = jobs._summary({"items": [], "status": "empty",
+                          "summary": "not drafted (no product with the key 'x' on file)",
+                          "notes": ["no reader was chosen for this piece — 2 approved persona(s)"]})
+    ck("the run's own account leads the line, not its first note",
+       "not drafted (no product" in said and "no reader was chosen" not in said, said)
+    ck("  and a run with no account of its own still shows its first note",
+       "a first note" in jobs._summary({"items": [], "notes": ["a first note"]}))
+
     print("\n— the system_run kind is the one that is never retried silently —")
     ck("system_run is not retryable", jobs.KINDS["system_run"]["retryable"] is False)
 

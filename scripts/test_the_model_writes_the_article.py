@@ -417,6 +417,26 @@ def main() -> int:
     ar.file_pattern("baci", ar.PATTERN_DEFAULT)
 
     print()
+    print("\n— the featured product is found in the catalogue, not the kit's sample —")
+    # The kit carries sixty products; the article writer checked the subject
+    # against that sample, so a product past the sixtieth failed in two
+    # seconds as "not on file" (the owner's blog run, 2026-09-28).
+    for i in range(70):
+        kb.add_entity("baci", "product", f"filler-{i:02d}", f"Filler piece {i:02d}")
+    kb.add_entity("baci", "product", "zz-late-cup", "A cup far down the catalogue")
+    _brief = ar.brief
+    ar.brief = lambda *a, **k: {"ok": False, "why": "stopped here on purpose", "calls": 0}
+    try:
+        got = ar.run("baci", "espresso cups", entity_key="zz-late-cup")
+    finally:
+        ar.brief = _brief
+    ck("a product far down the catalogue is found — the run goes on to the brief",
+       "stopped here on purpose" in got.get("note", "") and "no product" not in got.get("note", ""),
+       got.get("note", "")[:120])
+    got = ar.run("baci", "espresso cups", entity_key="no-such-thing")
+    ck("  and a key no catalogue holds is still refused by name",
+       got.get("note") == "no product with the key 'no-such-thing' on file", got.get("note", "")[:120])
+
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))
     return 0 if not _fail else 1
 
