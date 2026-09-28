@@ -3106,4 +3106,9 @@ def mark_published(tenant: str, output_id: str, url: str = "",
                         s.commit()
             except Exception:                                    # noqa: BLE001
                 pass      # measuring must never block a publish
+    # AND THE TOPIC'S OTHER PIECES, which were waiting for exactly this: a
+    # topic's email and Business Profile post point their buttons at the
+    # article once it is public (`topics.article_live`).
+    from . import topics
+    topics.article_live(output_id, url)
     return out

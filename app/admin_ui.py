@@ -958,6 +958,28 @@ def _every_note(every: bool, what: str) -> str:
             if every else "")
 
 
+def render_job_brief(key: str, tenant: str, job_id: str, got: dict) -> str:
+    """One job as a skill file for a Claude chat — copy it, or download it
+    (`handoff.for_job`). The platform's context, the job's inputs and what
+    went wrong, so a failed piece of client work can be finished by hand."""
+    if not got.get("ok"):
+        body = f'<div class="card"><p class="err">{_esc(got.get("why", "no such job"))}</p></div>'
+        return _shell(key, "jobs", "Queue", body, tenant=tenant)
+    dl = f'/admin/job_brief?id={_esc(job_id)}&tenant={_esc(tenant)}&download=1'
+    body = f"""
+<div class="card"><div class="head"><h2>Finish it in Claude</h2>
+  <span class="mut">everything this job knew — the brand's rules, proof, catalogue and buyer,
+  what it was asked and what went wrong — as one skill file. Paste it into a Claude chat, or
+  upload the file as a skill, and ask for the work.</span></div>
+  <div class="nacts"><button type="button" onclick="navigator.clipboard.writeText(
+    document.getElementById('brief').value).then(()=>{{this.textContent='Copied'}})">Copy</button>
+  <a class="btn" href="{dl}">Download {_esc(got["name"])}.md</a>
+  <a class="btn sec" href="{_esc(url(tenant, "jobs"))}">Back to the queue</a></div>
+  <textarea id="brief" readonly rows="32" style="width:100%;font:12px/1.45 ui-monospace,Menlo,monospace">{_esc(got["markdown"])}</textarea>
+</div>"""
+    return _shell(key, "jobs", "Queue", body, tenant=tenant)
+
+
 def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str:
     """THE QUEUE: what is running, what is behind it, and what just ran.
 
@@ -1004,6 +1026,9 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
                     f'waiting {_mins(j.get("waited", 0))}' if state == "queued" else
                     (f'took {_mins(j.get("ran_for", 0))}' if j.get("ran_for") else ""))
         acts = ""
+        brief = (f'<a class="btn{"" if state in ("interrupted", "failed") else " sec"}" '
+                 f'href="/admin/job_brief?id={_esc(j["id"])}&tenant={_esc(tenant)}">'
+                 f'{"Finish it in Claude" if state in ("interrupted", "failed") else "Claude file"}</a>')
         if state == "queued":
             acts = _act("job_cancel", "Take it off the queue", j["id"])
         elif state in ("interrupted", "failed"):
@@ -1026,7 +1051,7 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
           {" · " + _esc(str(j["at"])[:16].replace("T", " ")) if j.get("at") else ""}</span>
         <br><span class="mut">{_esc(j["says"])}{" &mdash; " + _esc(j["detail"])
                                                    if j.get("detail") else ""}</span>
-        {f'<div class="nacts">{acts}</div>' if acts else ""}
+        <div class="nacts">{acts}{brief}</div>
       </div>"""
 
     flight = ("".join(_row(j) for j in got["running"])
@@ -15364,7 +15389,10 @@ def _topic_card(key: str, tenant: str) -> str:
   <div class="f"><label>Keyword</label>
     <input name="keyword" placeholder="blank: the closest keyword in the map below"></div>
   <div class="f"><label>Channels</label>{"".join(boxes)}</div>
-  <div class="f"><label>Due on</label><input type="date" name="on">
+  <div class="f"><label>Due on</label>
+    <div class="what">blank: staggered before the start — the article 3 weeks out, the ads
+    10 days, the email and the Google post a week; the post and the email then point at
+    the article once it is live</div><input type="date" name="on">
     <label class="inl"><input type="checkbox" name="run_now" value="1"> Run now</label></div>
   <button>Plan it</button>
 </form></div>"""

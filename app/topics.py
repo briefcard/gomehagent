@@ -23,6 +23,11 @@ import re
 #: The channels a topic can go to — each a system whose plan carries it.
 CHANNELS = {"blog": "Blog article", "campaign_email": "Email",
             "ad_creative": "Ads", "gbp_post": "Google Business post"}
+#: How long before the topic STARTS each channel comes due, when no date is
+#: given: the article first, so it can be approved and live before anything
+#: points at it; the ads while there is still time to run; the email and the
+#: post a week out.
+LEAD_DAYS = {"blog": 21, "ad_creative": 10, "campaign_email": 7, "gbp_post": 7}
 
 _STOP = {"a", "an", "and", "at", "for", "from", "in", "of", "on", "the", "to",
          "with", "your", "our", "this", "that", "is", "are", "by", "week"}
@@ -89,7 +94,7 @@ def plan(tenant: str, *, topic: str, angle: str = "", starts: str = "", ends: st
     for key in picked:
         got = systems.open_plan(tenant, key, ref=f"{ref}:{key}",
                                 plan={k: v for k, v in fields[key].items() if str(v or "").strip()},
-                                planned_for=on or systems._today(), trigger="topic")
+                                planned_for=on or _due(key, starts), trigger="topic")
         row = {"key": key, "name": CHANNELS[key], "run_id": got.get("run_id", ""),
                "complete": bool(got.get("complete")), "missing": got.get("missing") or [],
                "queued": False, "error": got.get("error", "")}
@@ -115,3 +120,66 @@ def plan(tenant: str, *, topic: str, angle: str = "", starts: str = "", ends: st
     return {"ok": any(not r["error"] for r in out), "topic": topic, "keyword": phrase,
             "from_map": bool(found) or bool(keyword.strip()), "cluster": found.get("cluster", ""),
             "channels": out}
+
+
+def _due(key: str, starts: str) -> str:
+    """The day a channel's plan comes due: its lead before the topic starts,
+    never before today; today when the topic has no start date."""
+    import datetime as dt
+    from . import systems
+    today = systems._today()
+    try:
+        day = dt.date.fromisoformat(starts) - dt.timedelta(days=LEAD_DAYS.get(key, 0))
+    except (TypeError, ValueError):
+        return today
+    return max(day.isoformat(), today)
+
+
+# ---------------------------------------------------------------------------
+# The topic's pieces reinforce its article
+# ---------------------------------------------------------------------------
+
+def _topic_of(output_id: str) -> tuple[str, str]:
+    """`(tenant, "topic:<slug>")` when this output is a topic's ARTICLE — its
+    run is the blog plan the topic filed — else `("", "")`."""
+    from . import db
+    with db.SessionLocal() as s:
+        out = s.get(db.Output, output_id) if output_id else None
+        run = s.get(db.SystemRun, out.run_id) if out is not None and out.run_id else None
+        ref = str(getattr(run, "ref", "") or "")
+        if not (ref.startswith("topic:") and ref.endswith(":blog")):
+            return "", ""
+        return str(run.tenant or ""), ref[: -len(":blog")]
+
+
+def _refill(tenant: str, topic_ref: str, key: str, fields: dict) -> bool:
+    """Fill the topic's plan on `key` while it is still waiting. `open_plan` by
+    the same ref merges the fields and keeps anything you edited; a plan
+    already run, or never filed, is left alone rather than filed anew."""
+    from . import systems
+    ref = f"{topic_ref}:{key}"
+    if not any(r.ref == ref for r in systems.plans(tenant, key)):
+        return False
+    got = systems.open_plan(tenant, key, ref=ref, plan=fields, trigger="topic")
+    if got.get("error"):
+        import logging
+        logging.getLogger("topics").warning("could not fill %s on %s: %s", sorted(fields), ref, got["error"])
+    return bool(got.get("ok"))
+
+
+def article_approved(output_id: str) -> None:
+    """A topic's article was approved: its Business Profile post is MADE FROM
+    it now — the source a post must have — so the post's plan completes."""
+    tenant, topic_ref = _topic_of(output_id)
+    if topic_ref:
+        _refill(tenant, topic_ref, "gbp_post", {"source": output_id})
+
+
+def article_live(output_id: str, url: str) -> None:
+    """A topic's article went live (`keywords.mark_published`): the email's
+    button and the post's button point at it. Not before — a draft's address
+    is a page the reader cannot open."""
+    tenant, topic_ref = _topic_of(output_id)
+    if topic_ref and url:
+        _refill(tenant, topic_ref, "gbp_post", {"source": output_id, "url": url})
+        _refill(tenant, topic_ref, "campaign_email", {"link": url})

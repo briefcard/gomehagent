@@ -1037,6 +1037,10 @@ def _execute(ap: db.Approval) -> None:
         # it, not against the hand-made one — and the layout it was approved
         # in becomes the brand's pattern when the brand has not filed one.
         _learn_from_approved(ap, p.get("output_id") or "")
+        # A TOPIC'S POST IS MADE FROM ITS ARTICLE — approved now, so the
+        # post's plan has the source it waits for (`topics.article_approved`).
+        from . import topics as _topics
+        _topics.article_approved(p.get("output_id") or "")
         _fields = _fields_from_artifact(p.get("output_id") or "", p["fields"])
         # PUBLISHED IS A DECISION, NOT A DEFAULT (§5). On the `auto` rung an
         # article the maker finished clean and the JUDGE would publish goes

@@ -845,7 +845,8 @@ def _message_text(message: dict | None) -> str:
         return ": the brand itself — write the subject line and the preheader yourself."
     lines = []
     for k, v in (("subject line (use verbatim)", message.get("subject")), ("preheader", message.get("preheader")),
-                 ("angle", message.get("angle")), ("offer", message.get("offer"))):
+                 ("angle", message.get("angle")), ("offer", message.get("offer")),
+                 ("the main button goes to (use verbatim)", message.get("link"))):
         if v:
             lines.append(f"- {k}: {v}")
     if message.get("products"):

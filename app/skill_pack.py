@@ -3221,8 +3221,14 @@ def _run_campaign_email(ctx: Context) -> dict:
     # `/collections/shop`, because the drafter wrote the platform's usual
     # shape and nothing checked it against the actual site.
     _dests = links.destinations(ctx.tenant)
+    # WHERE THE PLAN SAYS THE BUTTON GOES — a topic's article, once live. A
+    # page the destination list has not met yet, so it joins the list rather
+    # than being repointed away as "not a page on this site".
+    _link = str(ctx.params.get("link") or "").strip()
+    if _link:
+        _dests = [{"kind": "page", "key": "", "label": "the article", "url": _link}] + list(_dests)
     _known = {d["url"].split("?")[0].rstrip("/") for d in _dests} or None
-    _cta_home = links.best_for(
+    _cta_home = _link or links.best_for(
         ctx.tenant,
         [e.get("key", "") for e in (ctx.bundle.get("entities") or [])],
         _dests) or (f"https://{_dom}" if _dom else "")
@@ -3684,6 +3690,10 @@ def _run_campaign_email(ctx: Context) -> dict:
                                                signatory=theme.get("sender"),
                                                default_cta_url=_cta_home,
                                                known_urls=_known)
+        if _link:
+            for _b in blocks:
+                if _b.get("type") == "cta":
+                    _b["url"] = _link
         # The email's one destination, in preference order: what the CTA
         # actually ended up pointing at, then the featured product's page,
         # then the storefront. Every empty link in the prose gets it.
@@ -3730,6 +3740,7 @@ def _run_campaign_email(ctx: Context) -> dict:
                                   "title": "drawn for this send", "kind": "lifestyle"}]
                                 if hero_got.get("basis") == "generated" and hero_got.get("asset_id") and (hero or {}).get("url") else []),
                 message={"subject": c.get("subject", ""), "preheader": c.get("preheader", ""),
+                         "link": _link,
                          "angle": chosen_angle or goal, "offer": str(ctx.bundle.get("offer") or ""),
                          "text": _blocks_text(blocks),
                          "products": [{"name": e.get("name"), "price": e.get("price", ""), "url": e.get("url", "")}
@@ -4747,7 +4758,7 @@ register(Skill(
             # who RECEIVES the send, the audience is who it is WRITTEN FOR,
             # and one `reorder_due` list contains all three Baci personas.
             "audience_key",
-            "offer", "utterance", "draft_visual", "generate_visual"),
+            "offer", "utterance", "draft_visual", "generate_visual", "link"),
     writes=True,
     produces="draft",
     # ONE-TO-MANY WORK NAMES ITS READER. Owner, 2026-08-31: "Audience only
@@ -4795,6 +4806,9 @@ register(Skill(
     params=("revision_notes", "goal", "subject", "intent", "deadline",
             "entity_key", "entity_keys", "audience_key", "offer", "utterance",
             "draft_visual", "generate_visual",
+            # where the button goes, when not the product (shares the
+            # campaign email's builder, which honours it)
+            "link",
             # WHICH structure to build on, by id. Optional: blank draws at
             # random from the library (owner, 2026-09-11).
             "structure",

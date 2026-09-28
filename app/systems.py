@@ -477,6 +477,11 @@ CATALOG = {
                 dict(key="generate_visual",
                      label="Draw a hero on a miss (blank = yes)",
                      required=False, kind="flag"),
+                # WHERE THE BUTTON GOES, when it is not the product or the
+                # store — a topic's article, filled when the article goes
+                # live (`topics.article_live`, 2026-09-28).
+                dict(key="link", label="Where the button goes (optional)",
+                     required=False),
                 # `draft_into_esp` is NOT a plan field. Producing the draft in
                 # the client's ESP is what this system IS — a campaign that
                 # stops short of the platform is not a lighter version of the

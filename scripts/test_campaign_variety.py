@@ -1108,6 +1108,19 @@ def main():
        _rd3.get("ok") is False and _kept == [("Do not lose this thought.", "open")],
        str(_kept))
 
+    print("\n— a plan that names where the button goes: the maker is told —")
+    # A topic's email points at its article once live (`topics.article_live`
+    # fills the plan's `link`); the run carries it to the maker verbatim.
+    from app import recreate as _rcm
+    _msgs: list = []
+    _was = _rcm.run
+    _rcm.run = lambda *a, message=None, **k: (_msgs.append(dict(message or {})) or _was(*a, message=message, **k))
+    _url = "https://www.bacimilanousa.com/blogs/news/wine-week-table"
+    skill.run("campaign_email", "baci", segment="new_subscribers", goal="x", link=_url)
+    _rcm.run = _was
+    ck("the maker is handed the button's address", bool(_msgs) and _msgs[-1].get("link") == _url,
+       str([m.get("link") for m in _msgs])[:120])
+
     print("\n" + ("all checks passed" if not _fail
                   else f"{len(_fail)} FAILED: " + "; ".join(_fail)))
     return 1 if _fail else 0

@@ -207,6 +207,14 @@ SABOTAGES = [
         "why": "'Read the reference again' quietly recreates from the old reading instead, so a design whose READING was wrong can never be corrected and the owner presses a button that cannot do what it says",
     },
     {
+        "name": 'a_claude_file_leaves_out_the_brand',
+        "file": 'app/handoff.py',
+        "find": '    if kind in WRITES:\n        got = resolve.resolve(',
+        "replace": '    if False:  # SABOTAGE\n        got = resolve.resolve(',
+        "suites": ['test_a_job_is_a_file_for_claude.py'],
+        "why": "a failed job's Claude file carries the task but not the brand's rules, proof or catalogue, so the chat writes the client's email from nothing — and states what the platform would never let it",
+    },
+    {
         "name": 'a_topic_ignores_the_seo_map',
         "file": 'app/topics.py',
         "find": '    found = {} if keyword.strip() else keyword_for(tenant, f"{topic} {angle}")\n',

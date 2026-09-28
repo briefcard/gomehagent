@@ -124,6 +124,43 @@ def main() -> int:
     ck("  with its plan approved — the rung's question answered by the press",
        all(approved) and {c["run_id"] for c in out["channels"]} <= queued)
 
+    print("\n— with no date given, each channel is staggered before the start —")
+    topics.plan(T, topic="Wine Week", starts="2027-03-22", channels=list(topics.CHANNELS),
+                entity_key="portofino", audience_key="hosts", segment="new_subscribers")
+    due = {k: str(((r := [x for x in plans(k) if x.ref.startswith("topic:wine-week")][0]).brief or {})
+                  .get("planned_for")) for k in topics.CHANNELS}
+    ck("the article three weeks out, the ads ten days, the email and the post a week",
+       due == {"blog": "2027-03-01", "ad_creative": "2027-03-12",
+               "campaign_email": "2027-03-15", "gbp_post": "2027-03-15"}, str(due))
+    ck("  and never before today", topics._due("blog", "2020-01-01") == systems._today())
+
+    print("\n— the pieces reinforce the article: made from it, pointing at it —")
+    blog_run = [x for x in plans("blog") if x.ref == "topic:wine-week:blog"][0].id
+    with db.SessionLocal() as s:
+        art = db.Output(tenant=T, system_key="blog", run_id=blog_run, format="cms_article")
+        s.add(art)
+        s.get(db.SystemRun, blog_run).decision = "approved"   # as approving records it first
+        s.commit()
+        art_id = art.id
+    topics.article_approved(art_id)
+    g = [x for x in plans("gbp_post") if x.ref == "topic:wine-week:gbp_post"][0]
+    ck("the article approved, the post is made from it — and complete",
+       (g.brief or {}).get("plan", {}).get("source") == art_id
+       and systems.plan_complete(g, "gbp_post")["complete"], str((g.brief or {}).get("plan")))
+    url = "https://www.bacimilanousa.com/blogs/news/wine-week-table"
+    from app import keywords
+    keywords.mark_published(T, art_id, url=url)
+    e = [x for x in plans("campaign_email") if x.ref == "topic:wine-week:campaign_email"][0]
+    g = [x for x in plans("gbp_post") if x.ref == "topic:wine-week:gbp_post"][0]
+    ck("the article live, the email's button and the post's point at it",
+       (e.brief or {}).get("plan", {}).get("link") == url
+       and (g.brief or {}).get("plan", {}).get("url") == url,
+       str(((e.brief or {}).get("plan", {}).get("link"), (g.brief or {}).get("plan", {}).get("url"))))
+    from app import recreate, skill
+    ck("  and the email's maker is told the button's address, verbatim",
+       "link" in skill.get("campaign_email").params
+       and f"the main button goes to (use verbatim): {url}" in recreate._message_text({"link": url}))
+
     print("\n— the Plan tab carries the form, and the form comes back with a line per channel —")
     page = ui.render_plan("s3cret", T)
     ck("the card is on the Plan tab with a box per channel",

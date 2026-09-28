@@ -3746,6 +3746,25 @@ def admin_article_review(request: Request, output_id: str):
         f"/admin/work/{quote(output_id)}" + (f"?{q}" if q else ""), 303)
 
 
+@app.get("/admin/job_brief")
+def job_brief(request: Request, key: str = Depends(admin_key), id: str = "",
+              tenant: str = "", download: int = 0):
+    """One job as a file to hand to Claude — the Queue's "Finish it in Claude"
+    (owner, 2026-09-28). `download=1` is the file itself, a skill file named
+    for the account and the work; otherwise the page to copy it from."""
+    if key != config.APPROVAL_SECRET:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/admin/signin", 303)
+    from . import admin_ui as admin_ui_mod, handoff
+    got = handoff.for_job(id)
+    if download and got.get("ok"):
+        return Response(got["markdown"], media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{got["name"]}.md"'})
+    admin_ui_mod.set_theme(request.cookies.get(THEME_COOKIE, ""))
+    return HTMLResponse(admin_ui_mod.render_job_brief(
+        key if request.query_params.get("key") else "", tenant, id, got))
+
+
 @app.get("/admin/work/{output_id}", response_class=HTMLResponse)
 def admin_workroom(request: Request, output_id: str,
                    key: str = Depends(admin_key), ok: str = "", err: str = ""):
