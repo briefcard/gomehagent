@@ -299,6 +299,24 @@ def attach_esp_push(run_id: str, push: dict) -> int:
     return n
 
 
+def note_open_findings(run_id: str, findings: list) -> int:
+    """What is still open on a draft the owner may launch as it stands — on
+    the approval, so the card says it before the button is pressed."""
+    if not run_id or not findings:
+        return 0
+    n = 0
+    with db.SessionLocal() as s:
+        for ap in (s.query(db.Approval)
+                   .filter(db.Approval.run_id == run_id,
+                           db.Approval.status == "pending").all()):
+            ap.payload = {**(ap.payload or {}),
+                          "open_findings": [str(f)[:240] for f in findings[:8]]}
+            n += 1
+        if n:
+            s.commit()
+    return n
+
+
 def withdraw(run_id: str, why: str) -> int:
     """Close the pending approvals for a run whose artifact never appeared.
 

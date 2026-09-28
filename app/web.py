@@ -7076,6 +7076,37 @@ def plan_run(key: str = Depends(admin_key), id: str = "", tenant: str = "",
              "Waiting on you")
 
 
+@app.post("/admin/topic_plan")
+async def topic_plan(request: Request, key: str = Depends(admin_key)):
+    """Plan a topic into each chosen channel — the Plan tab's topic card —
+    and come back to the Plan tab with one line per channel."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    from fastapi.responses import RedirectResponse
+
+    from . import systems, topics
+    form = await request.form()
+    tenant = str(form.get("tenant") or "")
+    val = lambda k: str(form.get(k) or "").strip()  # noqa: E731
+    got = topics.plan(tenant, topic=val("topic"), angle=val("angle"), starts=val("starts"),
+                      ends=val("ends"), channels=form.getlist("channels"),
+                      entity_key=val("entity_key"), audience_key=val("audience_key"),
+                      segment=val("segment"), keyword=val("keyword"), on=val("on"),
+                      run_now=bool(val("run_now")))
+    if got.get("why"):
+        return RedirectResponse(_console_url(tenant, "plan", err=got["why"]), 303)
+    due = val("on") or systems._today()
+    said = [f"{c['name']}: {c['error']}" if c["error"] else
+            f"{c['name']}: queued" if c["queued"] else
+            f"{c['name']}: planned for {due}" if c["complete"] else
+            f"{c['name']}: planned, still needs {', '.join(c['missing'])} — finish it on its Planned list"
+            for c in got["channels"]]
+    head = (f"{got['topic']} — keyword “{got['keyword']}”"
+            + (" from the map" if got["from_map"] else " (new to the map)"))
+    return RedirectResponse(_console_url(tenant, "plan", **{("ok" if got["ok"] else "err"):
+                                                            head + ": " + "; ".join(said)}), 303)
+
+
 @app.get("/admin/plan_propose")
 def plan_propose(key: str = Depends(admin_key), tenant: str = "",
                  system: str = ""):

@@ -561,10 +561,28 @@ def main():
        (r.get("summary") or "")[:90])
     _oid_dead = (r.get("items") or [{}])[0].get("output_id", "")
     _got_dead = skill_pack.push_campaign_to_esp("baci", _oid_dead)
-    ck("…and the push refuses the withdrawn verdict, naming it",
+    # CHANGED 2026-09-27 (owner: "I'd like to already be able to launch
+    # this"). A defect that is not false or forbidden no longer withdraws the
+    # approval: it stays on the card, and approving pushes it as it stands.
+    ck("…and the push waits for your approval, naming what is open",
        _got_dead.get("ok") is not True
-       and "withdrew" in (_got_dead.get("error") or ""),
-       str(_got_dead)[:90])
+       and "not approved" in (_got_dead.get("error") or "")
+       and "dead_link" in (_got_dead.get("error") or ""),
+       str(_got_dead)[:120])
+    ck("…the run says it is yours to launch as it stands",
+       any("approving pushes it as it stands" in n for n in r.get("notes", [])))
+    # This account's email system runs itself (the auto rung), so no approval
+    # was filed for the held draft. The workroom's own control files one and
+    # approves it — that press IS your decision — and it pushes as it stands.
+    from fastapi.testclient import TestClient
+    from app import web as _web
+    _c = TestClient(_web.app)
+    _c.cookies.set("console", _web._console_token())
+    _n_before = len(_drafted)
+    _c.post("/admin/queue_approval", data={"output_id": _oid_dead, "decide": "approved"},
+            follow_redirects=False)
+    ck("…and approving it in the workroom pushes the draft as it stands",
+       len(_drafted) == _n_before + 1, str(len(_drafted) - _n_before))
     ck("…and the run says which control is dead",
        any("points nowhere" in n for n in r.get("notes", [])))
     ck("…and it is recorded, so a repeat is visible as an account gap",

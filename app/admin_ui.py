@@ -8561,7 +8561,10 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         # DOES, per kind, instead of one word meaning five things.
         prov = (pl.get("esp_push") or {}).get("provider", "")
         _mail = pl.get("send_mail") or {}
-        if prov:
+        _open = [str(f) for f in (pl.get("open_findings") or [])]
+        if prov and _open:
+            says = f"Approve as it stands — pushes the draft to {_esc(prov)}"
+        elif prov:
             says = f"Approve — pushes the draft to {_esc(prov)}"
         elif _mail:
             # A report leaves as mail. "Marks it reviewed" on a card whose
@@ -8599,6 +8602,8 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         return f"""
         <div class="msg"><div><b>{approval_title(a, _ship_arts)}</b></div>
           {_ship_preview(pl)}
+          {('<p class="mut">Still open — yours to launch as it stands or redraft: '
+            + "; ".join(_esc(f) for f in _open[:5]) + "</p>") if _open else ""}
           <div class="row">
             {_btn("approved", says)}
             {_btn("denied", "Deny", "sec")}
@@ -15324,6 +15329,47 @@ PLAN_SUBS = (("strategy", "Strategy"), ("schedule", "Schedule"),
              ("progress", "Progress"), ("goal", "Goal &amp; cadence"))
 
 
+def _topic_card(key: str, tenant: str) -> str:
+    """PLAN AROUND A TOPIC — an event, a holiday, a moment the plan does not
+    already cover, into every channel from one form (`topics.plan`). Owner,
+    2026-09-27: "plug that in and have both blogs, emails, ads, etc.
+    generated separately or collectively … and do so easily." A channel
+    whose system is not on this account says so where its box would be."""
+    from . import systems, topics
+    boxes = []
+    for k, name in topics.CHANNELS.items():
+        row = systems.find(tenant, k)
+        live = bool(row) and systems.is_on(row)
+        why = "" if live else (" — not installed here" if not row else f" — {row.status or 'off'}")
+        boxes.append(f'<label class="inl"><input type="checkbox" name="channels" value="{k}"'
+                     f'{" checked" if live else " disabled"}> {_esc(name)}{_esc(why)}</label>')
+
+    def pick(k: str, kind: str, label: str) -> str:
+        return _plan_field_input({"key": k, "kind": kind, "label": label}, "", tenant)
+    return f"""
+<div class="card" id="topic"><div class="head"><h2>Plan around a topic</h2>
+  <span class="mut">an event, a holiday, a moment the plan does not already cover — into
+  every channel at once, on the keyword the map is already building</span></div>
+<form method="post" action="/admin/topic_plan">
+  <input type="hidden" name="key" value="{_esc(key)}">
+  <input type="hidden" name="tenant" value="{_esc(tenant)}">
+  <div class="f"><label>Topic</label><input name="topic" required placeholder="Art Basel Miami Beach"></div>
+  <div class="f"><label>Why it matters to this client</label>
+    <input name="angle" placeholder="hosting guests during the fair"></div>
+  <div class="f"><label>Starts</label><input type="date" name="starts">
+    <label>Ends</label><input type="date" name="ends"></div>
+  {pick("entity_key", "entity", "Feature (optional)")}
+  {pick("audience_key", "audience", "Written for — emails and ads need it")}
+  {pick("segment", "segment", "Email list — emails need it")}
+  <div class="f"><label>Keyword</label>
+    <input name="keyword" placeholder="blank: the closest keyword in the map below"></div>
+  <div class="f"><label>Channels</label>{"".join(boxes)}</div>
+  <div class="f"><label>Due on</label><input type="date" name="on">
+    <label class="inl"><input type="checkbox" name="run_now" value="1"> Run now</label></div>
+  <button>Plan it</button>
+</form></div>"""
+
+
 def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
                 pick: bool = False, days: int = 28, probe: bool = False,
                 sub: str = "", ssort: str = "", sdesc: bool = False) -> str:
@@ -15623,6 +15669,7 @@ def render_plan(key: str, tenant: str = "", msg: str = "", err: str = "",
       {downstream_html}
       {_working_card(tenant)}
       {_plan_window(key, tenant, days)}
+      {_topic_card(key, tenant)}
       {strip}
       {rooms[sub]()}
       <details><summary>How this decides what to write next</summary>

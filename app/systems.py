@@ -804,6 +804,11 @@ CATALOG = {
                 dict(key="entity_keys", label="Also about (comma-separated)",
                      required=False, kind="entity_list"),
                 dict(key="variants", label="Variants (1–5)", required=False),
+                # THE ANGLE, which `ad_copy` has always taken and no plan could
+                # carry — so a topic planned into the ads (Art Basel, EV Week)
+                # reached them as a bare product and audience (2026-09-27).
+                dict(key="positioning", label="Angle — the moment or idea (optional)",
+                     required=False, kind="text"),
             ),
             artifact="proposal_rows",
             ship="approving marks the batch ready, then the copy is carried "

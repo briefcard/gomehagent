@@ -4130,19 +4130,29 @@ def _run_campaign_email(ctx: Context) -> dict:
         _landed = f"esp:{_prov}:not-drafted"
     ledger.delivered(ctx.tenant, item["output_id"], _landed)
 
-    # AN APPROVAL IS A QUESTION ABOUT SOMETHING PUSHABLE. Defective or
-    # forbidden copy withdraws it — the workroom still shows the artifact and
-    # its defects, feedback still files, but nothing offers to put it in a
-    # client's platform until a redraft comes back clean.
-    if defects or _forbidden or not final_html:
+    # WHAT MAY BE LAUNCHED IS YOURS TO DECIDE — except what is false or
+    # forbidden in the client's name. Owner, 2026-09-27: "with all of these
+    # fixes for each and every email generation, it's actually making it
+    # very difficult to push anything live … I'd like to already be able to
+    # launch this." Every defect withdrew the approval, so an email with a
+    # craft note, a dead button or neutral merge tags could never be pushed.
+    # Now only FORBIDDEN copy (a banned claim, unbacked urgency, an unfit
+    # entity named, an offer nobody approved) or no HTML withdraws it; any
+    # other defect stays ON the approval, listed on its card, and approving
+    # pushes the draft as it stands. The workroom still shows every defect,
+    # and a redraft still fixes them.
+    from . import approvals as _appr
+    if _forbidden or not final_html:
         why = ("; ".join(f["detail"] for f in _forbidden) if _forbidden
-               else "; ".join(defects) if defects
                else "no HTML was produced")
-        from . import approvals as _appr
         if _appr.withdraw(ctx.run_id, why):
-            ctx.note("the approval was withdrawn — not fit to push as it "
+            ctx.note("the approval was withdrawn — never pushable as it "
                      "stands: " + why + ". Review it in the workroom; a "
                      "clean redraft re-queues it.")
+    elif defects:
+        _appr.note_open_findings(ctx.run_id, defects)
+        ctx.note("open findings — approving pushes it as it stands: "
+                 + "; ".join(defects))
 
     # RECORDED SO IT CAN STOP HAPPENING. Every defect goes on the run, where
     # `systems.blocked_reasons` ranks it by how often it actually cost a send —
@@ -4169,8 +4179,8 @@ def _run_campaign_email(ctx: Context) -> dict:
                            else ", held for your review — approving pushes "
                                 "it to the ESP"
                            if final_html and not defects
-                           else ", held with defects — fix before it can "
-                                "be approved: " + "; ".join(defects)[:120]
+                           else ", held with defects — yours to approve as "
+                                "it stands or redraft: " + "; ".join(defects)[:120]
                            if final_html
                            else ", no HTML was produced")),
             "defects": defects,
@@ -4223,14 +4233,19 @@ def push_campaign_to_esp(tenant: str, output_id: str) -> dict:
     # side door around it. A withdrawn approval, or defects recorded on the
     # run with no approval in sight, both mean "not fit to push as it
     # stands"; a clean redraft re-queues a fresh approval and lifts this.
-    if latest_status == "withdrawn" or (
-            held_defects and run_decision != "approved"):
+    if latest_status == "withdrawn":
         return {"ok": False,
-                "error": "the review withdrew this campaign — not fit to "
-                         "push as it stands"
+                "error": "the review withdrew this campaign — never pushable "
+                         "as it stands"
                          + (f" ({'; '.join(held_defects[:3])})"
                             if held_defects else "")
                          + "; a clean redraft re-queues it"}
+    if held_defects and run_decision != "approved" and latest_status not in ("approved", "executed"):
+        return {"ok": False,
+                "error": "this campaign has open findings ("
+                         + "; ".join(held_defects[:3]) + ") and is not "
+                         "approved — approve it in Review to push it as it "
+                         "stands, or redraft it"}
     if art is None or not (art.body or "").strip():
         return {"ok": False,
                 "error": "no artifact HTML is kept for this campaign — "

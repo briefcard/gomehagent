@@ -207,6 +207,14 @@ SABOTAGES = [
         "why": "'Read the reference again' quietly recreates from the old reading instead, so a design whose READING was wrong can never be corrected and the owner presses a button that cannot do what it says",
     },
     {
+        "name": 'a_topic_ignores_the_seo_map',
+        "file": 'app/topics.py',
+        "find": '    found = {} if keyword.strip() else keyword_for(tenant, f"{topic} {angle}")\n',
+        "replace": '    found = {}  # SABOTAGE\n',
+        "suites": ['test_a_topic_is_planned_everywhere.py'],
+        "why": "a topic's article is written for its own bare name instead of the map's keyword and cluster, so the piece the client asked for reinforces nothing the site is building",
+    },
+    {
         "name": 'a_section_edge_is_left_open',
         "file": 'app/dividers.py',
         "find": '    ImageDraw.Draw(im).polygon([(0, 0), (w, 0)] + edge[::-1], fill=palette.parse(above))\n',
@@ -2849,17 +2857,12 @@ SABOTAGES = [
                "nothing",
     },
     {
-        "name": "push_refuses_withdrawn",
+        "name": "push_waits_for_the_approval",
         "file": "app/skill_pack.py",
-        "find": "    if latest_status == \"withdrawn\" or (\n"
-                "            held_defects and run_decision != \"approved\"):",
-        "replace": "    if False and (\n"
-                   "            held_defects and run_decision != \"approved\"):  # SABOTAGE",
+        "find": "    if held_defects and run_decision != \"approved\" and latest_status not in (\"approved\", \"executed\"):",
+        "replace": "    if False:  # SABOTAGE",
         "suites": ["test_campaign_variety.py"],
-        "why": "the push becomes a side door around the review's verdict — a "
-               "campaign the gates withdrew (dead links, defects) can be "
-               "written into a client's live ESP anyway, one click from a "
-               "list",
+        "why": "a campaign with open findings is written into the client's ESP without anyone approving it as it stands — the owner's press is what makes a defect a decision (2026-09-27)",
     },
     {
         "name": "redraft_supersedes",
