@@ -5499,7 +5499,9 @@ def _run_blog_article(ctx: Context) -> dict:
         # exists to improve. Refusing is the better output.
         ctx.note(f"not drafted — {why_not}. Nothing was filed: a templated "
                  f"article would rank worse than no article.")
-        return {"summary": f"not drafted ({str(why_not)[:80]})", "keyword": keyword}
+        # THE REASON, WHOLE — not the story that led up to it cut at eighty
+        # characters ("Read 0 rival page(s)… the writer di", 2026-09-28).
+        return {"summary": f"not drafted — {str(_made.get('why') or why_not)[:300]}", "keyword": keyword}
     for _line in str(_made.get("note") or "").split(". "):
         if _line.strip():
             ctx.note(_line.strip().rstrip(".") + ".")

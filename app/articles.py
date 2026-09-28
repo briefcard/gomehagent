@@ -782,7 +782,8 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
     got_b = brief(tenant, keyword, reads, material=material_)
     calls += got_b.get("calls", 0)
     if not got_b.get("ok"):
-        return {"ok": False, "status": FAILED, "note": "The brief could not be read: " + str(got_b.get("why")), "rounds": []}
+        return {"ok": False, "status": FAILED, "note": "The brief could not be read: " + str(got_b.get("why")),
+                "why": "the brief could not be read: " + str(got_b.get("why")), "rounds": []}
     brief_ = got_b["brief"]
     story.append(f"Read {len(reads)} rival page(s): " + (str(brief_.get("beat") or "")[:140] if reads else "none on file — writing the best page we can") + ".")
     app_ = None
@@ -797,7 +798,8 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
                          tenant=tenant, material=material_)
     calls += got_s.get("calls", 0)
     if not got_s.get("ok"):
-        return {"ok": False, "status": FAILED, "note": " ".join(story) + " " + str(got_s.get("why")), "rounds": [], "brief": brief_}
+        return {"ok": False, "status": FAILED, "note": " ".join(story) + " " + str(got_s.get("why")),
+                "why": str(got_s.get("why")), "rounds": [], "brief": brief_}
     story_ = got_s["story"]
     story.append(f"The story: {str(story_.get('hook') or '')[:100]} — {len(story_.get('beats') or [])} beats"
                  + ("; turned: " + "; ".join(map(str, story_["turned"]))[:200] if story_.get("turned") else "") + ".")
@@ -872,7 +874,8 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
             break
         prev_png = shot.get("png") or b""
     if best_i < 0:
-        return {"ok": False, "status": FAILED, "note": " ".join(story), "rounds": rounds, "brief": brief_, "story": story_, "calls": calls}
+        return {"ok": False, "status": FAILED, "note": " ".join(story), "why": (story[-1] if story else ""),
+                "rounds": rounds, "brief": brief_, "story": story_, "calls": calls}
     best = rounds[best_i]
     status = PUBLISHABLE if best["blocking"] == 0 and best["judged"] and (best["verdict"] or {}).get("would_publish") else NOT_PUBLISHABLE
     story.append(f"Kept round {best_i} of {len(rounds)}: {status}.")

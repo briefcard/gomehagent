@@ -76,7 +76,11 @@ def plan(tenant: str, *, topic: str, angle: str = "", starts: str = "", ends: st
         return {"ok": False, "why": "choose at least one channel"}
     found = {} if keyword.strip() else keyword_for(tenant, f"{topic} {angle}")
     phrase = keyword.strip() or found.get("phrase") or topic.lower()
-    about = f"{topic} — {angle.strip()}" if angle.strip() else topic
+    # THE DATES TRAVEL WITH THE TOPIC — into the article's angle, the email's
+    # goal and the ads' positioning — so a piece about an event says when it
+    # is (a chat handed the file asked for them, 2026-09-28).
+    when = (f"{starts} to {ends}" if ends and ends != starts else starts) if starts else ""
+    about = topic + (f" ({when})" if when else "") + (f" — {angle.strip()}" if angle.strip() else "")
     fields = {
         "blog": {"keyword": phrase, "cluster": found.get("cluster", ""), "role": "support",
                  "angle": about, "entity_key": entity_key, "audience_key": audience_key},

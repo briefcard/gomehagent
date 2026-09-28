@@ -1121,7 +1121,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`best_for`**(tenant, entity_keys?, dests?) → `str`  ·  from `skill_pack.py`
 - **`check`**(html, tenant, dests?) → `list[str]`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_can_the_engines_read_us.py`, `test_claim_trace.py`, `test_seo_guard.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `triage.py`, `web.py`, `wordpress_seo.py`
-- **`destinations`**(tenant, fetch?) → `list[dict]`  ·  from `skill_pack.py`
+- **`destinations`**(tenant, fetch?) → `list[dict]`  ·  from `handoff.py`, `skill_pack.py`
 - **`points_at`**(html, url) → `bool`  ·  from `keywords.py`, `test_support_links.py`
 - **`repoint`**(html, tenant, fallback, dests?) → `tuple[str, list[str]]`  ·  from `skill_pack.py`
 - **`shop_url`**(tenant, dests?) → `str`  ·  from `test_campaign_variety.py`

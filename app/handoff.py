@@ -127,4 +127,13 @@ def for_job(job_id: str) -> dict:
             if key in _META or _empty(value):
                 continue
             out += [f"### {key} — {part.get('what', '')}", "```json", _json(value), "```", ""]
+        # THE SITE'S OWN PAGES — the only places a link may go. A chat given
+        # the package without them wrote an article with no links at all and
+        # asked for the booking page (2026-09-28).
+        from . import links as _links
+        pages = [{"page": d.get("label", ""), "url": d.get("url", "")}
+                 for d in _links.destinations(tenant) if d.get("url")][:150]
+        if pages:
+            out += ["### links — the site's own pages; link only to these", "```json",
+                    _json(pages), "```", ""]
     return {"ok": True, "name": name, "markdown": "\n".join(out)}

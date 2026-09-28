@@ -185,8 +185,13 @@ def call(purpose: str, messages: list, *, tenant: str = "", system: str = "",
     try:
         msg = _client().messages.create(**kwargs)
     except Exception as exc:                                    # noqa: BLE001
-        return Reply(model=chosen, purpose=purpose, ok=False,
-                     error=model_error.explain(exc))
+        # SAID IN THE LOG, not only returned. A refused call came back as a
+        # sentence the caller could cut short — a blog run on 2026-09-28 read
+        # "the writer di…" and the worker log said nothing at all.
+        err = model_error.explain(exc)
+        import logging
+        logging.getLogger("llm").warning("model call failed — %s on %s: %s", purpose, chosen, err)
+        return Reply(model=chosen, purpose=purpose, ok=False, error=err)
 
     # Logged before the body is read: the tokens were spent whether or not we
     # like the shape of what came back, and a call that cost money and recorded

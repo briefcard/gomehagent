@@ -90,6 +90,8 @@ def main() -> int:
        and e.get("segment") == "new_subscribers" and e.get("audience_key") == "hosts", str(e))
     a = fields("ad_creative")
     ck("the ads carry it as their angle", "Holiday entertaining" in a.get("positioning", ""), str(a))
+    ck("  and the topic's dates travel with it", "2026-12-18 to 2026-12-24" in a.get("positioning", "")
+       and "2026-12-18 to 2026-12-24" in b.get("angle", ""), a.get("positioning", ""))
     g = fields("gbp_post")
     ck("the Business Profile post is an event, on its dates",
        g.get("kind") == "event" and g.get("event_title") == "Holiday entertaining"

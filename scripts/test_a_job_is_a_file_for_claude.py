@@ -73,6 +73,8 @@ def main() -> int:
        md.index("### rules") < md.index("### claims") < md.index("### entities")
        and "### claims — approved proof" in md)
     ck("  the rules that are never broken travel with it", "Invent nothing" in md)
+    ck("  and the site's own pages, the only places a link may go",
+       "### links — the site's own pages" in md and "https://" in md.split("### links")[1][:400])
 
     print("\n— a job a chat cannot do still says what it was and why it stopped —")
     sync = jobs.enqueue(T, "sync", payload={})["id"]

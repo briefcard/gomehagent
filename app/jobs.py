@@ -552,7 +552,7 @@ def _summary(result) -> str:
     said = str(result.get("summary") or "").strip()
     notes = result.get("notes")
     if said:
-        bits.append(said[:200])
+        bits.append(said[:400])
     elif isinstance(notes, list) and notes:
         bits.append(str(notes[0])[:200])
     # A CREATIVE RUN IS NOT A SKILL RUN. It reports what it drew, what it
