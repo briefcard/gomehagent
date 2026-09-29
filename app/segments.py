@@ -539,6 +539,13 @@ def esp_id_for(tenant: str, key: str) -> dict:
     and NOT persisted (the draft path stays read-only; `sync` remembers).
     Returns {id, name, via, why}; an empty id always carries a why.
     """
+    # NO SEGMENT ON THE PLAN is a choice, not a missing segment: the email was
+    # planned for an audience, and the list is chosen in the ESP (owner,
+    # 2026-09-29). `general` is the run's name for "no segment given".
+    if not key or key == "general":
+        return {"id": "", "name": "", "via": "",
+                "why": ("no segment on the plan — the draft goes to the ESP "
+                        "untargeted; choose who receives it there before sending")}
     stored = links(tenant).get(key) or {}
     if stored.get("id"):
         return {"id": stored["id"], "name": stored.get("name", ""),
@@ -553,8 +560,9 @@ def esp_id_for(tenant: str, key: str) -> dict:
                         "why": ("linked by name for this draft — run Sync "
                                 "on the Segments card to remember the id")}
         return {"id": "", "name": "", "via": "",
-                "why": (f"segment {key!r} does not exist in the ESP yet — "
-                        f"build it from the Segments card")}
+                "why": (f"segment {key!r} is not in the ESP yet — the draft "
+                        f"goes there untargeted: choose the list in the ESP "
+                        f"before sending, or build it from the Segments card")}
     return {"id": "", "name": "", "via": "",
             "why": ("the ESP could not be read ("
                     + (rec.get("esp_note") or rec.get("error", ""))[:200]

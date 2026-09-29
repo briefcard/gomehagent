@@ -2504,10 +2504,21 @@ def _plan_fields_split(key_: str, get, tenant: str) -> str:
     Nothing is hidden that was not already optional, and the fold names what is
     inside it, so it is never a mystery drawer.
     """
-    fields = systems.workflow(key_)["plan_fields"]
-    req = [f for f in fields if f.get("required")]
-    rest = [f for f in fields if not f.get("required")]
+    wf = systems.workflow(key_)
+    fields = wf["plan_fields"]
+    # ONE OF THESE IS NEEDED — shown in the open with the required ones. Folded,
+    # a group the plan cannot run without sat under "none of these stop the
+    # plan running", which was false about it (an email's segment-or-reader,
+    # 2026-09-29; a Business Profile post's made-from before it).
+    one_of = set(wf.get("one_of") or ())
+    req = [f for f in fields if f.get("required") or f["key"] in one_of]
+    rest = [f for f in fields if not (f.get("required") or f["key"] in one_of)]
     out = "".join(_plan_field_input(f, get(f["key"]), tenant) for f in req)
+    if one_of:
+        either = [str(f.get("label") or f["key"]).split(" — ")[0]
+                  for f in fields if f["key"] in one_of]
+        out += ('<p class="mut" style="grid-column:1/-1">One of these is needed: '
+                + _esc(" or ".join(either)) + ' — either will do.</p>')
     if rest:
         names = ", ".join(str(f.get("label") or f["key"]).lower() for f in rest)
         out += ('<details class="sec" style="grid-column:1/-1">'
@@ -15392,8 +15403,8 @@ def _topic_card(key: str, tenant: str) -> str:
   <div class="f"><label>Starts</label><input type="date" name="starts">
     <label>Ends</label><input type="date" name="ends"></div>
   {pick("entity_key", "entity", "Feature (optional)")}
-  {pick("audience_key", "audience", "Written for — emails and ads need it; the article reads it too")}
-  {pick("segment", "segment", "Email list — emails need it")}
+  {pick("audience_key", "audience", "Written for — ads need it; an email needs this or a list; the article reads it too")}
+  {pick("segment", "segment", "Email list — or leave it and choose the list in the ESP")}
   <div class="f"><label>Keyword</label>
     <input name="keyword" placeholder="blank: the closest keyword in the map below"></div>
   <div class="f"><label>Channels</label>{"".join(boxes)}</div>

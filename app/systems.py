@@ -412,16 +412,21 @@ CATALOG = {
             skill="campaign_email",
             cadence=dict(horizon_days=21, per_segment_monthly=1,
                          segment_rest_days=6),
+            # A SEGMENT OR AN AUDIENCE — either will do. Owner, 2026-09-29: "I
+            # need to be able to send emails to audiences OR segments and then
+            # I can choose the segment in the ESP if it's not already set up."
+            # With no segment the drafter writes for the audience and the
+            # draft reaches the ESP untargeted, the list chosen there.
+            one_of=("segment", "audience_key"),
             plan_fields=(
-                dict(key="segment", label="Audience segment", required=True,
-                     kind="segment"),
+                dict(key="segment", label="Segment — the list it goes to",
+                     required=False, kind="segment"),
                 # WHO IT IS WRITTEN FOR — a different decision from the
                 # segment above, which is who RECEIVES it. One `reorder_due`
                 # list holds every persona this brand has, so the plan asks
-                # both. Required, because one-to-many work written for
-                # everybody is written for nobody in particular.
-                dict(key="audience_key", label="Written for", required=True,
-                     kind="audience"),
+                # both; either alone is enough to write from.
+                dict(key="audience_key", label="Written for",
+                     required=False, kind="audience"),
                 # THE ANGLE IS DIRECTION, AND IT IS OPTIONAL. It was
                 # required, which forced a person to invent a concept for
                 # every send before anything could run — and the one thing a

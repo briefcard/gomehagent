@@ -883,8 +883,14 @@ def run(key: str, tenant: str, *, trigger: str = "manual", ref: str = "",
             except Exception:                                    # noqa: BLE001
                 _binds = False      # a predicate that cannot run must not stop work
         if _binds:
-            _absent_p = [r for r in sk.requires
-                         if not str(params.get(r) or "").strip()]
+            # A TUPLE INSIDE `requires` IS "ONE OF THESE": an email needs a
+            # segment OR an audience (owner, 2026-09-29) — either names who
+            # it is for, and requiring the audience alone blocked every
+            # segment-only send on an account that has personas.
+            _absent_p = [(r if isinstance(r, str) else " or ".join(r))
+                         for r in sk.requires
+                         if not any(str(params.get(p) or "").strip()
+                                    for p in ((r,) if isinstance(r, str) else r))]
             if _absent_p:
                 systems.finish_run(run_id, "blocked",
                                    blocked_on="; ".join(_absent_p))

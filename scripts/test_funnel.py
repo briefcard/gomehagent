@@ -475,16 +475,24 @@ def main() -> int:
        _saw2.get("offer") == "15% off through Sunday", str(_saw2.get("offer")))
     ck("  and the bottom-of-funnel brief stops reporting a gap it cannot close",
        "offer" in (_saw2.get("have") or []), str(_saw2.get("have")))
-    # ONE-TO-MANY WORK IS REFUSED WITHOUT A READER — on every caller, not just
-    # the plan path. This account has approved personas, so naming none is a
-    # decision somebody skipped rather than knowledge nobody has written.
-    _no_reader = skill.run("campaign_email", "baci", segment="reorder_due",
-                           intent="offer")
-    ck("a campaign that names no reader is refused",
+    # ONE-TO-MANY WORK NAMES WHO IT IS FOR — a segment OR a reader, on every
+    # caller, not just the plan path (owner, 2026-09-29: "I need to be able to
+    # send emails to audiences OR segments"). This account has approved
+    # personas, so naming NEITHER is a decision somebody skipped rather than
+    # knowledge nobody has written.
+    _no_reader = skill.run("campaign_email", "baci", intent="offer")
+    ck("a campaign that names neither a list nor a reader is refused",
        _no_reader["status"] == "blocked", str(_no_reader.get("status")))
-    ck("  and the refusal names the field",
-       any("audience_key" in b for b in _no_reader.get("blocked_on") or []),
+    ck("  and the refusal names the fields that would do",
+       any("segment or audience_key" in b for b in _no_reader.get("blocked_on") or []),
        str(_no_reader.get("blocked_on")))
+    skill_pack.draft_campaign = lambda bundle, seg, goal, craft=None: (
+        {"subject": "S", "preheader": "p", "body_html": "<p>x</p>", "claim_ids": [],
+         "cta_label": "Shop", "cta_url": "https://x/s"}, "model", "")
+    _seg_only = skill.run("campaign_email", "baci", segment="reorder_due", intent="offer")
+    skill_pack.draft_campaign = _real_c
+    ck("  while a segment alone is enough — the list names who it is for",
+       _seg_only["status"] == "produced", str(_seg_only.get("blocked_on")))
 
     # ...BUT AN ACCOUNT WITH NONE ON FILE STILL RUNS, thinly and saying so.
     # Refusing there would stop work on the strength of an absence, which this
@@ -502,7 +510,10 @@ def main() -> int:
     with db.SessionLocal() as _s:
         _s.get(db.System, _nr.id).status = "live"
         _s.commit()
-    _r2 = skill.run("campaign_email", "eien", segment="reorder_due")
+    # NEITHER a segment nor a reader: since 2026-09-29 a segment alone
+    # satisfies the requirement, so only a run naming neither proves the
+    # requirement stays unbound on an account with nobody to name.
+    _r2 = skill.run("campaign_email", "eien")
     ck("an account with NO persona on file still produces",
        _r2["status"] != "blocked", str(_r2.get("blocked_on")))
     ck("  and says which kind of gap it is",

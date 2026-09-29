@@ -74,11 +74,25 @@ def _call(tenant: str, method: str, path: str, *, payload: dict | None = None,
             body = r.json()
         except Exception:                                        # noqa: BLE001
             body = {}
+        if not isinstance(body, dict):
+            body = {}
         detail = ""
-        for f in (body.get("fields") or body.get("errors") or []):
-            if isinstance(f, dict):
-                detail += f" · {f.get('field', '')}: {f.get('code', '') or f.get('message', '')}"
-        msg = body.get("message") or body.get("error") or r.text[:160]
+        for key in ("fields", "errors", "invalidParams", "invalid-params"):
+            for f in body.get(key) or []:
+                if isinstance(f, dict):
+                    where = f.get("field") or f.get("name") or f.get("pointer") or f.get("path") or ""
+                    why = (f.get("code") or f.get("message") or f.get("reason")
+                           or f.get("detail") or "")
+                    detail += f" · {where}: {why}"
+                elif f:
+                    detail += f" · {f}"
+        # PROBLEM DETAILS (RFC 7807) — what the newer endpoints answer with:
+        # the reason is in `title` and `detail`, never in `message`. Reading
+        # only `message` fell back to the raw JSON, and the console cut that
+        # at "Validati" — the owner saw a refusal with no reason (2026-09-29).
+        msg = (body.get("message") or body.get("error")
+               or " — ".join(str(body[k]) for k in ("title", "detail") if body.get(k))
+               or r.text[:300])
         if "sender-email-not-available" in str(body) + r.text:
             return {"ok": False, "needs_owner": True,
                     "error": ("Omnisend has no verified sender address for this "
@@ -207,10 +221,15 @@ SEGMENT_CONDITIONS: dict[str, list[dict]] = {
     "win_back": [{"conditions": [{"entity": "event", "junction": "and",
                   "filters": [_order_event("has"),
                               _order_event("hasNot", days=120)]}]}],
+    # `subscriptionStatus` is per CHANNEL: `equals` one status, with the
+    # channels it applies to — the docs' own example, verbatim in shape
+    # (api-docs.omnisend.com/reference/segments). It was `anyOf` a list with
+    # no channel, and Omnisend refused it as validation-failed every time the
+    # owner pressed Build (2026-09-29).
     "new_subscribers": [{"conditions": [
         {"entity": "contact", "junction": "and",
-         "filters": [{"property": "subscriptionStatus", "operator": "anyOf",
-                      "value": ["subscribed"]}]},
+         "filters": [{"property": "subscriptionStatus", "operator": "equals",
+                      "value": "subscribed", "channels": ["email"]}]},
         {"entity": "event", "junction": "and",
          "filters": [_order_event("hasNot")]}]}],
     # NOT mapped, deliberately: cart_abandoners / engaged_non_buyers /

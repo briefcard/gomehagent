@@ -178,7 +178,10 @@ def main() -> int:
             print(f"       skipped: {k} is exempt — "
                   + ("one-to-one" if k in ONE_TO_ONE else "no chosen segment"))
             continue
-        ck(f"  {k} requires a reader", "audience_key" in (sk.requires or ()),
+        # An audience, or — for an email — a segment OR an audience (owner,
+        # 2026-09-29): a group in `requires` is "one of these".
+        _groups = [r if isinstance(r, tuple) else (r,) for r in (sk.requires or ())]
+        ck(f"  {k} requires a reader", any("audience_key" in g for g in _groups),
            "a campaign or an ad written for everybody is written for nobody")
         ck(f"  {k} only requires one where one can exist",
            sk.requires_when is not None,

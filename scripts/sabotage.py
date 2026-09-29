@@ -128,6 +128,92 @@ SABOTAGES = [
                "'in progress' after the owner runs it again — six hours on, "
                "Diagnostics reports a worker that never finished (2026-09-29)",
     },
+    # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
+    # The owner's Build pressed on Omnisend: 400 for New subscribers, the
+    # reason cut at "Validati"; and "audiences OR segments".
+    {
+        "name": "new_subscribers_goes_out_malformed_again",
+        "file": "app/omnisend.py",
+        "find": '         "filters": [{"property": "subscriptionStatus", "operator": "equals",',
+        "replace": '         "filters": [{"property": "subscriptionStatus", "operator": "anyOf",',
+        "suites": ["test_segments.py"],
+        "why": "New subscribers is refused by Omnisend as validation-failed "
+               "every time the owner presses Build",
+    },
+    {
+        "name": "omnisend_problem_details_go_unread",
+        "file": "app/omnisend.py",
+        "find": '               or " — ".join(str(body[k]) for k in ("title", "detail") if body.get(k))',
+        "replace": '               or ""  # SABOTAGE',
+        "suites": ["test_segments.py"],
+        "why": "Omnisend's reason for a refusal is in title and detail; unread, "
+               "the owner gets raw JSON cut before it",
+    },
+    {
+        "name": "the_segment_failure_is_cut_before_its_reason",
+        "file": "app/web.py",
+        "find": "                   + \"; \".join(f\"{f.get('name') or f.get('key')}: {f['error'][:300]}\"",
+        "replace": "                   + \"; \".join(f\"{f.get('name') or f.get('key')}: {f['error'][:80]}\"",
+        "suites": ["test_segments.py"],
+        "why": "the console shows `{\"type\":…,\"title\":\"Validati` and nothing "
+               "that says what to fix",
+    },
+    {
+        "name": "an_email_plan_asks_for_nobody",
+        "file": "app/systems.py",
+        "find": '            one_of=("segment", "audience_key"),',
+        "replace": "            one_of=(),  # SABOTAGE",
+        "suites": ["test_segments.py"],
+        "why": "an email plan with neither a list nor a reader reads complete "
+               "and is sent to be written for nobody",
+    },
+    {
+        "name": "an_email_run_demands_an_audience_again",
+        "file": "app/skill_pack.py",
+        "find": '    requires=(("segment", "audience_key"),),',
+        "replace": '    requires=("audience_key",),  # SABOTAGE',
+        "suites": ["test_campaign_variety.py"],
+        "why": "a segment-only email on an account with personas is blocked at "
+               "run time after its plan read complete",
+    },
+    {
+        "name": "one_of_in_requires_is_read_as_all_of",
+        "file": "app/skill.py",
+        "find": '                         if not any(str(params.get(p) or "").strip()',
+        "replace": '                         if not all(str(params.get(p) or "").strip()',
+        "suites": ["test_campaign_variety.py"],
+        "why": "\"a segment OR an audience\" is enforced as both, and every "
+               "email naming one of them is blocked",
+    },
+    {
+        "name": "no_segment_reads_as_a_missing_segment",
+        "file": "app/segments.py",
+        "find": '    if not key or key == "general":',
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_segments.py", "test_campaign_variety.py"],
+        "why": "an email planned for an audience is reported as a segment "
+               "'general' to build, instead of a list to choose in the ESP",
+    },
+    {
+        "name": "the_drafter_writes_to_the_general_list",
+        "file": "app/skill_pack.py",
+        "find": '                     if seg.get("key") != "general" else',
+        "replace": "                     if True else",
+        "suites": ["test_segments.py"],
+        "why": "an email planned for an audience is drafted for a 'General "
+               "list' rather than for its reader",
+    },
+    {
+        "name": "a_needed_either_or_is_folded_as_optional",
+        "file": "app/admin_ui.py",
+        "find": '    req = [f for f in fields if f.get("required") or f["key"] in one_of]\n'
+                '    rest = [f for f in fields if not (f.get("required") or f["key"] in one_of)]',
+        "replace": '    req = [f for f in fields if f.get("required")]\n'
+                   '    rest = [f for f in fields if not f.get("required")]',
+        "suites": ["test_workflow_ui.py"],
+        "why": "an email's segment and reader are folded under 'none of these "
+               "stop the plan running' — false, since one of them is needed",
+    },
     # -- WHAT'S NEW: the owner's facts for one piece, 2026-09-29 --------------
     # One wire each: a fact typed on the plan must reach every writer as a fact
     # to state, and every check that asks "is it on file" must count it.

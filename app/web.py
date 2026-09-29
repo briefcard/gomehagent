@@ -1506,8 +1506,12 @@ def segments_build(key: str = Depends(admin_key), tenant: str = "",
     if apply:
         segments.sync(tenant)
         said = (f"Created {len(out.get('created', []))} segment(s) in the ESP"
+                # WHICH ONE, AND OMNISEND'S WHOLE REASON. Cut at 80, the owner
+                # read `{"type":…,"title":"Validati` and nothing that said
+                # what to fix (2026-09-29).
                 + (f"; {len(out.get('failed', []))} failed — "
-                   + "; ".join(f["error"][:80] for f in out["failed"])
+                   + "; ".join(f"{f.get('name') or f.get('key')}: {f['error'][:300]}"
+                               for f in out["failed"])
                    if out.get("failed") else "")
                 + (f"; {len(out.get('unmapped', []))} cannot be expressed yet"
                    if out.get("unmapped") else ""))

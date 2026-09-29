@@ -366,17 +366,21 @@ def main() -> int:
     ck("…and the hand-fill form is still there for whoever wants it",
        "plan_new" in _empty)
 
-    # A CAMPAIGN NAMES ITS READER. An account that has authored no persona
-    # cannot have a COMPLETE campaign plan proposed for it, and the proposal
-    # says which field is missing rather than pretending — the honest state,
-    # pinned on its own account so it cannot be confused with the cap logic
-    # (a skipped plan still counts against the month, deliberately).
-    ck("a campaign plan with no reader NAMES the gap rather than running",
-       "Written for" in _sys.plan_complete(
-           {"plan": {"segment": "reorder_due"}, "planned_for": "2099-01-01"},
-           "campaign_email")["missing"],
-       "an account that has authored no persona cannot have a complete "
-       "campaign plan, and saying which field is missing is the honest state")
+    # A CAMPAIGN NAMES WHO IT IS FOR — a segment OR a reader. Owner,
+    # 2026-09-29: "I need to be able to send emails to audiences OR
+    # segments." A plan with NEITHER says which fields would do rather than
+    # pretending — the honest state, pinned on its own account so it cannot
+    # be confused with the cap logic (a skipped plan still counts against
+    # the month, deliberately).
+    ck("a campaign plan with neither a list nor a reader NAMES the gap rather than running",
+       any("Segment" in m and "Written for" in m for m in _sys.plan_complete(
+           {"plan": {"goal": "autumn"}, "planned_for": "2099-01-01"},
+           "campaign_email")["missing"]),
+       "a plan that says neither who receives it nor who it is written for "
+       "cannot be complete, and saying which fields would do is the honest state")
+    ck("  while a segment alone is a complete plan — the list names who it is for",
+       _sys.plan_complete({"plan": {"segment": "reorder_due"}, "planned_for": "2099-01-01"},
+                          "campaign_email")["complete"])
 
     _kbw.add_audience("baci", "core_hostess", "Women 35–44 — the core buyer",
                       ["generic tableware that says nothing about her"],
@@ -391,6 +395,19 @@ def main() -> int:
        bool(_plans) and all(_sys.plan_complete(pl, "campaign_email")["complete"]
                             for pl in _plans),
        str([_sys.plan_complete(pl, "campaign_email") for pl in _plans[:2]]))
+    # AND EACH NAMES ITS READER. A segment alone completes a plan since
+    # 2026-09-29, so completeness no longer proves the planner chose a reader
+    # on an account that has one — the reader itself is asserted.
+    ck("…and each names its reader — the account has one to name",
+       bool(_plans) and all(((pl.brief or {}).get("plan") or {}).get("audience_key")
+                            for pl in _plans),
+       str([((pl.brief or {}).get("plan") or {}).get("audience_key") for pl in _plans[:3]]))
+    _form = __import__("app.admin_ui", fromlist=["_plan_fields_split"])._plan_fields_split(
+        "campaign_email", lambda k: "", "baci")
+    ck("the segment and the reader sit in the open, saying one of them is needed",
+       _form.index('name="segment"') < _form.index("<summary>Optional")
+       and _form.index('name="audience_key"') < _form.index("<summary>Optional")
+       and "One of these is needed" in _form, _form[:200])
     ck("the optional fields on a real plan are folded",
        "Optional &mdash;" in _full)
     ck("…while both required ones stay visible",

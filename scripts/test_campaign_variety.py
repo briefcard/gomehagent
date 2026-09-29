@@ -510,6 +510,23 @@ def main():
     _n = " ".join(r.get("notes", []))
     ck("a draft the owner NAMED under What's new is named on purpose — said, not held",
        "you named it under What's new" in _n and "the email recommends CitroBurn" not in _n, _n[-300:])
+    # AN AUDIENCE OR A SEGMENT (owner, 2026-09-29): planned for an audience
+    # alone, the email is made and goes to the ESP untargeted, the list
+    # chosen there.
+    kb.add_audience("baci", "hosts", "Hosts who entertain", ["dull tables"], ["a table worth a photo"])
+    skill_pack.draft_campaign = _blocks_drafter([
+        {"type": "text", "html": "<p>A table worth a photo.</p>"},
+        {"type": "cta", "label": "See the table", "url": "https://x/t"}])
+    r = skill.run("campaign_email", "baci", audience_key="hosts", goal="x")
+    _n = " ".join(r.get("notes", []))
+    ck("an email planned for an audience alone is made — the list chosen in the ESP",
+       r.get("status") not in ("failed", "blocked") and (r.get("items") or [{}])[0].get("ok") is True
+       and "no segment on the plan" in _n and "choose who receives it" in _n,
+       str(r.get("status")) + " " + _n[-240:])
+    r = skill.run("campaign_email", "baci", goal="x")
+    ck("  and with NEITHER, on an account with personas, it is refused by name before anything is made",
+       r.get("status") == "blocked"
+       and any("segment or audience_key" in b for b in r.get("blocked_on") or []), str(r.get("blocked_on")))
 
     print("\n— a sign-off names a real person or nobody —")
     sig = [{"type": "text", "html": "<p>Hello.</p>"},
@@ -1035,6 +1052,7 @@ def main():
 
     def _cap(bundle, seg, goal, craft=None):
         _saw["notes"] = (craft or {}).get("revision_notes", "")
+        _saw["reader"] = (bundle.get("audience") or {}).get("key", "")
         return _keep(bundle, seg, goal, craft)
     skill_pack.draft_campaign = _cap
     _rd = skill_pack.redraft_artifact("eien", _oid0,
@@ -1045,6 +1063,11 @@ def main():
     ck("  and the owner's note reaches the drafter",
        "Make the opening warmer" in (_saw.get("notes") or ""),
        repr(_saw.get("notes"))[:90])
+    # WRITTEN FOR THE SAME READER. Since a segment alone may run (2026-09-29),
+    # a redraft that dropped the reader is no longer REFUSED — it is quietly
+    # rewritten for nobody in particular, so the reader itself is asserted.
+    ck("  and the redraft is written for the SAME reader the draft was",
+       _saw.get("reader") == "core_hostess", repr(_saw.get("reader")))
 
     # ...AND WHEN A REDRAFT IS GENUINELY REFUSED, IT SAYS WHY. The message
     # threw `blocked_on` away, so the one field naming the cause was lost and
@@ -1056,6 +1079,9 @@ def main():
         _a = (_s.query(db.ArtifactBody)
               .filter(db.ArtifactBody.output_id == _oid1).first())
         _a.meta = {}                       # a draft from before the reader was recorded
+        # …and with no list on record either: a segment OR an audience is
+        # enough since 2026-09-29, so only neither is a genuine refusal.
+        _s.get(db.Output, _oid1).audience_key = ""
         _s.commit()
     _bad = skill_pack.redraft_artifact("eien", _oid1, note="try again")
     ck("a refused redraft NAMES what stopped it",
@@ -1105,6 +1131,7 @@ def main():
         _a3 = (_s.query(db.ArtifactBody)
                .filter(db.ArtifactBody.output_id == _oid3).first())
         _a3.meta = {}
+        _s.get(db.Output, _oid3).audience_key = ""     # neither reader nor list on record
         _s.commit()
     _rd3 = skill_pack.redraft_artifact("eien", _oid3, part="body",
                                        note="Do not lose this thought.")

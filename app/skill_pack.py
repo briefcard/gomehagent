@@ -2639,8 +2639,13 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
             parts.append("\n## Hesitations you may answer:")
             for o in objs[:2]:
                 parts.append(f"- {o.get('objection', '')}")
+        # NO SEGMENT is a choice (owner, 2026-09-29): planned for an audience,
+        # the list chosen in the ESP — so the reader is the one to write to.
         parts.append(f"\n## Segment you are writing to:\n{seg['name']} — "
-                     f"{seg.get('definition', '')}")
+                     f"{seg.get('definition', '')}"
+                     if seg.get("key") != "general" else
+                     "\n## No segment was chosen — write for the reader this "
+                     "brief names; the list is chosen in the ESP")
         # DIRECTION, NAMED AS DIRECTION. Handed over under a bare heading the
         # angle reads as copy, and a drafter short of a subject line will
         # reach for the nearest sentence it was given.
@@ -4795,7 +4800,11 @@ register(Skill(
     # applies in plural to segments in mass marketing." A campaign goes to a
     # list, so it is written for one persona on that list — and the choice is
     # only refused when the account has personas to choose from.
-    requires=("audience_key",),
+    # A SEGMENT NAMES ONE TOO. Owner, 2026-09-29: "I need to be able to send
+    # emails to audiences OR segments and then I can choose the segment in
+    # the ESP if it's not already set up." Either is enough; neither, on an
+    # account with personas, is still a decision somebody skipped.
+    requires=(("segment", "audience_key"),),
     requires_when=_has_a_reader_to_pick,
     run=_run_campaign_email))
 

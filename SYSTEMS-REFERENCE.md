@@ -103,7 +103,7 @@ Builds and schedules campaign sends from the catalogue and calendar.
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** `campaign_rollout`
 - **Cadence knobs:** `horizon_days`=21, `per_segment_monthly`=1, `segment_rest_days`=6
-- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `news` (long), `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag), `structure` (structure), `generate_visual` (flag), `link`
+- **Plan fields** (the plan UI; `*` required): `segment` (segment), `audience_key` (audience), `goal`, `news` (long), `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag), `structure` (structure), `generate_visual` (flag), `link`
 - **Unit:** a campaign email to one segment
 - **Artifact:** esp_campaign
 - **Ship:** marks it launch-ready — launching stays human, in the ESP

@@ -400,6 +400,131 @@ def main() -> int:
     ck("the sweep reads only accounts whose campaign system is ON",
        swept == ["baci"], str(swept))
 
+    print("\n— every condition we send is one Omnisend documents (2026-09-29) —")
+    # The owner pressed Build and got `400 validation-failed` for New
+    # subscribers: `subscriptionStatus` went out as `anyOf` a list with no
+    # channel. The contract below is api-docs.omnisend.com/reference/segments,
+    # so every mapped segment is checked against what the API accepts BEFORE a
+    # client's workspace is asked to.
+    import app.omnisend as om2
+    DOC_PROPS = {"email", "phoneNumber", "firstName", "lastName", "gender", "country",
+                 "state", "subscriptionStatus", "consent", "tags", "birthday", "dateAdded",
+                 "lastDetectedCity", "lastDetectedCountry", "address", "city", "postalCode",
+                 "averageOrderValue", "totalSpent", "customerLifecycleStage", "custom"}
+    DOC_EVENTS = {"placed order", "opened message", "clicked message", "started checkout",
+                  "added product to cart"}
+    DOC_STAGES = {"champions", "loyalists", "cantLose", "atRisk", "highPotential",
+                  "needNurturing", "aboutToLose", "recentCustomers"}
+    PERIOD_OPS = {"inTheLast", "notInTheLast", "equals", "before", "after", "between"}
+    UNITS = {"days", "weeks", "months", "years"}
+
+    def _problems(key: str, groups: list) -> list[str]:
+        out = []
+        for g in groups:
+            for c in g.get("conditions") or []:
+                if c.get("entity") not in ("contact", "event") or c.get("junction") not in ("and", "or"):
+                    out.append(f"{key}: entity/junction {c.get('entity')}/{c.get('junction')}")
+                for f in c.get("filters") or []:
+                    if c.get("entity") == "event":
+                        p = f.get("period") or {}
+                        if (f.get("name") not in DOC_EVENTS or f.get("operator") not in ("has", "hasNot")
+                                or f.get("count") not in ("atLeast", "equals")
+                                or not isinstance(f.get("value"), int)
+                                or (p and (p.get("operator") not in PERIOD_OPS or p.get("unit") not in UNITS))):
+                            out.append(f"{key}: event filter {f}")
+                    elif f.get("property") not in DOC_PROPS:
+                        out.append(f"{key}: property {f.get('property')!r}")
+                    elif f["property"] == "subscriptionStatus" and not (
+                            f.get("operator") in ("equals", "notEquals")
+                            and f.get("value") in ("subscribed", "unsubscribed", "nonSubscribed")
+                            and isinstance(f.get("channels"), list) and f["channels"]
+                            and set(f["channels"]) <= {"email", "sms", "browserPush"}):
+                        out.append(f"{key}: subscriptionStatus {f}")
+                    elif f["property"] == "customerLifecycleStage" and not (
+                            f.get("operator") in ("anyOf", "noneOf")
+                            and set(f.get("value") or []) <= DOC_STAGES and f.get("value")):
+                        out.append(f"{key}: customerLifecycleStage {f}")
+        return out
+    bad = [p for k, g in om2.SEGMENT_CONDITIONS.items() for p in _problems(k, g)]
+    ck("every mapped segment is in the documented shape", not bad, "; ".join(bad)[:400])
+    ns = om2.SEGMENT_CONDITIONS["new_subscribers"][0]["conditions"][0]["filters"][0]
+    ck("  New subscribers asks for the email channel's status, as the docs' own example does",
+       ns == {"property": "subscriptionStatus", "operator": "equals",
+              "value": "subscribed", "channels": ["email"]}, str(ns))
+
+    print("\n— when Omnisend refuses, its reason reaches the owner —")
+    import types as _types
+    import httpx as _httpx
+    real_req, real_key = _httpx.request, om2._key
+    om2._key = lambda t: ("k", "")
+    _httpx.request = lambda *a, **k: _types.SimpleNamespace(
+        status_code=400, text="{...}",
+        json=lambda: {"type": "https://problems.omnisend.com/validation-failed",
+                      "title": "Validation failed",
+                      "detail": "conditionGroups[0].conditions[0].filters[0].channels is required",
+                      "errors": [{"field": "conditionGroups[0].conditions[0].filters[0].channels",
+                                  "message": "required"}]})
+    try:
+        said = om2._call("baci", "POST", "/api/segments", payload={})
+    finally:
+        _httpx.request, om2._key = real_req, real_key
+    ck("a problem-details refusal is read for its title, its detail and its field",
+       said["ok"] is False and "Validation failed" in said["error"]
+       and "channels is required" in said["error"] and "filters[0].channels: required" in said["error"],
+       said.get("error", ""))
+    from fastapi.testclient import TestClient
+    from urllib.parse import unquote_plus
+    from app import web
+    real_mat, real_sync2 = segments.materialize, segments.sync
+    segments.materialize = lambda t, apply=False: {
+        "ok": True, "created": [], "unmapped": [],
+        "failed": [{"key": "new_subscribers", "name": "New subscribers (no purchase)",
+                    "error": "400: " + "x" * 120 + " — the reason at the end"}]}
+    segments.sync = lambda t: {"ok": True}
+    try:
+        c = TestClient(web.app)
+        c.cookies.set("console", web._console_token())
+        r = c.get("/admin/segments_build?tenant=baci&apply=1&ui=1", follow_redirects=False)
+    finally:
+        segments.materialize, segments.sync = real_mat, real_sync2
+    where = unquote_plus(r.headers.get("location", ""))
+    ck("the console names the segment and keeps Omnisend's whole reason — not the first 80 characters",
+       "New subscribers (no purchase)" in where and "the reason at the end" in where, where[-160:])
+
+    print("\n— an email goes to a segment OR is written for an audience (2026-09-29) —")
+    from app import kb as _kb, systems as _sys
+    _kb.add_audience("baci", "hosts", "Hosts who entertain", ["dull tables"], ["a table worth a photo"])
+    _sys.find("baci", "campaign_email") or _sys.create("baci", "campaign_email")
+
+    def _complete(plan: dict) -> dict:
+        got = _sys.open_plan("baci", "campaign_email", ref=f"t:{sorted(plan)}", planned_for="2026-10-01",
+                             plan=plan)
+        return {"complete": bool(got.get("complete")), "missing": got.get("missing") or []}
+    ck("a plan with an audience and no segment is complete",
+       _complete({"audience_key": "hosts"})["complete"])
+    ck("  a plan with a segment and no audience is complete",
+       _complete({"segment": "new_subscribers"})["complete"])
+    none_ = _complete({"goal": "autumn"})
+    ck("  and one with neither says it needs one of the two",
+       not none_["complete"] and any("Segment" in m and "Written for" in m for m in none_["missing"]),
+       str(none_["missing"]))
+    ck("no segment on the plan is said as a choice — the list is picked in the ESP",
+       "choose who receives it" in segments.esp_id_for("baci", "general")["why"])
+    from app import config as _cfg, llm as _llm, skill_pack as _sp
+    _cfg.ANTHROPIC_API_KEY = _cfg.ANTHROPIC_API_KEY or "test-key"
+    seen_p: list = []
+    real_ask = _llm.ask
+    _llm.ask = lambda purpose, prompt, **k: (seen_p.append(prompt) or _types.SimpleNamespace(
+        ok=True, text='{"blocks": [{"type": "text", "html": "<p>x</p>"}]}',
+        stop_reason="end_turn", error="", degraded=""))
+    try:
+        _sp._draft_campaign_live({"rules": {"block": "RULES"}, "claims": [], "tenant": "baci"},
+                                 _sp._segment_brief("baci", None), "autumn", {})
+    finally:
+        _llm.ask = real_ask
+    ck("  and the drafter is pointed at the reader, not told it writes to a 'General list'",
+       bool(seen_p) and "No segment was chosen" in seen_p[-1] and "General list" not in seen_p[-1])
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")
