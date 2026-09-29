@@ -2381,6 +2381,31 @@ def _release_plan_subject(system_id: str, brief: dict) -> None:
             "could not release %r after a skip", phrase)
 
 
+def refile_plan(run_id: str) -> dict:
+    """The same plan, filed again as a fresh PLANNED row — what "Run it again"
+    means for a run that TOOK a plan and did not finish. A plan is consumed
+    once (`take_plan`), so re-sending the old row was refused as "not a plan
+    (stage 'brief')" (owner's blog run, 2026-09-29). The old row stays as the
+    record of what happened; the new one carries the same ref, fields and
+    approval — the press that asks for it again is the approval."""
+    with db.SessionLocal() as s:
+        old = s.get(db.SystemRun, run_id)
+        if old is None:
+            return {"error": "no such run"}
+        if old.stage == PLANNED:
+            return {"ok": True, "run_id": old.id, "unchanged": True}
+        sysrow = s.get(db.System, old.system_id)
+        key, tenant, ref = (sysrow.key if sysrow else ""), old.tenant, old.ref
+        plan = dict((old.brief or {}).get("plan") or {})
+    if not plan:
+        return {"error": "that run was not made from a plan — there is nothing to file again"}
+    got = open_plan(tenant, key, ref=ref or f"again:{run_id[:8]}", plan=plan,
+                    planned_for=_today(), trigger="again")
+    if got.get("run_id"):
+        approve_plan(got["run_id"])
+    return got
+
+
 def plans(tenant: str, key: str = "", due_by: str = "") -> list[db.SystemRun]:
     """Open planned rows for one account, soonest first.
 

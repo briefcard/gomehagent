@@ -683,7 +683,12 @@ def _pressure_plans(sysrow, cad: dict, have_by_segment: dict) -> tuple[int, int,
             _mo.consumed_for(sysrow.tenant, g["moment_ids"], queued)
             continue
 
-        if have_by_segment.get(seg, {}).get(_month(today), 0) >= cad["per_segment_monthly"]:
+        # THE MONTH THE NEW PLAN LANDS IN — it is dated LEAD_DAYS out, so on
+        # the last days of a month it counts toward NEXT month's cap; checking
+        # this month's let a cohort already planned for the 1st be planned
+        # again (found by the suite on 2026-09-29).
+        if have_by_segment.get(seg, {}).get(_month(today + dt.timedelta(days=LEAD_DAYS)), 0) \
+                >= cad["per_segment_monthly"]:
             refusals.append(f"{seg}: {g['people']} people are in a window, but "
                             f"this cohort is at its monthly cap — pressure "
                             f"does not buy extra sends")

@@ -297,6 +297,45 @@ def main() -> int:
     ck("  and a mode with nothing to work on is refused rather than guessed",
        not _rc.job("baci", mode="run")["ok"] and not _rc.job("baci", mode="swipe")["ok"])
 
+    print("\n— running again a run that took a plan files the plan again —")
+    # The owner's blog run was killed mid-way; "Run it again" re-sent the plan
+    # it had already taken, and was refused: "not a plan (stage 'brief')".
+    from app import skill as _skill, systems as _sys
+    blog = _sys.find("baci", "blog") or _sys.create("baci", "blog")
+    with db.SessionLocal() as s:
+        s.get(db.System, blog.id).status = "live"
+        s.commit()
+    first = _sys.open_plan("baci", "blog", ref="again:1", plan={"keyword": "espresso cups"},
+                           planned_for=_sys._today())["run_id"]
+    _params = _skill.get("blog_article").params
+    _sys.approve_plan(first)                       # as "Approve & run" does
+    ck("the plan is taken once", _sys.take_plan(first, "baci", system_id=blog.id,
+                                                skill_params=_params).get("ok") is True)
+    with db.SessionLocal() as s:
+        s.query(db.JobQueue).filter(db.JobQueue.state.in_(("queued", "running"))) \
+            .update({"state": "done"}, synchronize_session=False)
+        s.commit()
+    died = jobs.enqueue("baci", "system_run", system_key="blog", label="Blog — plan run",
+                        payload={"key": "blog_article", "trigger": "manual", "run_id": first})["id"]
+    jobs.claim("baci", "instance-D")
+    jobs.let_go("instance-D")
+    with db.SessionLocal() as s:
+        stuck = s.get(db.SystemRun, first)
+        stage, err = stuck.stage, stuck.error or ""
+    ck("the run a stopped worker abandoned is closed, not left 'in progress'",
+       stage == "failed" and "interrupted" in err, f"{stage} {err[:60]}")
+    got = jobs.again(died)
+    with db.SessionLocal() as s:
+        again_run = (s.get(db.JobQueue, got["id"]).payload or {}).get("run_id")
+        fresh = s.get(db.SystemRun, again_run)
+        fresh_stage, fresh_plan = fresh.stage, dict((fresh.brief or {}).get("plan") or {})
+        approved = bool((fresh.brief or {}).get("plan_approved_at"))
+    ck("Run it again files the same plan afresh — the old row stays the record",
+       got["ok"] and again_run != first and fresh_stage == _sys.PLANNED
+       and fresh_plan.get("keyword") == "espresso cups" and approved, str(got))
+    ck("  and that plan can be taken — no more 'not a plan'",
+       _sys.take_plan(again_run, "baci", system_id=blog.id, skill_params=_params).get("ok") is True)
+
     print("\n— a run that made nothing leads with why —")
     said = jobs._summary({"items": [], "status": "empty",
                           "summary": "not drafted (no product with the key 'x' on file)",

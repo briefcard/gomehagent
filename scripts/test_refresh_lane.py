@@ -201,12 +201,16 @@ def main() -> int:
                         cluster_key=f"k{i}", priority=100 - i)
     for _ in range(3):
         planner.blog_rollout(blog2)
-    mo = dt.date.today().strftime("%Y-%m")
-    same_month = [r for r in _plans(blog2, "article:")
-                  if str((r.brief or {}).get("planned_for", ""))[:7] == mo]
+    # PER CALENDAR MONTH OF planned_for, whichever months the horizon reaches:
+    # on the 29th a twenty-day horizon plans into next month, and counting only
+    # this month read that as "0 filed" (2026-09-29).
+    months: dict = {}
+    for r in _plans(blog2, "article:"):
+        m = str((r.brief or {}).get("planned_for", ""))[:7]
+        months[m] = months.get(m, 0) + 1
     ck("three runs in one month respect a cap of one",
-       len(same_month) == 1,
-       f"{len(same_month)} filed — the cap used to bind only WITHIN a run, "
+       bool(months) and max(months.values()) == 1,
+       f"{months} — the cap used to bind only WITHIN a run, "
        f"and the tick runs the planner every day")
 
     print()

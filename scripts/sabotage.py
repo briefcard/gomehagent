@@ -2553,7 +2553,8 @@ SABOTAGES = [
     {
         "name": "pressure_buys_timing_not_volume",
         "file": "app/planner.py",
-        "find": '        if have_by_segment.get(seg, {}).get(_month(today), 0) >= cad["per_segment_monthly"]:',
+        "find": '        if have_by_segment.get(seg, {}).get(_month(today + dt.timedelta(days=LEAD_DAYS)), 0) \\\n'
+                '                >= cad["per_segment_monthly"]:',
         "replace": "        if False:  # SABOTAGE",
         "suites": ["test_moment_pressure.py"],
         "why": "a cohort earns extra campaigns by having a bad week — the "
