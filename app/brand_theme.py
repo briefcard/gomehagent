@@ -53,7 +53,12 @@ DEFAULT = {
     "logo_url": "", "logo_alt": "",
     "colors": {"accent": "#1f2937", "accent_text": "#ffffff"},
     "font": {"heading": "Georgia, 'Times New Roman', serif",
-             "body": "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"},
+             "body": "-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif",
+             # THE TYPE PAIRING (app/type_system.py): blank = the brand's own
+             # faces above; a key = one of the vetted pairings (owner,
+             # 2026-09-29: "a network of complementary fonts so that you
+             # don't just guess").
+             "pairing": ""},
     "width": 600,
     "nav": [],
     # WHO SIGNS a letter. Brand data, owner-entered; a drafter once invented
@@ -61,6 +66,19 @@ DEFAULT = {
     "sender": {"name": "", "role": ""},
     "footer": {"brand": "", "address": "", "tagline": "",
                "socials": [], "disclaimer": ""},
+    # STICKERS AND BADGES — "allowed" or "never"; blank = the brand's default
+    # (`TENANT_DEFAULTS`, else allowed). A starburst "NEW!" on Baci's email:
+    # "That doesn't look good" (owner, 2026-09-29).
+    "design": {"stickers": ""},
+}
+
+#: A BRAND'S OWN DEFAULTS where the owner has said one, overridden by anything
+#: approved on the Brand tab. The seeded tenant rows never reach a deployed
+#: database again, so a per-brand choice lives here, beside the shape it fills.
+TENANT_DEFAULTS: dict[str, dict[str, str]] = {
+    # Owner, 2026-09-29: "Stickers: Baci only" — a starburst badge is not
+    # this brand's world.
+    "baci": {"design.stickers": "never"},
 }
 
 
@@ -68,9 +86,26 @@ def filled(theme: dict) -> dict:
     """A theme with every field filled from the default, deep enough for the
     nested dicts a reader expects."""
     t = {**DEFAULT, **(theme or {})}
-    for k in ("colors", "font", "footer", "sender"):
+    for k in ("colors", "font", "footer", "sender", "design"):
         t[k] = {**DEFAULT[k], **((theme or {}).get(k) or {})}
     return t
+
+
+def setting(tenant: str, theme: dict | None, path: str) -> str:
+    """One design setting: the approved theme's value, else this brand's own
+    default, else the renderer's. `path` is dotted, e.g. "design.stickers"."""
+    node: object = theme or {}
+    for part in path.split("."):
+        node = node.get(part, "") if isinstance(node, dict) else ""
+    if str(node or "").strip():
+        return str(node).strip()
+    own = (TENANT_DEFAULTS.get(tenant or "") or {}).get(path, "")
+    if own:
+        return own
+    node = DEFAULT
+    for part in path.split("."):
+        node = node.get(part, "") if isinstance(node, dict) else ""
+    return str(node or "")
 
 
 def missing_to_send(theme: dict) -> list[str]:
@@ -580,6 +615,13 @@ def approve(tenant: str, edits: dict | None = None) -> dict:
                 f"unknown theme field {path!r} — the theme's shape is "
                 f"DEFAULT's; editable fields are "
                 + ", ".join(sorted(allowed)))}
+        if value == "(default)":
+            # A CHOICE PUT BACK TO ITS DEFAULT — the brand's own faces, its own
+            # sticker rule. A blank box is not an edit; this is one, and it is
+            # recorded as applied so no earlier approval carries over it.
+            _set(theme, path, "")
+            applied.append(path)
+            continue
         if isinstance(value, str) and not value.strip():
             continue                       # a blank form input is not an edit
         if value is None:

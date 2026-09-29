@@ -184,7 +184,48 @@ _READ_JS = r"""() => {
     const b = i.getBoundingClientRect();
     return {colors: i.dataset.divider, rect: [b.left, b.top, b.width, b.height]};
   });
-  return {texts, grounds, dividers};
+  // THE PICTURES AS DRAWN: a product cut by its box (a fixed height, a
+  // cover-fit, a clipping cell) reads whole in the HTML and cut on the screen
+  // (owner, 2026-09-29: "The product photo is cut off on the top and bottom").
+  const images = [...document.querySelectorAll("img")].map(i => {
+    const b = i.getBoundingClientRect(), cs = getComputedStyle(i);
+    let v = [b.left, b.top, b.right, b.bottom];
+    for (let e = i.parentElement; e && e !== document.body; e = e.parentElement) {
+      const s = getComputedStyle(e);
+      if (s.overflow !== "visible" || s.overflowX !== "visible" || s.overflowY !== "visible") {
+        const r = e.getBoundingClientRect();
+        v = [Math.max(v[0], r.left), Math.max(v[1], r.top), Math.min(v[2], r.right), Math.min(v[3], r.bottom)];
+      }
+    }
+    return {src: i.currentSrc || i.src || "", natural: [i.naturalWidth, i.naturalHeight],
+            box: [b.width, b.height], shown: [Math.max(0, v[2] - v[0]), Math.max(0, v[3] - v[1])],
+            fit: cs.objectFit || "fill"};
+  });
+  // A ROW WITH AN EMPTY COLUMN beside its content — a two-up row holding one
+  // card (owner, 2026-09-29: "poorly aligned blocks in the same section").
+  // A cell is empty when it has no words, no picture and paints nothing of
+  // its own; a narrow gutter is not a column.
+  const groundOf = e => {
+    for (; e; e = e.parentElement) {
+      const bg = getComputedStyle(e).backgroundColor;
+      if (!/^(transparent|rgba\(.*, 0\))$/.test(bg)) return bg;
+    }
+    return "rgb(255, 255, 255)";
+  };
+  const rows = [];
+  for (const tr of document.querySelectorAll("tr")) {
+    const cells = [...tr.children].filter(c => c.tagName === "TD" || c.tagName === "TH");
+    if (cells.length < 2) continue;
+    const info = cells.map(c => {
+      const b = c.getBoundingClientRect(), cs = getComputedStyle(c);
+      const has = /[\p{L}\p{N}]/u.test(c.innerText || "") || !!c.querySelector("img");
+      const paints = cs.backgroundImage !== "none" || groundOf(c) !== groundOf(tr.parentElement);
+      return {w: Math.round(b.width), h: Math.round(b.height), has, paints};
+    });
+    if (info.some(x => x.has) && info.some(x => !x.has && !x.paints && x.w >= 80 && x.h >= 80))
+      rows.push({cells: info, text: (tr.innerText || "").replace(/\s+/g, " ").trim().slice(0, 60)});
+  }
+  return {texts, grounds, dividers, images, rows};
 }"""
 
 _NO_TEXT = ("*, *::before, *::after, *::marker { color: transparent !important; "
@@ -207,7 +248,8 @@ def _read(page, width: int) -> dict:
         page.add_style_tag(content=_NO_TEXT)
         ground = page.screenshot(full_page=True, type="png", scale="css")
         return {"texts": got.get("texts") or [], "grounds": got.get("grounds") or [],
-                "dividers": got.get("dividers") or [], "ground": ground}
+                "dividers": got.get("dividers") or [], "images": got.get("images") or [],
+                "rows": got.get("rows") or [], "ground": ground}
     except Exception as e:                                        # noqa: BLE001
         return {"read_why": f"the render could not be read: {type(e).__name__}: {str(e)[:160]}"}
 

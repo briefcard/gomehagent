@@ -28,6 +28,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import types
@@ -37,6 +38,7 @@ os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ.pop("SHOTS_WS", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from app import type_system  # noqa: E402
 from app import (admin_ui, brand_theme, db, email_structures as es, kb, llm, media,  # noqa: E402
                  pictures as pics, recreate as rc, shots, tenants, web)
 
@@ -100,15 +102,15 @@ def email_html(*, photo_a=PHOTO_A, photo_b=PHOTO_B, logo=LOGO, address=ADDRESS, 
                       "Pile the pasta straight onto the plates.", "Mangia!"), cta="Shop Portofino", claim=CLAIM,
                bake=False) -> str:
     step_html = "".join(f'<p style="margin:0 0 8px;color:{ink}">{i + 1}. {s}</p>' for i, s in enumerate(steps))
-    head_row = (f'<tr><td align="center" style="color:{cream};font-family:Impact,\'Arial Black\',sans-serif;'
+    head_row = (f'<tr><td align="center" style="color:{cream};font-family:Georgia,\'Times New Roman\',serif;'
                 f'font-size:{headline_px}px">{headline}</td></tr>')
     if bake:
         head_row = (f'<tr><td><!--bake--><table width="600" style="background:{page}"><tr><td align="center" '
-                    f'style="color:{cream};font-family:\'Archivo Black\';font-size:{headline_px}px">{headline}</td></tr></table>'
+                    f'style="color:{cream};font-family:\'Gelasio\';font-size:{headline_px}px">{headline}</td></tr></table>'
                     f'<!--/bake--></td></tr>')
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{headline}</title>
-<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&display=swap" rel="stylesheet"></head>
-<body style="margin:0;background:{page}"><!-- system: faces display=Impact headline=Helvetica body=Helvetica accent=Brush Script MT · scale: 96/13/12/11/11 · space: 8/16/30/34 · inset: 34 · radius: 14 -->{extra}
+<link href="https://fonts.googleapis.com/css2?family=Gelasio&display=swap" rel="stylesheet"></head>
+<body style="margin:0;background:{page}"><!-- system: faces headline=Georgia body=Helvetica · scale: 96/13/12/11/11 · space: 8/16/30/34 · inset: 34 · radius: 14 -->{extra}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{page}"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px">
 <tr><td align="center" style="padding:30px"><img src="{logo}" alt="the brand" width="150"></td></tr>
@@ -306,10 +308,15 @@ def main() -> int:
     prompt = seen["email_compose"][-1]
     ck("the composer was handed the crops, the tones, the brief, the message and the standard",
        "pasta_1200x1500_crop_center" in prompt and "tones:" in prompt and "social post shown as a post" in prompt
-       and "Set the scene" in prompt and "<!DOCTYPE html>" in prompt and "bacimilanousa" not in prompt.split("THE STANDARD")[0])
+       and "Set the scene" in prompt and "<!DOCTYPE html>" in prompt
+       # the standard's own words stay in THE STANDARD — the site's pages are
+       # the one place the brand's domain belongs before it (2026-09-29)
+       and "bacimilanousa" not in re.sub(r"THE SITE'S PAGES.*?\n\nTHE MESSAGE", "", prompt.split("THE STANDARD")[0], flags=re.S))
+    ck("  and the site's pages, so a button's words can find their page",
+       "THE SITE'S PAGES" in prompt and "https://bacimilanousa.com" in prompt.split("THE SITE'S PAGES")[1].split("THE MESSAGE")[0])
     baked_html, notes = rc.bake(email_html(bake=True), "baci")
     ck("a baked block is photographed and replaced by one picture whose alt carries the words",
-       "<!--bake-->" not in baked_html and 'alt="Set the scene!"' in baked_html and frag_shots and "Archivo Black" in frag_shots[-1]
+       "<!--bake-->" not in baked_html and 'alt="Set the scene!"' in baked_html and frag_shots and "Gelasio" in frag_shots[-1]
        and notes and notes[0].startswith("baked:"))
     shots.shoot_fragment = lambda head, frag, **k: {"ok": False, "png": b"", "door": "", "why": "playwright is not installed"}
     unbaked, notes2 = rc.bake(email_html(bake=True), "baci")
@@ -367,7 +374,19 @@ def main() -> int:
     named = email_html().replace("scale: 96/13/12/11/11", "scale: display=96 / headline=13 / body=12 / small=11 / tiny=11")
     ck("a scale written as named steps is read whole, not as its first number", not rc.system_check(named), str(rc.system_check(named)))
     four = email_html(extra='<p style="color:#ffffff;font-family:Georgia,serif">a</p><p style="color:#ffffff;font-family:Playfair Display,serif">b</p>')
-    ck("a fourth face blocks — two faces and one accent is the ceiling", any(f["code"] == "system_faces" for f in rc.system_check(four)))
+    # THE BRAND'S PAIRING, not a count (owner, 2026-09-29: "a network of
+    # complementary fonts so that you don't just guess").
+    _pair = type_system.for_theme(kit.get("theme") or {})
+    ck("a face outside the brand's pairing blocks — the type is chosen once, per brand",
+       any(f["code"] == "system_faces" and "Playfair Display" in f["what"]
+           for f in rc.system_check(four, pairing=_pair)), str(rc.system_check(four, pairing=_pair)))
+    ck("  and one set only inside a baked block is read from the maker's own HTML",
+       any(f["code"] == "system_faces" and "Caveat" in f["what"] for f in rc.system_check(
+           email_html(), pairing=_pair,
+           raw='<!--bake--><table><tr><td style="font-family:Caveat,cursive">Points</td></tr></table><!--/bake-->')))
+    ck("  while the brand's own faces pass",
+       not any(f["code"] == "system_faces" for f in rc.system_check(email_html(), pairing=_pair)),
+       str(rc.system_check(email_html(), pairing=_pair)))
     ck("an invented picture on the brand's own host blocks", blocks(email_html(photo_b=CDN + "table_staged_tray_1200x800.jpg"), "asset_invented"))
     ck("a cut of a filed picture is allowed", not any(f["code"] in ("asset", "asset_invented") for f in rc.check(email_html(photo_b=CDN + "table_1200x1500_crop_center.jpg"), kit, BRIEF, copy_)))
     httpx.head = lambda url, *a, **k: types.SimpleNamespace(status_code=404 if "gone" in url else 200)
@@ -781,6 +800,35 @@ def main() -> int:
     html_b = admin_ui.render_brand("s3cret", "baci")
     ck("the Brand tab carries the pictures by kind and no palette of roles, no theme preview",
        "By kind" in html_b and "Palette of roles" not in html_b and "srcdoc=" not in html_b)
+
+    print("\n— the run holds the email to the brand: its header, its type, its time said —")
+    # Owner, 2026-09-29: a wave where the header should be, three faces in one
+    # headline, and thirty minutes for it. Asserted through `run`, the loop
+    # that ships, not only the pieces.
+    answers["email_judge"] = {"ours_first_words": "Don't just set the table.", "same_concept": True,
+                              "devices_in_order": True, "brand_material": True, "would_send": True,
+                              "weight_rhythm": "", "findings": []}
+    answers["email_compose"] = reply_email(email_html(
+        extra='<p style="color:#ffffff;font-family:Caveat,cursive">Points</p>'))
+    got_b = rc.run(sid, "baci", "portofino", seed="brand", message={"subject": "Set the scene"})
+    r0 = (got_b.get("rounds") or [{}])[0]
+    ck("the email that ships opens with the brand's header",
+       'data-brand-header="1"' in (got_b.get("html") or ""), str(got_b.get("note"))[:160])
+    ck("  a script face in live text blocks the round — the brand's pairing, not a count",
+       any(c.get("code") == "system_faces" and "Caveat" in c.get("what", "") for c in r0.get("check") or []),
+       str([c.get("code") for c in r0.get("check") or []]))
+    ck("  a button that names a page is sent to it, and the run says so",
+       "the page it names" in (got_b.get("note") or ""), str(got_b.get("note"))[-240:])
+    ck("  and every round says how long each step took",
+       set(r0.get("took") or {}) == {"writing", "drawing", "checking", "rendering", "judging"}
+       and "took" in (got_b.get("note") or ""), str(r0.get("took")))
+    # A GUARD THAT CAUGHT NOTHING (found 2026-09-29, missed on bebf031 too):
+    # the "cannot be made" outcome was never asserted through `run`.
+    answers["email_cast"] = {"picks": [], "none": [{"section": 3, "needs": "a photograph of food on the plate"}]}
+    got_c = rc.run(sid, "baci", "portofino", seed="none", message={"subject": "Set the scene"})
+    ck("a design whose photograph slots nothing fits cannot be made yet — and says what it needs",
+       got_c.get("status") == rc.CANNOT and "needs a photograph of food" in (got_c.get("note") or ""),
+       f'{got_c.get("status")} {str(got_c.get("note"))[-160:]}')
 
     print()
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: " + "; ".join(_fail))

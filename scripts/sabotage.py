@@ -128,6 +128,167 @@ SABOTAGES = [
                "'in progress' after the owner runs it again — six hours on, "
                "Diagnostics reports a worker that never finished (2026-09-29)",
     },
+    # -- THE EMAIL IS THE BRAND'S, 2026-09-29 -----------------------------------
+    # The owner's run: a wave for a header, three faces in one headline, plates
+    # cut top and bottom, a "NEW!" star, a card beside an empty column,
+    # "Request a Partnership" to the collections, and thirty minutes for it.
+    {
+        "name": "packshots_are_cut_to_fit_again",
+        "file": "app/recreate.py",
+        "find": '                  if _is_scene(p) else {"whole": p["url"]})',
+        "replace": '                  if True else {"whole": p["url"]})',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a product on its own ground is offered in centre crops, and the "
+               "maker takes one that cuts the product",
+    },
+    {
+        "name": "a_cropped_packshot_passes_the_check",
+        "file": "app/recreate.py",
+        "find": '        if re.search(r"_\\d+x\\d*_crop_\\w+\\.\\w+$", src.split("?", 1)[0]) and _base(src) in packshots:',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a crop of a packshot the maker constructed ships as a filed picture",
+    },
+    {
+        "name": "a_product_cut_on_screen_passes",
+        "file": "app/recreate.py",
+        "find": "        if off > 0.03 or clipped:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a whole URL in a fixed-height, cover-fit box ships with the "
+               "product cut top and bottom",
+    },
+    {
+        "name": "an_empty_column_passes",
+        "file": "app/recreate.py",
+        "find": '    for r in (shot.get("rows") or [])[:3]:',
+        "replace": "    for r in []:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a card sits beside an empty column and the section reads as "
+               "poorly aligned blocks",
+    },
+    {
+        "name": "the_header_is_never_drawn",
+        "file": "app/recreate.py",
+        "find": "        html, head_note = email_header.place(html, tenant, kit_, COLUMN)",
+        "replace": '        head_note = ""  # SABOTAGE',
+        "suites": ["test_the_model_makes_the_email.py"],
+        "why": "the email opens with whatever the reference opened with — a wave "
+               "where the brand's header should be",
+    },
+    {
+        "name": "the_type_is_guessed_again",
+        "file": "app/recreate.py",
+        "find": "                  + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_))",
+        "replace": "                  + system_check(html, seen=shot) + story_check(html, story_, kit_))",
+        "suites": ["test_the_model_makes_the_email.py"],
+        "why": "the run counts faces instead of holding them to the brand's "
+               "pairing, and a script word in the headline ships",
+    },
+    {
+        "name": "a_button_goes_to_the_fallback_again",
+        "file": "app/recreate.py",
+        "find": "        html, moved = _links.match_buttons(html, dests)",
+        "replace": "        moved = []  # SABOTAGE",
+        "suites": ["test_the_model_makes_the_email.py"],
+        "why": "'Request a Partnership' ships pointing at the collections page",
+    },
+    {
+        "name": "revisions_rewrite_the_whole_email_again",
+        "file": "app/recreate.py",
+        "find": '            "html": html, "output": _EDITS_OUTPUT,',
+        "replace": '            "html": html, "output": _FULL_OUTPUT,',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "every revision writes the whole email out again — minutes a "
+               "round for a handful of changes",
+    },
+    {
+        "name": "an_unplaceable_edit_ends_the_round_empty",
+        "file": "app/recreate.py",
+        "find": "        prompt = prompt.replace(_EDITS_OUTPUT, _FULL_OUTPUT)",
+        "replace": '        return {"ok": False, "html": "", "subject": "", "preheader": "", "edited": 0, "why": "x"}  # SABOTAGE',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a revision whose edits cannot be placed ends the round with "
+               "nothing, instead of the whole email once",
+    },
+    {
+        "name": "the_maker_is_not_told_no_stickers",
+        "file": "app/recreate.py",
+        "find": '            "stickers": (_NO_STICKERS if _stickers_never(tenant, theme) else _STICKERS_BESIDE),',
+        "replace": '            "stickers": _STICKERS_BESIDE,  # SABOTAGE',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "Baci's email is told a sticker may sit beside the words, and a "
+               "'NEW!' star ships",
+    },
+    {
+        "name": "stickers_allowed_for_baci_again",
+        "file": "app/brand_theme.py",
+        "find": '    "baci": {"design.stickers": "never"},',
+        "replace": '    "baci": {},  # SABOTAGE',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the owner's 'Stickers: Baci only' is forgotten",
+    },
+    {
+        "name": "a_default_choice_cannot_clear_a_pairing",
+        "file": "app/brand_theme.py",
+        "find": '        if value == "(default)":',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "choosing the brand's own faces on the Brand tab saves the word "
+               "'(default)' rather than clearing the pairing",
+    },
+    {
+        "name": "the_header_ignores_the_makers_colours",
+        "file": "app/email_header.py",
+        "find": '        ground = m.group(1) or ""',
+        "replace": '        ground = ""  # SABOTAGE',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the header is always white, whatever the email's look and feel",
+    },
+    {
+        "name": "a_vanishing_mark_is_drawn_anyway",
+        "file": "app/email_header.py",
+        "find": '    vanishes = (tone == "light" and ground_light) or (tone == "dark" and not ground_light)',
+        "replace": "    vanishes = False  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a dark mark is set on a dark header and the brand disappears",
+    },
+    {
+        "name": "the_header_off_the_emails_rhythm",
+        "file": "app/email_header.py",
+        "find": "    side = inset or 24",
+        "replace": "    side = 24  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the header sits on its own inset, not the email's — one more "
+               "stray inset in every email",
+    },
+    {
+        "name": "a_baked_face_is_not_read",
+        "file": "app/type_system.py",
+        "find": '    return [m for frag in _BAKE.findall(raw_html or "")',
+        "replace": "    return [m for frag in []  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a script face set inside a baked headline is never counted — "
+               "how the owner's three-face headline passed",
+    },
+    {
+        "name": "a_partnership_button_goes_anywhere",
+        "file": "app/links.py",
+        "find": "    for _job, (said, page) in INTENTS.items():",
+        "replace": "    for _job, (said, page) in {}.items():  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a button's words name no page, and every button goes to the "
+               "one fallback",
+    },
+    {
+        "name": "the_brand_tab_offers_no_type_choice",
+        "file": "app/admin_ui.py",
+        "find": "        if choices:",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the pairing and the sticker rule are free-text boxes nobody "
+               "can fill correctly",
+    },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the
     # reason cut at "Validati"; and "audiences OR segments".

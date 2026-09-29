@@ -1143,8 +1143,10 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     from . import admin_ui as ui
     form = await request.form()
     tenant = str(form.get("tenant", ""))
+    # "(default)" on a choice travels as itself: `approve` puts that field
+    # back to the brand's default, which a blank box never could.
     edits = {path: str(form.get(path, ""))
-             for path, _label, _hint in ui._THEME_EDIT_FIELDS
+             for path, *_ in ui._THEME_EDIT_FIELDS
              if str(form.get(path, "")).strip()}
     got = brand_theme.approve(tenant, edits)
     arg = (("ok", "approved" + (" — " + got["note"] if got.get("note") else ""))

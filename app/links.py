@@ -151,6 +151,77 @@ def best_for(tenant: str, entity_keys: list[str] | None = None,
     return shop_url(tenant, dests)
 
 
+#: A BUTTON GOES WHERE ITS WORDS SAY. Owner, 2026-09-29: "the buttons don't
+#: correspond with the correct links like 'Request a Partnership' should take
+#: you to the wholesale page not the collections page." Every button the
+#: drafter wrote without an address was sent to ONE fallback page, whatever it
+#: said. Each job: the words a button uses for it, then the words its page
+#: carries in its label or address.
+INTENTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "wholesale": (("wholesale", "partnership", "partner with", "become a partner", "trade",
+                   "stockist", "retailer", "reseller", "b2b", "for retailers",
+                   "for your store", "for your shop"),
+                  ("wholesale", "trade", "partner", "stockist", "retailer", "b2b")),
+    "contact": (("contact", "get in touch", "talk to us", "write to us", "email us", "call us",
+                 "enquire", "inquire", "ask us"),
+                ("contact", "get-in-touch", "enquir", "inquir")),
+    "about": (("our story", "about us", "who we are", "meet the"),
+              ("about", "our-story", "story")),
+    "stores": (("find a store", "store locator", "visit a store", "near you"),
+               ("stores", "locator", "stockists", "find-a-store")),
+}
+
+
+def for_words(words: str, dests: list[dict]) -> dict | None:
+    """The page a button's words name, or None when they name none in
+    particular ("Shop now" is the fallback's to answer, not this)."""
+    w = " " + re.sub(r"[^a-z0-9' ]+", " ", str(words or "").lower()) + " "
+    for _job, (said, page) in INTENTS.items():
+        if any(f" {t} " in w or f" {t}" in w for t in said):
+            for d in dests:
+                if d.get("kind") in ("page", "home", "collection"):
+                    hay = f"{d.get('label', '')} {d.get('url', '')}".lower()
+                    if any(p in hay for p in page):
+                        return d
+            return None
+    # A button that names a collection by its own name goes to that collection.
+    toks = {t for t in re.findall(r"[a-z]{4,}", w)} - {"shop", "view", "see", "discover", "explore",
+                                                       "collection", "collections", "more", "the"}
+    best, best_n = None, 0
+    for d in dests:
+        if d.get("kind") != "collection":
+            continue
+        name = {t for t in re.findall(r"[a-z]{4,}", str(d.get("label", "")).lower())}
+        n = len(name & toks)
+        if name and n == len(name) and n > best_n:
+            best, best_n = d, n
+    return best
+
+
+_A = re.compile(r"<a\b([^>]*?)href=([\"'])(.*?)\2([^>]*)>(.*?)</a>", re.I | re.S)
+
+
+def match_buttons(html: str, dests: list[dict]) -> tuple[str, list[str]]:
+    """`(html, changes)` — every link whose words name a page sent to that
+    page. Only a link of button length (40 characters of words or fewer) is
+    read, and only one whose words name a page is moved."""
+    changes: list[str] = []
+
+    def one(m):
+        words = re.sub(r"<[^>]+>", " ", m.group(5))
+        words = re.sub(r"\s+", " ", words).strip()
+        href = m.group(3)
+        if not words or len(words) > 40 or not href.startswith("http"):
+            return m.group(0)
+        hit = for_words(words, dests)
+        if not hit or _norm_href(hit["url"]) == _norm_href(href):
+            return m.group(0)
+        changes.append(f"“{words}” went to {href} — sent to {hit['url']}, the page it names")
+        return f"<a{m.group(1)}href={m.group(2)}{hit['url']}{m.group(2)}{m.group(4)}>{m.group(5)}</a>"
+
+    return _A.sub(one, html or ""), changes
+
+
 def points_at(html: str, url: str) -> bool:
     """Does this markup link to that page? Offline, and deliberately so.
 

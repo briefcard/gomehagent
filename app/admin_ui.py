@@ -4181,6 +4181,8 @@ def _next_steps_line(steps: dict) -> str:
 #: Deliberately the high-consequence fields; the long tail (background/border
 #: colours, radius, nav) arrives via the deriver or `brand_theme.approve`
 #: called directly. footer.address is the CAN-SPAM line.
+from . import type_system as _type_pairings  # noqa: E402 — the Brand tab's pairing choices
+
 _THEME_EDIT_FIELDS = (
     ("footer.address", "Mailing address", "required before anything can send"),
     ("logo_url", "Logo URL", "absolute https URL"),
@@ -4194,6 +4196,14 @@ _THEME_EDIT_FIELDS = (
     # shape the reader expects, exactly as footer.address already does.
     ("sender.name", "Sender name", "signs letter-format emails — with no "
                                    "name the sign-off is dropped"),
+    # THE TYPE AND THE STICKERS — chosen once per brand, never per email
+    # (owner, 2026-09-29). A fourth element is the choices; "(default)" saves
+    # blank, which is the brand's own faces / the brand's own default.
+    ("font.pairing", "Type pairing", "the two faces every email is set in",
+     (("(default)", "The brand's own faces"),)
+     + tuple((k, p["name"]) for k, p in _type_pairings.PAIRINGS.items())),
+    ("design.stickers", "Stickers and badges", "starbursts, seals, “NEW!” stars in an email",
+     (("(default)", "This brand's default"), ("allowed", "Allowed"), ("never", "Never"))),
 )
 
 _BRAND_CSS = """<style>
@@ -4839,14 +4849,26 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
     # The approve form, prefilled from the proposal (else the live theme) so
     # approving unchanged is one click and correcting is typing over a value.
     inputs = ""
-    for path, label, hint in _THEME_EDIT_FIELDS:
+    from . import brand_theme as _bt, type_system as _ts
+    for path, label, hint, *choices in _THEME_EDIT_FIELDS:
         node: object = prop.get("theme") or live or {}
         for part in path.split("."):
             node = node.get(part, "") if isinstance(node, dict) else ""
+        if choices:
+            # WHAT "DEFAULT" MEANS HERE, said — the brand's own faces by name,
+            # the brand's own sticker rule by value.
+            now = (_ts.for_theme(live or {})["name"] if path == "font.pairing"
+                   else _bt.setting(tenant, {}, path) or "allowed")
+            field = "<select name='{}'>{}</select>".format(path, "".join(
+                f"<option value='{_esc(v)}'"
+                f"{' selected' if (str(node) == v or (v == '(default)' and not str(node))) else ''}>"
+                f"{_esc(t + (f' — {now}' if v == '(default)' else ''))}</option>"
+                for v, t in choices[0]))
+        else:
+            field = f"<input type='text' name='{path}' value='{_esc(node)}'>"
         inputs += (f"<tr><td style='white-space:nowrap'>{_esc(label)}<br>"
                    f"<small class='mut'>{_esc(hint)}</small></td>"
-                   f"<td><input type='text' name='{path}' "
-                   f"value='{_esc(node)}'></td></tr>")
+                   f"<td>{field}</td></tr>")
     keyfield = f'<input type="hidden" name="key" value="{_esc(key)}">'
     # A control that can only fail teaches distrust of every control (the
     # Sources block's own rule about a store-sync button with no store). With

@@ -27,7 +27,7 @@ import re
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
-from . import config, db, dividers
+from . import config, db, dividers, email_header, type_system
 
 #: Rounds: the first, then up to this many edits. The hand-made proof took two.
 ROUNDS = 2
@@ -592,10 +592,16 @@ def fit(tenant: str, url: str, aspect: str, width: int = FIT_WIDTH) -> str:
 
 
 def fits(tenant: str, cast_: dict) -> dict:
-    """Every cast picture in every aspect: `{section: {"original": url, "1x1": url, …}}`."""
+    """Every cast SCENE in every aspect: `{section: {"original": url, "1x1": url, …}}`.
+
+    A PACKSHOT is offered whole and nothing else. A scene has edges to spare;
+    a product on its own ground fills the frame, so a centre crop cuts the
+    product — the owner's plates lost their top and bottom (2026-09-29: "The
+    product photo is cut off on the top and bottom. That should not happen.")."""
     out = {}
     for n, p in (cast_.get("picks") or {}).items():
-        out[n] = {"original": p["url"], **{a: fit(tenant, p["url"], a) for a in ASPECTS}}
+        out[n] = ({"original": p["url"], **{a: fit(tenant, p["url"], a) for a in ASPECTS}}
+                  if _is_scene(p) else {"whole": p["url"]})
     return out
 
 
@@ -633,7 +639,7 @@ its type roles, its colour logic and its rhythm. Its devices are of two kinds:
   effect, played by a thing of this brand — its products, its place, its voice, what its
   photographs show. A snack brand's crunch word becomes a word that is TRUE of this product
   and of this email's idea; its cartoon shopper becomes a drawn thing from this brand's own
-  world; its badge carries a fact from the material. Never the reference's instance, never a
+  world; its badge carries a fact from the material%(no_stickers)s. Never the reference's instance, never a
   generic stand-in (a random exclamation, a random emoji), never decoration that says
   nothing. The standard below shows the move: a sauce brand's "SAUCE THE MEAT!" became a
   tableware brand's "Set the scene!"; its recipe's last step became "Mangia!". If nothing in
@@ -650,12 +656,15 @@ today: %(today)s — never name a season, holiday or date that has passed; never
   date, a deadline, a "this weekend", a launch or a discount that is not in the material
 instagram handle: %(handle)s
 postal address (footer, verbatim): %(address)s
-faces on file: heading %(heading_face)s · body %(body_face)s
+THE TYPE — this brand's, the same in every email, never chosen per email:
+%(type)s
 %(rules_brand)s
 
-THE PICTURES — the brand's own, cast for this design by looking at them. Each is offered in
-the original and cut to 1:1, 4:5, 3:2 and 16:9 (centre crops, 1200 px wide): use the cut
-that fits the slot, never stretch. The tones measured from each are the palette this email
+THE PICTURES — the brand's own, cast for this design by looking at them. A SCENE is offered
+in the original and cut to 1:1, 4:5, 3:2 and 16:9 (centre crops, 1200 px wide): use the cut
+that fits the slot. A PACKSHOT (a product on its own ground) is offered WHOLE, once: set its
+width and leave its height to its own proportions — never a height that cuts it, never a
+cover-fit, never a crop: the product is shown entire. Never stretch either. The tones measured from each are the palette this email
 leads with: the page ground may be a photograph's bold tone if the reference's is, the card
 its light tone; the brand's accent supports; every text colour must read on its ground.
 THE REFERENCE'S COLOURS ARE NOT YOURS — not its ground, not its accent, not a near match of
@@ -663,6 +672,11 @@ either: if the reference is yellow, yours is this brand's. A mark that is light 
 ground under it; on a light ground set the name in type instead.
 %(pictures)s
 %(cut)s
+
+THE SITE'S PAGES — where a link may go. A button goes to the page ITS WORDS NAME: a
+partnership, wholesale or trade ask to the wholesale page, a contact ask to the contact page,
+a collection named to that collection — never the catalogue by default:
+%(pages)s
 
 THE MESSAGE this email carries%(message)s
 %(story)s
@@ -676,15 +690,15 @@ THE SYSTEM FIRST — the way a designer at a good studio works: before the first
 set the system, then lay every section out from it. One rhythm reads as one email; a
 different inset and a different size in every section reads as pieces glued together.
 Declare it as the first line inside <body>, as a comment, and then USE ONLY THOSE VALUES:
-<!-- system: faces display=… headline=… body=… accent=…(optional) ·
+<!-- system: faces headline=… body=… ·
      scale: display/headline/subhead/body/small = 64/40/24/16/12 (your numbers) ·
      space: 8/16/32/56 (your four steps) · inset: 34 (one side inset, the whole column) ·
      radius: 14 -->
-The faces: TWO — the brand's heading face for display and headlines, the brand's body face
-for everything else — plus at most ONE accent face (a script, a marker hand) used ONCE, for
-the single dressing device that needs it. Where the brand has no heading face on file, one
-display face stands in for it. An italic of a face is that face; a different face for the
-tagline, the pills, the buttons or the footer is a fourth voice and a fault. The scale: five sizes with clear steps; every font-size in the email is one
+The faces: THE TYPE above and nothing else — its headline face for display lines, headlines
+and product names, its body face for everything else, in live text AND inside baked blocks.
+There is no accent face: a script or hand-lettered line in the reference is set in the
+headline face's italic. An italic of a face is that face; a different face for the tagline, the
+pills, the buttons, a baked headline or the footer is a third voice and a fault. The scale: five sizes with clear steps; every font-size in the email is one
 of them. The space: four steps; every vertical gap is one of them, and like things get the
 same gap (headline→body, picture→caption, section→section). The inset: one number, every
 section's content sits on it; a card inside the column has its own one inner inset. Colours
@@ -696,16 +710,24 @@ RULES
 - Pictures: ONLY the URLs listed above, verbatim. Every <img> has alt text and an explicit
   width. No background-image. No <script>, <form>, <video>, <iframe>. An <svg> anywhere
   outside a baked block is a defect — social links are text, an icon is baked or left out.
-- Type: outside baked blocks use email-safe stacks only (Georgia; Helvetica/Arial; Impact,
-  'Arial Black' for a heavy display line; 'Brush Script MT', cursive for a script).
+- Type: outside baked blocks, THE TYPE's font-family stacks exactly as written; inside a baked
+  block, its web faces (a Google Fonts <link> in <head> loads them). No other face anywhere.
+- THE HEADER IS THE BRAND'S: the column's FIRST row is <!--brand-header: GROUND INK--> alone in
+  a full-width cell with no padding (<tr><td style="padding:0">…</td></tr>) — GROUND and INK two
+  hex colours from this email's own palette, INK reading on GROUND. The brand's mark over its
+  navigation is drawn there for you, the same layout on every email. Never draw a logo row, a
+  navigation bar or anything above the header — no band, no divider, no wave opens the email;
+  the reference's opening is recreated BELOW the header.
 - SECTION EDGES: a shaped edge between two grounds — a wave, a curve, a slant, a zigzag, a
   scallop — is NEVER drawn by you (no SVG path, no clip-path, no border trick). Write
   <!--divider: SHAPE ABOVE BELOW--> alone in a full-width cell with no padding
   (<tr><td style="padding:0;font-size:0;line-height:0">…</td></tr>): SHAPE one of wave, curve,
   slant, zigzag, scallop; ABOVE and BELOW the hex grounds of the two sections it joins. It is
   drawn to the column's width and placed for you. A straight edge needs no divider.
-- A drawn shape — a badge, a star, a sticker — sits beside words or behind them, never over
-  them: every letter is read where it lands, and a letter under a shape is a defect.
+%(stickers)s
+- A ROW HOLDS WHAT IT HAS: a two- or three-up row carries exactly as many cards as there are
+  things to show — one product alone spans the column, centred, never a card beside an empty
+  column; a button under a row sits on the same axis as what is above it.
 - BAKED BLOCKS: a display headline, a script line, a device with icons — anything that needs
   a web font or inline SVG — goes inside <!--bake-->…<!--/bake-->: exactly one complete
   <table width="…">, no links inside, TYPE AND DRAWN SHAPES ONLY: never a photograph (no
@@ -740,9 +762,43 @@ Subject: <the subject line>
 Preheader: <the preheader>
 <!DOCTYPE html>… the complete HTML document. Nothing after it."""
 
+#: THE STICKER RULE, as the maker is told it — per brand (`design.stickers`).
+_STICKERS_BESIDE = ("- A drawn shape — a badge, a star, a sticker — sits beside words or behind them, never over\n"
+                    "  them: every letter is read where it lands, and a letter under a shape is a defect.")
+_NO_STICKERS = ("- THIS BRAND USES NO STICKERS: no badge, star, burst, seal or sticker shape anywhere, baked or\n"
+                "  drawn — a reference's badge is set as a short line of type in the body face, or left out\n"
+                "  and said in the turned comment.")
+
+
+def _mins_secs(secs) -> str:
+    """`2m 05s` / `40s` — how long a step took, as the run log says it."""
+    secs = int(secs or 0)
+    return f"{secs // 60}m {secs % 60:02d}s" if secs >= 60 else f"{secs}s"
+
+
+def _stickers_never(tenant: str, theme: dict | None) -> bool:
+    """Does this brand refuse stickers and badges? (owner, 2026-09-29, of a
+    starburst "NEW!" on Baci's email: "That doesn't look good.")"""
+    from . import brand_theme
+    return brand_theme.setting(tenant, theme, "design.stickers") == "never"
+
+
+def _pages(tenant: str) -> list[dict]:
+    """The site's pages a link may go to — the approved nav and the home page
+    first, then the collections — so a button's words can find their page."""
+    from . import links
+    try:
+        dests = links.destinations(tenant, fetch=False)
+    except Exception:                                             # noqa: BLE001
+        return []
+    return ([d for d in dests if d.get("kind") in ("home", "page")]
+            + [d for d in dests if d.get("kind") == "collection"][:10])
+
+
 _REVISE_PROMPT = """Below is the email you wrote and the judge's findings after comparing it to the reference.
 EDIT the HTML to close each finding. Change only what a finding requires; every other line
-stays exactly as it is. The same rules apply (email-safe outside baked blocks; only the
+stays exactly as it is. The same rules apply (THE TYPE's faces only, in live text and baked
+blocks; the <!--brand-header--> row stays first; a product photograph stays whole; only the
 listed pictures; the address and {{UNSUBSCRIBE}}; nothing invented). Keep to the system
 declared in the <!-- system --> comment at the top of <body>: an edit uses ITS faces, ITS
 sizes, ITS spacing steps and ITS inset — never a new value; if the system itself is wrong,
@@ -755,13 +811,55 @@ photograph, by a solid panel or a darker/lighter ground under the words, never b
 as it is; the rest in the order given.
 %(findings)s
 
-OUTPUT, exactly:
-Subject: <the subject line, unchanged unless a finding names it>
-Preheader: <the preheader>
-<!DOCTYPE html>… the complete HTML document. Nothing after it.
+%(output)s
 
 THE HTML
 %(html)s"""
+
+#: A REVISION IS EDITS, NOT A REWRITE. Every round used to write the whole
+#: email out again — ten to sixteen thousand tokens, minutes a round — for a
+#: handful of changes (owner, 2026-09-29: "It took 30 minutes to generate this
+#: email"). The maker names each change; `_apply_edits` places them.
+_EDITS_OUTPUT = """OUTPUT, exactly — the CHANGES, not the whole email:
+Subject: <the subject line, unchanged unless a finding names it>
+Preheader: <the preheader>
+then one block per change:
+<<<<<<< FIND
+the exact lines of THE HTML being changed, copied character for character — enough of
+them to occur once
+=======
+what replaces them
+>>>>>>> REPLACE
+Nothing else. Only if the findings need the whole design rebuilt, answer instead with the
+complete HTML document, starting <!DOCTYPE html>."""
+
+_FULL_OUTPUT = """OUTPUT, exactly:
+Subject: <the subject line, unchanged unless a finding names it>
+Preheader: <the preheader>
+<!DOCTYPE html>… the complete HTML document. Nothing after it."""
+
+_EDIT = re.compile(r"<<<<<<<\s*FIND\s*\n(.*?)\n=======\s*\n(.*?)\n?>>>>>>>\s*REPLACE", re.S)
+
+
+def _apply_edits(html: str, text: str) -> tuple[str, int, list[str]]:
+    """`(html, placed, missed)` — each FIND/REPLACE placed where it occurs
+    ONCE: exactly, else with its spacing forgiven. A FIND that is absent or
+    ambiguous is not guessed at; it is named in `missed`."""
+    out, placed, missed = html, 0, []
+    for find, repl in _EDIT.findall(text or ""):
+        if not find.strip():
+            missed.append("(an empty FIND)")
+            continue
+        if out.count(find) == 1:
+            out, placed = out.replace(find, repl, 1), placed + 1
+            continue
+        hits = list(re.finditer(r"\s+".join(re.escape(t) for t in find.split()), out))
+        if len(hits) == 1:
+            out = out[:hits[0].start()] + repl + out[hits[0].end():]
+            placed += 1
+        else:
+            missed.append(find.strip()[:60])
+    return out, placed, missed
 
 
 _STORY_PROMPT = """You are the writer. Before a line of the email is set, decide THE STORY — the argument
@@ -905,7 +1003,7 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
         prompt = _REVISE_PROMPT % {
             "findings": "\n".join(f'- [{f.get("severity", "")}] {f.get("where", "")}: {f.get("what", "")}'
                                   + (f' → {f["do"]}' if f.get("do") else "") for f in findings),
-            "html": html,
+            "html": html, "output": _EDITS_OUTPUT,
             "story": ("THE STORY this email tells — an edit never changes a beat's meaning or drops its frame:\n"
                       + _story_text(story_) + "\n") if story_ else ""}
         if kit_.get("_notes"):
@@ -926,7 +1024,7 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
         pics = []
         for n, p in (cast_.get("picks") or {}).items():
             c = p.get("colours") or {}
-            urls = fitted.get(n) or {"original": p["url"]}
+            urls = fitted.get(n) or ({"original": p["url"]} if _is_scene(p) else {"whole": p["url"]})
             pics.append(f'section {n} — {p.get("title")}' + (f' ({p["why"]})' if p.get("why") else "") + "\n"
                         + "\n".join(f"   {a}: {u}" for a, u in urls.items())
                         + ("\n   tones: " + ", ".join(f"{k} {v}" for k, v in c.items() if isinstance(v, str)) if c else ""))
@@ -957,8 +1055,12 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "today": db.utcnow().strftime("%d %B %Y"),
             "handle": (kit_.get("handles") or {}).get("instagram") or "(none on file)",
             "address": (theme.get("footer") or {}).get("address") or "",
-            "body_face": (theme.get("font") or {}).get("body") or "Helvetica, Arial, sans-serif",
-            "heading_face": (theme.get("font") or {}).get("heading") or "(none — the body face)",
+            "type": type_system.prompt_text(type_system.for_theme(theme)),
+            "pages": "\n".join(f"- {d['label']} · {d['url']}" for d in _pages(tenant))
+                     or "(none on file — the links in the message only)",
+            "stickers": (_NO_STICKERS if _stickers_never(tenant, theme) else _STICKERS_BESIDE),
+            "no_stickers": (" — set as a line of type, since this brand uses no stickers"
+                            if _stickers_never(tenant, theme) else ""),
             "rules_brand": rules_brand,
             "brief": (json.dumps({k: brief_.get(k) for k in ("concept", "sections", "visual_system", "devices")},
                                  ensure_ascii=False, indent=1) if brief_.get("concept") else
@@ -987,6 +1089,22 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
                        " (this platform has no view-in-browser variable — offer none)"}
     asked = seen_blocks + [{"type": "text", "text": prompt}] if seen_blocks else prompt
     reply = _ask("email_compose", asked, tenant=tenant, max_tokens=16000)
+    if html and findings and getattr(reply, "ok", False) and _EDIT.search(reply.text or ""):
+        text = reply.text or ""
+        out, placed, missed = _apply_edits(html, text)
+        if placed:
+            import difflib
+            sub = re.search(r"^\s*Subject:\s*(.+)$", text, re.M)
+            pre = re.search(r"^\s*Preheader:\s*(.+)$", text, re.M)
+            edited = sum(1 for d in difflib.unified_diff(html.splitlines(), out.splitlines(), lineterm="", n=0)
+                         if d.startswith(("+", "-")) and not d.startswith(("+++", "---")))
+            return {"ok": True, "html": out, "subject": sub.group(1).strip() if sub else "",
+                    "preheader": pre.group(1).strip() if pre else "", "why": "", "edited": edited,
+                    "how": f"{placed} edit(s) placed" + (f", {len(missed)} could not be found" if missed else "")}
+        # NOTHING COULD BE PLACED: the whole email, once, as before.
+        prompt = prompt.replace(_EDITS_OUTPUT, _FULL_OUTPUT)
+        asked = seen_blocks + [{"type": "text", "text": prompt}] if seen_blocks else prompt
+        reply = _ask("email_compose", asked, tenant=tenant, max_tokens=16000)
     if not getattr(reply, "ok", False) and "Connection" in str(getattr(reply, "error", "")):
         # a dropped connection on a two-minute call is not the model's answer
         # — one more try before the round is lost (owner's run, 2026-09-17)
@@ -1213,6 +1331,15 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
             add("asset", "blocks", src[:100], "not one of the brand's own pictures")
         elif _base(src) not in allowed:
             add("asset_invented", "blocks", src[:100], "the brand's host, but no such picture on file — use a listed URL verbatim")
+    # 1b. A PACKSHOT IS SHOWN WHOLE. A crop of a scene is a designer's cut; a
+    # crop of a product on its own ground cuts the product (owner, 2026-09-29).
+    packshots = {_base(p["url"]) for p in kit_.get("pictures") or [] if not _is_scene(p)}
+    for im in w.imgs:
+        src = im.get("src") or ""
+        if re.search(r"_\d+x\d*_crop_\w+\.\w+$", src.split("?", 1)[0]) and _base(src) in packshots:
+            add("product_cropped", "blocks", src[:100],
+                "a product photograph cut to fit a slot — a packshot is shown whole: its listed URL, "
+                "its width set, its height its own")
     # 2. nothing from the reference
     ref_words = brief_.get("reference_text") or []
     ref_grams = _grams(" ".join(map(str, ref_words)))
@@ -1433,6 +1560,35 @@ def render_check(shot: dict, kit_: dict, cast_: dict | None = None) -> list[dict
             f"{h} is neither the brand's colour nor a tone of its photographs — "
             + (f"use {', '.join(ours[:4])} or a tint of one" if ours else
                "this brand and its photographs are neutral here: keep to them"))
+    # A PRODUCT CUT OR STRETCHED BY ITS BOX. The URL can be whole and the
+    # screen still cut it — a fixed height, a cover-fit, a clipping cell — and
+    # only the render shows it (owner, 2026-09-29: "The product photo is cut off
+    # on the top and bottom. That should not happen.").
+    def _b(u: str) -> str:
+        return re.sub(r"_\d+x\d*(?:_crop_\w+)?(\.\w+)$", r"\1", str(u or "").split("?", 1)[0])
+    packs = {_b(p.get("url", "")): p for p in (kit_.get("pictures") or []) if not _is_scene(p)}
+    packs.update({_b(p.get("url", "")): p for p in ((cast_ or {}).get("picks") or {}).values()
+                  if not _is_scene(p)})
+    for im in shot.get("images") or []:
+        p = packs.get(_b(im.get("src", "")))
+        (nw, nh), (bw, bh), (sw, sh) = im.get("natural") or (0, 0), im.get("box") or (0, 0), im.get("shown") or (0, 0)
+        if not p or not (nw and nh and bw and bh):
+            continue
+        off = abs((bw / bh) / (nw / nh) - 1)
+        clipped = sw * sh < 0.97 * bw * bh
+        if off > 0.03 or clipped:
+            how = ("clipped by the cell around it" if clipped else
+                   "cut to its box" if str(im.get("fit")) in ("cover", "none") else "stretched to its box")
+            add("product_cropped", "blocks", str(p.get("title") or im.get("src", ""))[:60],
+                f"a product photograph {how} — a {nw}×{nh} picture shown in a {round(bw)}×{round(bh)} box; "
+                f"set its width, let its height follow, never a fixed height or a cover-fit")
+    # A ROW WITH AN EMPTY COLUMN beside its content — a two-up row holding one
+    # card, the card off to one side (owner, 2026-09-29: "poorly aligned blocks
+    # in the same section").
+    for r in (shot.get("rows") or [])[:3]:
+        add("empty_column", "blocks", str(r.get("text") or "a row")[:40],
+            "a row with an empty column beside its content — a row holds exactly what it has: one "
+            "card alone spans the column, centred, and a button under it sits on the same axis")
     return out
 
 
@@ -1468,7 +1624,8 @@ def _hue_gap(a: str, b: str) -> float:
     return min(d, 360 - d)
 
 
-def system_check(html: str, seen: dict | None = None) -> list[dict]:
+def system_check(html: str, seen: dict | None = None, *, pairing: dict | None = None,
+                 raw: str = "") -> list[dict]:
     """The composer is held to the system IT declared: the sizes it uses are
     its scale, the side insets its inset, the faces its four at most. Not a
     taste rule — its own word. The owner, 2026-09-17: "the padding is
@@ -1518,9 +1675,21 @@ def system_check(html: str, seen: dict | None = None) -> list[dict]:
         out.append({"code": "system_inset", "severity": "blocks", "where": "spacing",
                     "what": f"side insets {', '.join(map(str, distinct))} px — the system declares {inset[0]}; the column "
                             f"content sits on {inset[0]}, a card may have one inner inset, nothing else"})
-    faces = {re.split(r"\s*,", f.strip().strip("'\""))[0].strip("'\" ").lower()
-             for f in ([t["family"] for t in texts] if texts is not None else
-                       re.findall(r"font-family:\s*([^;\"]+)", body))}
+    families = ([t["family"] for t in texts] if texts is not None else
+                re.findall(r"font-family:\s*([^;\"]+)", body))
+    if pairing:
+        # THE BRAND'S TYPE, and nothing else — in live text AND in baked blocks,
+        # which are pictures by now and so are read from the maker's own HTML
+        # (`raw`). A headline baked in three faces passed this check whole
+        # (owner, 2026-09-29: "The different fonts … don't work together").
+        off = type_system.faces_off(families + type_system.baked_families(raw), pairing)
+        if off:
+            out.append({"code": "system_faces", "severity": "blocks", "where": "type",
+                        "what": f"{', '.join(off)} {'is' if len(off) == 1 else 'are'} not this brand's type — "
+                                f"{pairing['name']}: the headline face {pairing['headline']['family']}, the body "
+                                f"face {pairing['body']['family']}, nothing else, in live text and baked blocks alike"})
+        return out
+    faces = {re.split(r"\s*,", f.strip().strip("'\""))[0].strip("'\" ").lower() for f in families}
     if len(faces) > 3:
         out.append({"code": "system_faces", "severity": "blocks", "where": "type",
                     "what": f"{len(faces)} faces in use ({', '.join(sorted(faces))}) — three at most: the brand's heading "
@@ -2063,11 +2232,25 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     material_ = _material(kit_, entity_key, message)
     best_i, best_n = -1, 10 ** 6
     last_turn = ""
+    # THE BRAND'S TYPE, its pages and its sticker rule — the same every round.
+    pairing = type_system.for_theme(kit_.get("theme") or {})
+    from . import links as _links
+    try:
+        dests = _links.destinations(tenant, fetch=False)
+    except Exception:                                             # noqa: BLE001
+        dests = []
+    judge_notes = (kit_.get("_notes") or "") + (
+        "\nTHIS BRAND USES NO STICKERS: a badge, star, burst, seal or sticker anywhere is a blocking fault."
+        if _stickers_never(tenant, kit_.get("theme")) else "")
+    said_once: set = set()
+    import time as _time
     for n in range(ROUNDS + 1):
         say(f"round {n}: " + ("writing the email" if n == 0 else "editing to the findings"))
+        _t0 = _time.monotonic()
         made = compose(brief_, kit_, cast_, message, tenant=tenant, fitted=fitted, html=raw, findings=findings_prev,
                        png=prev_png, story_=story_)
         calls += 1
+        took = {"writing": round(_time.monotonic() - _t0)}
         if not made.get("ok"):
             story.append(f"Round {n}: {made.get('why')}.")
             break
@@ -2081,9 +2264,23 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         if _turn and _turn != last_turn:
             story.append(f"Round {n}: the concept was turned to what this brand has — {_turn}")
             last_turn = _turn
+        _t = _time.monotonic()
         html, drawn = dividers.place(raw, tenant, COLUMN)
+        # THE BRAND'S HEADER — its mark over its pages, the same every email.
+        html, head_note = email_header.place(html, tenant, kit_, COLUMN)
+        if head_note and head_note not in said_once:
+            said_once.add(head_note)
+            story.append(f"Round {n}: {head_note}.")
         html, baked = bake(html, tenant)
         baked = drawn + baked
+        # A BUTTON GOES WHERE ITS WORDS SAY — "Request a Partnership" to the
+        # wholesale page, not the fallback (owner, 2026-09-29).
+        html, moved = _links.match_buttons(html, dests)
+        for m_ in moved:
+            if m_ not in said_once:
+                said_once.add(m_)
+                story.append(f"Round {n}: {m_}.")
+        took["drawing"] = round(_time.monotonic() - _t)
         bake_findings = [{"code": "baked_" + n.split(":", 1)[0], "severity": "blocks", "where": "a baked block",
                           "what": n.split(":", 1)[1].strip()}
                          for n in baked if n.startswith(("clipped:", "unreadable:", "covered:", "divider:"))]                      # what is checked, shot, judged and sent
@@ -2092,11 +2289,16 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
                 story.append(b_ + ".")
         copy_.update(subject=made.get("subject") or copy_.get("subject", ""),
                      preheader=made.get("preheader") or copy_.get("preheader", ""))
+        _t = _time.monotonic()
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         told = truth(_Walk_words(html), material_, tenant=tenant)
         calls += told.get("calls", 0)
+        took["checking"] = round(_time.monotonic() - _t)
+        _t = _time.monotonic()
         shot = shots.shoot(_inline_media(html), read=True)
-        checks = checks + told["findings"] + bake_findings + system_check(html, seen=shot) + story_check(html, story_, kit_)
+        took["rendering"] = round(_time.monotonic() - _t)
+        checks = (checks + told["findings"] + bake_findings
+                  + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_))
         if "texts" in shot:
             # MEASURED ON THE RENDER where it could be read, in place of what
             # the inline styles could say about contrast — they miss classes,
@@ -2110,9 +2312,11 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         if shot.get("ok"):
             put = media.put(tenant, shot["png"], mime="image/png", origin="generated")
             png_id = put.get("id", "") if put.get("ok") else ""
+        _t = _time.monotonic()
         judged = (judge(ref_png, shot["png"], brief_, tenant=tenant, material=material_,
-                        notes=kit_.get("_notes") or "", turned_=turned(raw)) if shot.get("ok")
+                        notes=judge_notes, turned_=turned(raw)) if shot.get("ok")
                   else {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0})
+        took["judging"] = round(_time.monotonic() - _t)
         # THE JUDGE IS NOT A LEAK: a finding that carries the reference's own
         # words ("add CRUNCHYYY!!!", "a wire basket like the reference's") would
         # be implemented by the next edit — the owner's run of 2026-09-17 grew
@@ -2135,12 +2339,16 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
                        "verdict": judged.get("verdict", {}), "judged": judged.get("ok", False),
                        "why_not_judged": judged.get("why", "") if not judged.get("ok") else "",
                        "blocking": len(open_), "edited": made.get("edited", 0), "html": html,
+                       "took": took, "how": made.get("how", ""),
                        "shot": {"door": shot.get("door", ""), "ms": shot.get("ms", 0), "why": shot.get("why", "")}})
         story.append(f"Round {n}: {len(blocking(checks))} check(s) block, "
                      + (f"the judge names {len(blocking(judged.get('findings')))} blocking and "
                         f"{len(judged.get('findings', [])) - len(blocking(judged.get('findings')))} cosmetic"
                         if judged.get("ok") else f"not judged ({judged.get('why')})")
-                     + (f", {made['edited']} lines edited" if n else "") + ".")
+                     + (f", {made['edited']} lines edited" + (f" ({made['how']})" if made.get("how") else "")
+                        if n else "")
+                     + f" — took {_mins_secs(sum(took.values()))}: "
+                     + ", ".join(f"{k} {_mins_secs(v)}" for k, v in took.items()) + ".")
         if len(open_) < best_n:
             best_i, best_n = n, len(open_)
         if not open_:
