@@ -282,7 +282,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`read_pattern`**(url, tenant?) → `dict`  ·  from `test_the_model_writes_the_article.py`, `web.py`
 - **`rivals`**(tenant, keyword, urls?) → `list[dict]`  ·  from `test_the_model_writes_the_article.py`
 - **`run`**(tenant, keyword, role?, entity_key?, questions?, rival_urls?, approach_url?, products?, collections?, links?, angle?, angle_brief?, notes?, progress?) → `dict`  ·  from `article_once.py`, `command_agent.py`, `sabotage.py`, `seed_demo.py`, `skill.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_board.py`, `test_ad_panel.py`, `test_approval_gate.py`, `test_article_repair.py`, `test_article_review.py`, `test_audience_entities.py`, `test_auto_ships.py`, `test_blog_skill.py`, `test_bundle_contract.py`, `test_campaign_email.py`, `test_campaign_measured.py`, `test_campaign_variety.py`, `test_campaign_visual.py`, `test_catalog_vocabulary.py`, `test_coherence.py`, `test_entity_scope.py`, `test_every_system_draws.py`, `test_funnel.py`, `test_gbp_listing.py`, `test_gbp_post.py`, `test_offers.py`, `test_plans.py`, `test_refresh_lands.py`, `test_refresh_lane.py`, `test_register.py`, `test_rehearsal_fixes.py`, `test_rehearse.py`, `test_reorder_skill.py`, `test_replies.py`, `test_reports_skill.py`, `test_skill.py`, `test_strategy_ledger.py`, `test_the_ad_is_about_the_thing_you_chose.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `test_the_page_says_what_it_answers.py`, `test_workroom_email.py`, `web.py`, `worker.py`
-- **`shoot`**(html, title, kit_) → `dict`  ·  from `recreate.py`
+- **`shoot`**(html, title, kit_) → `dict`  ·  from `recreate.py`, `test_the_model_writes_the_article.py`
 
 ### `artifact_check.py`
 
@@ -1291,7 +1291,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`read_picture`**(asset, vision?, fetch?) → `dict`  ·  **from nothing**
 - **`read_pictures`**(tenant, limit?, vision?) → `dict`  ·  from `recreate_once.py`, `web.py`
 - **`set_picture_kind`**(asset_id, kind, by?) → `str`  ·  from `web.py`
-- **`strips`**(blob, max_edge, overlap?) → `list[dict]`  ·  from `articles.py`, `recreate.py`
+- **`strips`**(blob, max_edge, overlap?, limit?) → `list[dict]`  ·  from `articles.py`, `recreate.py`, `test_the_model_writes_the_article.py`
 
 ### `pinterest.py`
 
@@ -1499,7 +1499,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `shots.py`
 
 - **`door`**() → `tuple[str, str]`  ·  from `articles.py`, `test_the_model_makes_the_email.py`
-- **`shoot`**(html, width?, scale?, full?, read?) → `dict`  ·  from `articles.py`, `recreate.py`
+- **`shoot`**(html, width?, scale?, full?, read?) → `dict`  ·  from `articles.py`, `recreate.py`, `test_the_model_writes_the_article.py`
 - **`shoot_fragment`**(head, fragment, width?, scale?) → `dict`  ·  from `recreate.py`
 
 ### `sites.py`

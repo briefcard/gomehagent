@@ -483,7 +483,7 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
             from . import pictures as ed
             try:
                 _, edge = ed._tier_edge()
-                seen_blocks = [ed._image_block(ed.contact_sheet(png, edge))] + [ed._image_block(p["png"]) for p in ed.strips(png, edge)[:3]]
+                seen_blocks = [ed._image_block(ed.contact_sheet(png, edge))] + [ed._image_block(p["png"]) for p in ed.strips(png, edge, limit=3)]
                 prompt = ("YOUR ARTICLE AS A READER SEES IT is above — whole, then top to bottom. LOOK before you edit: "
                           "walls of text, a table that broke, a picture in the wrong place, a block missing.\n\n") + prompt
             except Exception:                                     # noqa: BLE001
@@ -629,7 +629,11 @@ h3{{font-size:19px;margin:24px 0 6px}} p{{margin:0 0 16px}} img{{max-width:100%;
 
 def shoot(html: str, title: str, kit_: dict) -> dict:
     from . import shots
-    return shots.shoot(page(html, title, kit_), width=760)
+    # AT 1× — the size the judge reads it at. A long article shot at 2× was
+    # 1520 × 21,428 px, and decoding it for the judge peaked near 300 MB on a
+    # 512 MB worker: the owner's blog run was killed eight minutes in
+    # (2026-09-29). Type at 18 px stays legible at 1×.
+    return shots.shoot(page(html, title, kit_), width=760, scale=1)
 
 
 def _shoot_url(url: str) -> dict:
@@ -721,7 +725,7 @@ def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword
         blocks.append({"type": "text", "text": "OURS — whole:"})
         blocks.append(ed._image_block(_stamp(ed.contact_sheet(ours_png, edge), "OURS — whole")))
         blocks.append({"type": "text", "text": "OURS — its top, legible:"})
-        blocks.append(ed._image_block(_stamp(ed.strips(ours_png, edge)[0]["png"], "OURS — top")))
+        blocks.append(ed._image_block(_stamp(ed.strips(ours_png, edge, limit=1)[0]["png"], "OURS — top")))
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": _JUDGE_PROMPT % {"keyword": keyword, "story": _story_text(story_)[:2500], "beat": brief_.get("beat") or "",

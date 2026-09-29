@@ -150,7 +150,7 @@ def _max_pixels() -> int:
     return int(llm.IMAGE_TIERS[tier]["max_tokens"]) * 750
 
 
-def strips(blob: bytes, max_edge: int, overlap: int = STRIP_OVERLAP) -> list[dict]:
+def strips(blob: bytes, max_edge: int, overlap: int = STRIP_OVERLAP, limit: int = 0) -> list[dict]:
     """The screenshot as strips that fit `max_edge` AND the pixel budget, each
     `{png, top, bottom, width, height}`, overlapping by `overlap` px so a
     section cut by a strip edge is seen whole in one of them. A picture
@@ -173,7 +173,9 @@ def strips(blob: bytes, max_edge: int, overlap: int = STRIP_OVERLAP) -> list[dic
         crop.save(buf, format="PNG", optimize=True)
         out.append({"png": buf.getvalue(), "top": top, "bottom": bottom,
                     "width": W, "height": bottom - top})
-        if bottom >= H:
+        # only the strips a caller uses — a long article was cut and encoded
+        # into thirty-three to send three (2026-09-29)
+        if bottom >= H or (limit and len(out) >= limit):
             break
         top = bottom - overlap
     return out

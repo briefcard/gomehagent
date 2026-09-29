@@ -912,7 +912,7 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             try:
                 _, edge = ed._tier_edge()
                 seen_blocks = [ed._image_block(ed.contact_sheet(png, edge))] + \
-                              [ed._image_block(p["png"]) for p in ed.strips(png, edge)[:4]]
+                              [ed._image_block(p["png"]) for p in ed.strips(png, edge, limit=4)]
                 prompt = ("YOUR EMAIL AS A BROWSER SHOWS IT is above — whole, then top to bottom. LOOK before "
                           "you edit: what is tiny, what is clipped, what is off-centre, what is heavier or lighter "
                           "than you meant. Fix what you see as well as what the findings name.\n\n") + prompt
@@ -1818,7 +1818,7 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
             blocks.append({"type": "text", "text": f"{label} — the whole email:"})
             blocks.append(ed._image_block(_stamp(ed.contact_sheet(png, edge), f"{label} — whole")))
             blocks.append({"type": "text", "text": f"{label} — its top, legible:"})
-            blocks.append(ed._image_block(_stamp(ed.strips(png, edge)[0]["png"], f"{label} — top")))
+            blocks.append(ed._image_block(_stamp(ed.strips(png, edge, limit=1)[0]["png"], f"{label} — top")))
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
     blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {

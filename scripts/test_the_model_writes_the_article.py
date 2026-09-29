@@ -417,6 +417,21 @@ def main() -> int:
     ar.file_pattern("baci", ar.PATTERN_DEFAULT)
 
     print()
+    print("\n— the article is photographed at the size the judge reads it —")
+    # At 2× a long article was 1520 × 21,428 px and decoding it for the judge
+    # peaked near 300 MB — the worker was killed eight minutes into a run
+    # (2026-09-29). At 1× the same page peaks under 100 MB.
+    asked: list = []
+    _was_shoot = shots.shoot
+    shots.shoot = lambda html, **k: (asked.append(k) or {"ok": True, "png": png(760, 3000), "door": "local", "ms": 5, "why": ""})
+    ar.shoot("<h1>t</h1><p>words</p>", "t", {"name": "Baci", "theme": {}})
+    shots.shoot = _was_shoot
+    ck("the article is shot at 1×, 760 wide", asked and asked[-1].get("scale") == 1
+       and asked[-1].get("width") == 760, str(asked[-1:]))
+    tall = png(760, 12000)
+    ck("  and only the strips a judge uses are cut", len(pics.strips(tall, 1568, limit=3)) == 3
+       and len(pics.strips(tall, 1568)) > 3)
+
     print("\n— the featured product is found in the catalogue, not the kit's sample —")
     # The kit carries sixty products; the article writer checked the subject
     # against that sample, so a product past the sixtieth failed in two
