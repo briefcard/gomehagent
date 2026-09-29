@@ -48,7 +48,17 @@ if [ -n "$2" ] && [ -f "$2" ]; then
 else
   git commit -q -m "$1
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+fi
+# A push restarts the worker, and the job it is running is lost. Production
+# says how many are running (keyless /health); push only at zero. Unreadable
+# is not a reason to hold a push — a broken deploy is exactly when one is due.
+running=$(curl -s --max-time 20 "${SHIP_HEALTH_URL:-https://assistant-web-zm2d.onrender.com/health}" \
+  | python3 -c 'import json,sys; print(int(json.load(sys.stdin).get("jobs_running") or 0))' 2>/dev/null || echo "?")
+if [ "$running" != "?" ] && [ "$running" -gt 0 ]; then
+  echo "── NOT pushed: production is running $running job(s), and a push restarts the worker running them." >&2
+  echo "   The commit is made. Push it when /health says jobs_running 0:  git push origin $(git rev-parse --abbrev-ref HEAD)" >&2
+  exit 3
 fi
 git push origin "$(git rev-parse --abbrev-ref HEAD)"
 git log --oneline -1

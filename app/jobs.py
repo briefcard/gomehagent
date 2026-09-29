@@ -385,16 +385,23 @@ def _give_back(s, rows: list, *, stopped: bool = False) -> dict:
                 "waiting. Press it again when you want it."
                 + (f" Last progress: {row.detail}" if row.detail else ""))
             out["interrupted"] += 1
-    # THE RUN IT ABANDONED is closed too, in the same session: a run a dead
-    # worker left at "brief" read as in progress on its system forever.
+    # THE RUN IT ABANDONED is closed too, in the same session.
     for row in rows:
-        rid = str((row.payload or {}).get("run_id") or "")
-        run = s.get(db.SystemRun, rid) if rid and not retryable(row.kind) else None
-        if run is not None and run.stage == "brief":
-            run.stage, run.error, run.finished_at = "failed", f"interrupted — {how}", db.utcnow()
+        _close_run(s, row, f"interrupted — {how}")
     if rows:
         s.commit()
     return out
+
+
+def _close_run(s, row, why: str) -> None:
+    """The run a job carried, closed if it still reads "brief" — in progress is
+    a claim only a live job can make. Left open, a run a dead worker abandoned
+    read as in progress on its system for ever, and six hours on Diagnostics
+    reported it as a worker that never finished."""
+    rid = str((row.payload or {}).get("run_id") or "")
+    run = s.get(db.SystemRun, rid) if rid and not retryable(row.kind) else None
+    if run is not None and run.stage == "brief":
+        run.stage, run.error, run.finished_at = "failed", why, db.utcnow()
 
 
 # ---------------------------------------------------------------------------
@@ -860,6 +867,12 @@ def again(job_id: str) -> dict:
             return {"ok": False, "why": "no such job", "id": ""}
         kind_, tenant, payload = row.kind, row.tenant, dict(row.payload or {})
         system_key, label = row.system_key or "", row.label or ""
+        # A job that ended before its give-back closed runs left its run at
+        # "brief" (the owner's blog run, 2026-09-29); the press is when that
+        # is known for certain, so the press closes it.
+        if row.state in ("interrupted", "failed"):
+            _close_run(s, row, "interrupted — the job carrying it ended before it did")
+            s.commit()
     # A RUN THAT TOOK A PLAN takes a fresh copy of it: the plan it took is
     # consumed, and sending that row again is refused as "not a plan".
     if payload.get("run_id"):

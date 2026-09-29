@@ -119,6 +119,16 @@ SABOTAGES = [
                "happens",
     },
     {
+        "name": "running_it_again_leaves_the_old_run_open",
+        "file": "app/jobs.py",
+        "find": '            _close_run(s, row, "interrupted — the job carrying it ended before it did")',
+        "replace": '            pass  # SABOTAGE',
+        "suites": ["test_job_queue.py"],
+        "why": "a run a kill left at 'brief' before give-back closed runs stays "
+               "'in progress' after the owner runs it again — six hours on, "
+               "Diagnostics reports a worker that never finished (2026-09-29)",
+    },
+    {
         "name": 'the_key_rides_in_the_address_bar_again',
         "file": 'app/web.py',
         "find": '            and "text/html" in request.headers.get("accept", "")\n',

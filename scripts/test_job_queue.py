@@ -336,6 +336,32 @@ def main() -> int:
     ck("  and that plan can be taken — no more 'not a plan'",
        _sys.take_plan(again_run, "baci", system_id=blog.id, skill_params=_params).get("ok") is True)
 
+    print("\n— a run a kill left open before that is closed by the press itself —")
+    # Prod, 2026-09-29: the blog run killed before give-back closed runs was
+    # still "brief" — six hours on, Diagnostics would call the worker dead.
+    left = _sys.open_plan("baci", "blog", ref="again:2", plan={"keyword": "latte cups"},
+                          planned_for=_sys._today())["run_id"]
+    _sys.approve_plan(left)
+    _sys.take_plan(left, "baci", system_id=blog.id, skill_params=_params)
+    with db.SessionLocal() as s:
+        s.query(db.JobQueue).filter(db.JobQueue.state.in_(("queued", "running"))) \
+            .update({"state": "done"}, synchronize_session=False)
+        s.commit()
+    old_job = jobs.enqueue("baci", "system_run", system_key="blog", label="Blog — plan run",
+                           payload={"key": "blog_article", "trigger": "manual", "run_id": left})["id"]
+    with db.SessionLocal() as s:
+        s.get(db.JobQueue, old_job).state = "interrupted"     # as the old code left it
+        s.commit()
+        opened = s.get(db.SystemRun, left).stage
+    got = jobs.again(old_job)
+    with db.SessionLocal() as s:
+        r = s.get(db.SystemRun, left)
+        closed = (r.stage, r.error or "", bool(r.finished_at))
+    ck("the press closes the run the ended job left 'in progress'",
+       opened == "brief" and closed[0] == "failed" and "interrupted" in closed[1] and closed[2],
+       f"{opened} -> {closed}")
+    ck("  and still files the plan afresh", got["ok"], str(got))
+
     print("\n— a run that made nothing leads with why —")
     said = jobs._summary({"items": [], "status": "empty",
                           "summary": "not drafted (no product with the key 'x' on file)",
