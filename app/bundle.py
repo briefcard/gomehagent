@@ -72,7 +72,16 @@ import pathlib
 #: private params-to-bundle hop apiece — the very thing `run`'s comment says a
 #: fourth skill would do — while `PARTS` declared `supplies="skill.run"` for a
 #: key `run` never wrote.
-OWNER_INPUT = ("offer", "deadline", "revision_notes")
+#:
+#: `news` is WHAT'S NEW — facts the owner gives for one piece (an activation,
+#: an incoming collection) that no KB row holds yet. Owner, 2026-09-29: "if we
+#: have a specific activation, incoming collection, or any other kind of new
+#: information, I want to be able to provide that as an input for the
+#: generation." The angle could not carry it: every writer is told the angle
+#: is direction, never copy, and the fact checks strip what is not on file.
+#: A person typed it, so it is on file for THIS piece — and only this one,
+#: because news goes stale and a claim would outlive it.
+OWNER_INPUT = ("offer", "deadline", "revision_notes", "news")
 
 #: KEYS IN AN ENTITY'S `attributes` THAT ARE NOT FACTS ABOUT THE PRODUCT.
 #:
@@ -200,6 +209,9 @@ PARTS: dict[str, dict] = {
                what="the owner's own input for this run — a person fills it "
                     "so that no generator has to invent one")
        for k in OWNER_INPUT},
+    "news": dict(tier=1, absent=SITUATIONAL, supplies="skill.run",
+                 what="what's new — facts the owner gave for this piece, true as "
+                      "written: stated as given and carried through it"),
     "revision_notes": dict(tier=1, absent=SITUATIONAL, supplies="skill.run",
                            what="what the owner sent the last draft back for"),
     # -- parts a SKILL adds to the package before it drafts -----------------

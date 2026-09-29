@@ -822,7 +822,7 @@ def decide_story(brief_: dict, kit_: dict, message: dict | None, *, tenant: str 
     prompt = _STORY_PROMPT % {
         "name": kit_.get("name") or theme.get("name") or "the brand",
         "positioning": kit_.get("positioning") or "", "voice": ", ".join(map(str, voice.get("tone") or [])) or "as the material reads",
-        "rules_brand": rules_brand, "material": (_material(kit_, entity_key) or "(nothing beyond the product's name)")[:3000],
+        "rules_brand": rules_brand, "material": (_material(kit_, entity_key, message) or "(nothing beyond the product's name)")[:3000],
         "notes": kit_.get("_notes") or "",
         "argument": json.dumps(arg, ensure_ascii=False, indent=1)[:5000], "message": _message_text(message)}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=2500)
@@ -869,6 +869,9 @@ def _message_text(message: dict | None) -> str:
             f"  · {p.get('name')} · {p.get('price', '')} · {p.get('url', '')}" for p in message["products"][:8]))
     if message.get("claims"):
         lines.append("- approved claims — use VERBATIM or not at all:\n" + "\n".join(f"  · {c}" for c in message["claims"][:8]))
+    if str(message.get("news") or "").strip():
+        lines.append("- what's new — the owner's facts for this send, TRUE AS WRITTEN; the email carries "
+                     "them, stated exactly (names, dates, numbers as given):\n" + str(message["news"]).strip()[:1500])
     if message.get("text"):
         lines.append("- what the drafter wrote, to carry (its facts and its ask, not its shape):\n" + str(message["text"])[:2200])
     return ":\n" + "\n".join(lines)
@@ -1571,15 +1574,27 @@ def story_check(html: str, story_: dict | None, kit_: dict) -> list[dict]:
     return out
 
 
-def _material(kit_: dict, entity_key: str) -> str:
-    """The product's own text — what the judge may hold ours to."""
+def _material(kit_: dict, entity_key: str, message: dict | None = None) -> str:
+    """What the judge may hold ours to: the owner's news for this send, the
+    product's own text, the approved claims this send cites, then the brand's.
+
+    NEWS FIRST, because callers cut this at 3,000–5,000 characters and the
+    news is the one thing this send exists to say. THE CITED CLAIMS, because
+    the kit holds brand-wide claims only: a claim about the product itself,
+    handed to the maker to use verbatim, was absent from the truth pass's
+    material and so readable as fabricated (found 2026-09-29)."""
     ents = kit_.get("entities") or []
     e = next((x for x in ents if x.get("key") == entity_key), None)
     lines = []
+    news = str((message or {}).get("news") or "").strip()
+    if news:
+        lines.append("what's new — the owner's own facts for this send, true as written: " + news)
     if e:
         lines.append(f"{e.get('name', '')}: {str(e.get('description') or '')[:1200]}")
-    for c in (kit_.get("claims") or [])[:12]:
-        lines.append("claim: " + str(c.get("claim") or ""))
+    said = [str(c).strip() for c in (message or {}).get("claims") or [] if str(c).strip()]
+    for c in said + [str(c.get("claim") or "") for c in (kit_.get("claims") or [])[:12]]:
+        if c and "claim: " + c not in lines:
+            lines.append("claim: " + c)
     return "\n".join(lines)
 
 
@@ -2045,7 +2060,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         toks = ln.split()
         if (len(toks) >= 2 or len(ln) >= 7) and len(ln) <= 40 and toks and not all(t in brand_words for t in toks):
             ref_lines.append(ln)
-    material_ = _material(kit_, entity_key)
+    material_ = _material(kit_, entity_key, message)
     best_i, best_n = -1, 10 ** 6
     last_turn = ""
     for n in range(ROUNDS + 1):

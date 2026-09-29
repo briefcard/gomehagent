@@ -1229,6 +1229,12 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
                               list(_pkg.stateable(e.get("attributes")).items())[:10])
             parts.append(f"- {e.get('name', '')}: {e.get('description', '')}"[:600]
                          + (f" ({facts})" if facts else ""))
+    # WHAT'S NEW — the owner's facts for this batch, stated, never treated as
+    # a theme: the positioning below is the idea, these are the news.
+    news = str(bundle.get("news") or "").strip()
+    if news:
+        parts.append("\n## What's new — facts the owner gave for this batch, "
+                     "TRUE AS WRITTEN: state them exactly as given\n" + news)
     aud = bundle.get("audiences") or []
     if aud:
         parts.append("\n## Who is reading")
@@ -1988,7 +1994,9 @@ register(Skill(
             # `funnel.proposals` builds them from the account's own claims,
             # objections and situations. Recorded on every row of the batch,
             # so "which positioning did better" is one GROUP BY.
-            "positioning"),
+            "positioning",
+            # WHAT'S NEW — the owner's facts for this batch (bundle.OWNER_INPUT)
+            "news"),
     writes=False,
     produces="draft",
     # An ad is one-to-many in the same sense a campaign is.
@@ -2587,6 +2595,17 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
                                 "if it earns its place."
                                 if c.get("background") else "")
                              + (f"\n    USE: {c['usage_rule']}" if c.get("usage_rule") else ""))
+        # WHAT'S NEW IS SAID, THE ANGLE IS NOT. The angle below is direction
+        # and is never quoted; these are facts the owner gave for this send
+        # (an activation, an incoming collection), and a drafter that treats
+        # them as a brief writes "something new is coming" and drops the date.
+        news = str(bundle.get("news") or "").strip()
+        if news:
+            parts.append(
+                "\n## WHAT'S NEW — facts the owner gave for this send\n" + news
+                + "\nTRUE AS WRITTEN, and the news this email exists to carry: "
+                  "state them plainly — names, dates and numbers exactly as "
+                  "given. Unlike the angle, these are to be said.")
         contested = bundle.get("contested_positioning") or []
         if contested:
             parts.append(
@@ -3740,7 +3759,7 @@ def _run_campaign_email(ctx: Context) -> dict:
                                   "title": "drawn for this send", "kind": "lifestyle"}]
                                 if hero_got.get("basis") == "generated" and hero_got.get("asset_id") and (hero or {}).get("url") else []),
                 message={"subject": c.get("subject", ""), "preheader": c.get("preheader", ""),
-                         "link": _link,
+                         "link": _link, "news": str(ctx.bundle.get("news") or ""),
                          "angle": chosen_angle or goal, "offer": str(ctx.bundle.get("offer") or ""),
                          "text": _blocks_text(blocks),
                          "products": [{"name": e.get("name"), "price": e.get("price", ""), "url": e.get("url", "")}
@@ -4017,7 +4036,16 @@ def _run_campaign_email(ctx: Context) -> dict:
 
     _all_ents = _kb.entities(ctx.tenant, available_only=False)
     _named = fitness.named_unfit(_model, to_check, _all_ents)
-    for n in _named:
+    # WHAT THE OWNER NAMED IS NAMED ON PURPOSE. An incoming collection is a
+    # draft in the store until it launches; the owner announcing it under
+    # What's new is the permission this check otherwise finds absent. Matched
+    # by the check's own reading, so "named" means one thing here.
+    _asked = {n["key"] for n in fitness.named_unfit(
+        _model, str(ctx.bundle.get("news") or ""), _all_ents)}
+    for n in [n for n in _named if n["key"] in _asked]:
+        ctx.note(f"names {n['name']} although {n['why']} — you named it "
+                 f"under What's new")
+    for n in [n for n in _named if n["key"] not in _asked]:
         hard.append({"severity": "block", "rule": "unfit_entity_named",
                      "detail": f"the email recommends {n['name']}, but "
                                f"{n['why']}",
@@ -4758,7 +4786,9 @@ register(Skill(
             # who RECEIVES the send, the audience is who it is WRITTEN FOR,
             # and one `reorder_due` list contains all three Baci personas.
             "audience_key",
-            "offer", "utterance", "draft_visual", "generate_visual", "link"),
+            "offer", "utterance", "draft_visual", "generate_visual", "link",
+            # WHAT'S NEW — the owner's facts for this send (bundle.OWNER_INPUT)
+            "news"),
     writes=True,
     produces="draft",
     # ONE-TO-MANY WORK NAMES ITS READER. Owner, 2026-08-31: "Audience only
@@ -5486,6 +5516,12 @@ def _run_blog_article(ctx: Context) -> dict:
         angle=angle, angle_brief=str(ARTICLE_ANGLES.get(angle, {}).get("brief") or ""),
         links=links[:6],
         notes=str(ctx.bundle.get("revision_notes") or ctx.params.get("revision_notes") or "").strip(),
+        # WHAT'S NEW — the owner's facts for this piece — and THE CLAIMS THIS
+        # SKILL HAS IN SCOPE (the hero's own and its collection's with the
+        # brand's), the ones `emit` below cites: the maker's material and the
+        # validator's citations are the same list.
+        news=str(ctx.bundle.get("news") or ""),
+        claims=[c.get("claim") for c in (ctx.bundle.get("claims") or []) if c.get("claim")],
         # the brand's own collection pages come from the KB inside the maker;
         # these are the keyword map's published siblings that happen to be
         # collection pages, added to them
@@ -6033,7 +6069,9 @@ register(Skill(
             "audience_key",
             "revision_notes",
             # Draw the pictures on a miss (blank = yes) — owner, 2026-09-08.
-            "generate_visual"),
+            "generate_visual",
+            # WHAT'S NEW — the owner's facts for this article (bundle.OWNER_INPUT)
+            "news"),
     writes=True,
     produces="draft",
     run=_run_blog_article))

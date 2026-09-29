@@ -124,6 +124,10 @@ def for_job(job_id: str) -> dict:
         out += ["## The context — the brand package the job reads", ""]
         for key, part in bundle.PARTS.items():
             value = (got or {}).get(key)
+            if _empty(value) and key in bundle.OWNER_INPUT:
+                # THE OWNER'S INPUT RIDES THE PACKAGE, as `skill.run` puts it
+                # there — What's new described as facts, not buried in the JSON.
+                value = inputs.get(key)
             if key in _META or _empty(value):
                 continue
             out += [f"### {key} — {part.get('what', '')}", "```json", _json(value), "```", ""]

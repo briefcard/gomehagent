@@ -128,6 +128,163 @@ SABOTAGES = [
                "'in progress' after the owner runs it again — six hours on, "
                "Diagnostics reports a worker that never finished (2026-09-29)",
     },
+    # -- WHAT'S NEW: the owner's facts for one piece, 2026-09-29 --------------
+    # One wire each: a fact typed on the plan must reach every writer as a fact
+    # to state, and every check that asks "is it on file" must count it.
+    {
+        "name": "whats_new_is_not_an_owner_input",
+        "file": "app/bundle.py",
+        "find": 'OWNER_INPUT = ("offer", "deadline", "revision_notes", "news")',
+        "replace": 'OWNER_INPUT = ("offer", "deadline", "revision_notes")  # SABOTAGE',
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the owner types What's new on the plan and no writer ever sees "
+               "it — skill.run copies only declared owner inputs into the package",
+    },
+    {
+        "name": "the_email_drafter_does_not_hear_whats_new",
+        "file": "app/skill_pack.py",
+        "find": '        news = str(bundle.get("news") or "").strip()',
+        "replace": '        news = ""  # SABOTAGE',
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the email is drafted from the angle alone, which it is told "
+               "never to quote — the launch date and the price never appear",
+    },
+    {
+        "name": "the_email_maker_does_not_hear_whats_new",
+        "file": "app/skill_pack.py",
+        "find": '"link": _link, "news": str(ctx.bundle.get("news") or ""),',
+        "replace": '"link": _link,  # SABOTAGE',
+        "suites": ["test_the_model_makes_the_email.py"],
+        "why": "the maker that writes the email that ships never sees the "
+               "owner's facts, and its fact check strips what the drafter said",
+    },
+    {
+        "name": "the_email_fact_check_does_not_count_whats_new",
+        "file": "app/recreate.py",
+        "find": "        lines.append(\"what's new — the owner's own facts for this send, true as written: \" + news)",
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_whats_new_reaches_every_writer.py", "test_the_model_makes_the_email.py"],
+        "why": "the owner's own launch date is flagged as fabricated and edited "
+               "out of the email that states it",
+    },
+    {
+        "name": "the_email_fact_check_forgets_the_cited_claims",
+        "file": "app/recreate.py",
+        "find": '    said = [str(c).strip() for c in (message or {}).get("claims") or [] if str(c).strip()]',
+        "replace": "    said = []  # SABOTAGE",
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "an approved claim about the product itself, handed to the maker "
+               "to use verbatim, reads as fabricated — the kit holds brand-wide "
+               "claims only",
+    },
+    {
+        "name": "the_article_material_lacks_whats_new",
+        "file": "app/articles.py",
+        "find": "        lines.append(\"what's new — the owner's own facts for this piece, true as written: \" + str(news).strip())",
+        "replace": "        pass  # SABOTAGE",
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the article's number check strips the owner's own price, and its "
+               "fact check the owner's own date",
+    },
+    {
+        "name": "the_article_run_keeps_whats_new_from_its_writers",
+        "file": "app/articles.py",
+        "find": '    kit_["_news"] = str(news or "").strip()',
+        "replace": '    kit_["_news"] = ""  # SABOTAGE',
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the story and the writer never hear the news as something to "
+               "say — the writer sees the story, not the material",
+    },
+    {
+        "name": "the_story_is_not_told_to_state_whats_new",
+        "file": "app/articles.py",
+        "find": "           f\"on them, names, dates and numbers exactly as given:\\n{kit_['_news'][:1500]}\\n\" if kit_.get(\"_news\") else \"\")",
+        "replace": "           f\"\" if False else \"\")  # SABOTAGE",
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the story treats the news as one more fact it may use, and the "
+               "article is about something else",
+    },
+    {
+        "name": "the_article_writer_is_not_handed_whats_new",
+        "file": "app/articles.py",
+        "find": '                     + kit_["_news"][:1500] + "\\n") if kit_.get("_news") else "",',
+        "replace": '                     + "") if False else "",  # SABOTAGE',
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the writer, who sees the story and not the material, states the "
+               "news loosely or not at all",
+    },
+    {
+        "name": "the_blog_skill_keeps_whats_new_from_the_maker",
+        "file": "app/skill_pack.py",
+        "find": '        news=str(ctx.bundle.get("news") or ""),',
+        "replace": '        news="",  # SABOTAGE',
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the package carries the news and the article maker is never "
+               "handed it",
+    },
+    {
+        "name": "the_article_never_sees_its_products_claims",
+        "file": "app/skill_pack.py",
+        "find": '        claims=[c.get("claim") for c in (ctx.bundle.get("claims") or []) if c.get("claim")],',
+        "replace": "        claims=None,  # SABOTAGE",
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "an article about a product states none of that product's own "
+               "approved claims — the kit holds brand-wide claims only",
+    },
+    {
+        "name": "a_collection_the_owner_announced_is_held_as_a_draft",
+        "file": "app/skill_pack.py",
+        "find": '    for n in [n for n in _named if n["key"] not in _asked]:',
+        "replace": "    for n in _named:  # SABOTAGE",
+        "suites": ["test_campaign_variety.py"],
+        "why": "an incoming collection is a draft in the store until it "
+               "launches; announcing it under What's new is withheld from the "
+               "ESP as if nobody had asked",
+    },
+    {
+        "name": "the_ad_writer_does_not_hear_whats_new",
+        "file": "app/skill_pack.py",
+        "find": "    if news:\n        parts.append(\"\\n## What's new — facts the owner gave for this batch, \"",
+        "replace": "    if False:  # SABOTAGE\n        parts.append(\"\\n## What's new — facts the owner gave for this batch, \"",
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "every ad variant is written from the positioning alone and the "
+               "news never appears",
+    },
+    {
+        "name": "the_ad_panel_briefs_without_whats_new",
+        "file": "app/ad_craft.py",
+        "find": '    if str(bundle.get("news") or "").strip():',
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the panel's brief is the drafter's last word, and written "
+               "without the news it steers every variant off it",
+    },
+    {
+        "name": "a_topic_drops_whats_new",
+        "file": "app/topics.py",
+        "find": '    news = str(news or "").strip()',
+        "replace": '    news = ""  # SABOTAGE',
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the topic card takes the facts once and files none of them on "
+               "the article, the email or the ads",
+    },
+    {
+        "name": "the_topic_card_drops_whats_new",
+        "file": "app/web.py",
+        "find": '                      news=val("news"), run_now=bool(val("run_now")))',
+        "replace": '                      run_now=bool(val("run_now")))  # SABOTAGE',
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "the box on the Plan tab is typed into and thrown away",
+    },
+    {
+        "name": "the_claude_file_buries_whats_new",
+        "file": "app/handoff.py",
+        "find": "            if _empty(value) and key in bundle.OWNER_INPUT:",
+        "replace": "            if False:  # SABOTAGE",
+        "suites": ["test_whats_new_reaches_every_writer.py"],
+        "why": "a job finished by hand in Claude gets the owner's facts as one "
+               "line of JSON instead of a part that says they are facts",
+    },
     {
         "name": 'the_key_rides_in_the_address_bar_again',
         "file": 'app/web.py',
@@ -1923,8 +2080,8 @@ SABOTAGES = [
     {
         "name": "the_owner_input_hop_carries_them_all",
         "file": "app/bundle.py",
-        "find": 'OWNER_INPUT = ("offer", "deadline", "revision_notes")',
-        "replace": 'OWNER_INPUT = ("offer", "deadline")  # SABOTAGE',
+        "find": 'OWNER_INPUT = ("offer", "deadline", "revision_notes", "news")',
+        "replace": 'OWNER_INPUT = ("offer", "deadline", "news")  # SABOTAGE',
         # test_funnel is what actually detects it — it asserts the digest on
         # the bundle the drafter receives. The conformance suite only checks
         # that each member is a declared PART, which stays true when a member

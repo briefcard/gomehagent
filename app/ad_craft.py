@@ -511,6 +511,11 @@ def panel_prompt(bundle: dict, concepts: list[dict]) -> list[str]:
                      "buyer the claim implies, and say that you had to")
     if str(bundle.get("positioning") or "").strip():
         parts.append(f"POSITIONING UNDER TEST: {str(bundle['positioning']).strip()}")
+    # WHAT'S NEW reaches the panel too: its brief is the drafter's last word,
+    # and a brief written without the news can steer every variant off it.
+    if str(bundle.get("news") or "").strip():
+        parts.append("WHAT'S NEW — the owner's facts for this batch, true as written, "
+                     f"to be carried: {str(bundle['news']).strip()}")
     # THE BRAND'S OWN RULE FOR ADS reaches the judge as well as the drafter —
     # a rule only the drafter sees is advice (memory: every KB rule names the
     # generator that receives it AND the validator that enforces it).

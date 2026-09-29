@@ -7111,7 +7111,7 @@ async def topic_plan(request: Request, key: str = Depends(admin_key)):
                       ends=val("ends"), channels=form.getlist("channels"),
                       entity_key=val("entity_key"), audience_key=val("audience_key"),
                       segment=val("segment"), keyword=val("keyword"), on=val("on"),
-                      run_now=bool(val("run_now")))
+                      news=val("news"), run_now=bool(val("run_now")))
     if got.get("why"):
         return RedirectResponse(_console_url(tenant, "plan", err=got["why"]), 303)
     due = val("on") or systems._today()

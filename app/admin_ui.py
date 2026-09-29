@@ -2835,6 +2835,13 @@ def _plan_field_input(f: dict, value, tenant: str = "") -> str:
             for v, t in (("", "— unset —"), ("yes", "yes"), ("no", "no")))
         return (f'<div class="f"><label>{label}</label>{req}'
                 f'<select name="{_esc(f["key"])}">{opts}</select></div>')
+    if f.get("kind") == "long":
+        # FACTS NEED ROOM — What's new is sentences (names, dates, numbers),
+        # and a one-line input hid all but the first few words of them.
+        return (f'<div class="f"><label>{label}</label>{req}'
+                f'<textarea name="{_esc(f["key"])}" rows="3" placeholder="an activation, an '
+                f'incoming collection — names, dates and numbers as they are">'
+                f'{_esc(str(value or ""))}</textarea></div>')
     return (f'<div class="f"><label>{label}</label>{req}'
             f'<input name="{_esc(f["key"])}" value="{_esc(str(value or ""))}">'
             f'</div>')
@@ -15381,6 +15388,7 @@ def _topic_card(key: str, tenant: str) -> str:
   <div class="f"><label>Topic</label><input name="topic" required placeholder="Art Basel Miami Beach"></div>
   <div class="f"><label>Why it matters to this client</label>
     <input name="angle" placeholder="hosting guests during the fair"></div>
+  {pick("news", "long", "What's new — facts every piece carries (optional)")}
   <div class="f"><label>Starts</label><input type="date" name="starts">
     <label>Ends</label><input type="date" name="ends"></div>
   {pick("entity_key", "entity", "Feature (optional)")}

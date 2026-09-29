@@ -502,6 +502,14 @@ def main():
     ck("…and nothing reached the ESP", len(_drafted) == before)
     ck("the banned-claims validator had passed it, so this is a NEW gate",
        (r.get("items") or [{}])[0].get("ok") is True)
+    # AN INCOMING COLLECTION IS A DRAFT UNTIL IT LAUNCHES. Named by the owner
+    # under What's new, naming it is the owner's decision — said on the card,
+    # not held as a thing nobody asked for (2026-09-29).
+    r = skill.run("campaign_email", "baci", segment="new_subscribers", goal="x",
+                  news="CitroBurn arrives October 15 — the first 200 tins.")
+    _n = " ".join(r.get("notes", []))
+    ck("a draft the owner NAMED under What's new is named on purpose — said, not held",
+       "you named it under What's new" in _n and "the email recommends CitroBurn" not in _n, _n[-300:])
 
     print("\n— a sign-off names a real person or nobody —")
     sig = [{"type": "text", "html": "<p>Hello.</p>"},

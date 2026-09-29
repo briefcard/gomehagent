@@ -64,10 +64,10 @@ Drafts grounded ad copy from approved claims against an audience and an entity. 
 - **Connections:** at least one of `ads`, `commerce`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `claim`, `entity`
 - **Skill** `ad_copy` — produces `draft`, tier 3, writes=False
-  - parameters: `entity_key`, `entity_keys`, `audience_key`, `variants`, `utterance`, `revision_notes`, `into_batch`, `offer`, `deadline`, `funnel_stage`, `positioning`
+  - parameters: `entity_key`, `entity_keys`, `audience_key`, `variants`, `utterance`, `revision_notes`, `into_batch`, `offer`, `deadline`, `funnel_stage`, `positioning`, `news`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** none — plans are filed by hand or by another system
-- **Plan fields** (the plan UI; `*` required): `entity_key`* (entity), `audience_key`* (audience), `entity_keys` (entity_list), `variants`, `positioning` (text)
+- **Plan fields** (the plan UI; `*` required): `entity_key`* (entity), `audience_key`* (audience), `entity_keys` (entity_list), `variants`, `positioning` (text), `news` (long)
 - **Unit:** one ad batch for one audience × entity
 - **Artifact:** proposal_rows
 - **Ship:** approving marks the batch ready, then the copy is carried to the platform by hand and the join finds it again
@@ -81,11 +81,11 @@ Writes grounded articles against the keyword map, and publishes them where there
 - **Connections:** —
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `audience`, `claim`
 - **Skill** `blog_article` — produces `draft`, tier 3, writes=True
-  - parameters: `keyword`, `role`, `cluster`, `angle`, `entity_key`, `approach`, `entity_keys`, `utterance`, `audience_key`, `revision_notes`, `generate_visual`
+  - parameters: `keyword`, `role`, `cluster`, `angle`, `entity_key`, `approach`, `entity_keys`, `utterance`, `audience_key`, `revision_notes`, `generate_visual`, `news`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** `blog_rollout`
 - **Cadence knobs:** `articles_monthly`=4, `horizon_days`=45
-- **Plan fields** (the plan UI; `*` required): `keyword`*, `role` (choice, pillar|support), `cluster`, `angle`, `entity_key` (entity), `entity_keys` (entity_list), `audience_key` (audience), `revision_notes` (text), `generate_visual` (flag)
+- **Plan fields** (the plan UI; `*` required): `keyword`*, `role` (choice, pillar|support), `cluster`, `angle`, `news` (long), `entity_key` (entity), `entity_keys` (entity_list), `audience_key` (audience), `revision_notes` (text), `generate_visual` (flag)
 - **Unit:** one article against one keyword
 - **Artifact:** cms_article
 - **Ship:** publishes the draft article, behind seo_guard
@@ -99,11 +99,11 @@ Builds and schedules campaign sends from the catalogue and calendar.
 - **Connections:** `esp`
 - **Knowledge (`kb_needs`):** `tone`, `banned_claims`, `entity`, `claim`, `objection`, `audience`, `asset`
 - **Skill** `campaign_email` — produces `draft`, tier 3, writes=True
-  - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `structure`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `generate_visual`, `link`
+  - parameters: `revision_notes`, `segment`, `goal`, `subject`, `intent`, `deadline`, `entity_key`, `structure`, `entity_keys`, `audience_key`, `offer`, `utterance`, `draft_visual`, `generate_visual`, `link`, `news`
   - constitutive (no draft without it): `banned_claims`
 - **Planner:** `campaign_rollout`
 - **Cadence knobs:** `horizon_days`=21, `per_segment_monthly`=1, `segment_rest_days`=6
-- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag), `structure` (structure), `generate_visual` (flag), `link`
+- **Plan fields** (the plan UI; `*` required): `segment`* (segment), `audience_key`* (audience), `goal`, `news` (long), `subject`, `intent` (choice, story|education|proof|offer), `entity_key` (entity), `entity_keys` (entity_list), `deadline`, `offer`, `draft_visual` (flag), `structure` (structure), `generate_visual` (flag), `link`
 - **Unit:** a campaign email to one segment
 - **Artifact:** esp_campaign
 - **Ship:** marks it launch-ready — launching stays human, in the ESP

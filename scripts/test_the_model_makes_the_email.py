@@ -655,6 +655,21 @@ def main() -> int:
        r1.get("status") == "produced" and any(n.startswith("built in the design") for n in notes1), str(r1.get("status")) + str([n[:80] for n in notes1][-4:]))
     ck("the composer carried the drafter's message — its subject and its cited claim",
        "THE MESSAGE this email carries" in compose_seen[-1] and "Set the scene" in compose_seen[-1] and CLAIM in compose_seen[-1])
+    # WHAT'S NEW (owner, 2026-09-29): facts for one send, said — where the
+    # angle is only direction — and on file for the fact check of that send.
+    NEWS = "The Portofino Blu collection arrives October 15 with 12 new pieces; pre-orders open October 1."
+    compose_seen.clear()
+    seen["email_judge"] = []
+    skill.run("campaign_email", "baci", segment="reorder_due", structure=new["id"], intent="education",
+              entity_key="portofino", generate_visual="no", news=NEWS)
+    ck("What's new reaches the maker as facts to state, not as the angle",
+       any(NEWS in p and "TRUE AS WRITTEN" in p for p in compose_seen if "THE MESSAGE this email carries" in p),
+       str([p[:60] for p in compose_seen][:4]))
+    _truths = [p[-1]["text"] for p in seen["email_judge"]
+               if isinstance(p, list) and p[-1]["text"].startswith("The words of an email")]
+    ck("  and the fact check holds the email to it — news first in the material, the cited claim beside it",
+       bool(_truths) and all(NEWS in t.split("THE MATERIAL")[-1][:400] and CLAIM in t.split("THE MATERIAL")[-1]
+                             for t in _truths), str(len(_truths)))
     with db.SessionLocal() as s:
         out1 = s.query(db.Output).filter(db.Output.tenant == "baci").order_by(db.Output.created_at.desc()).first()
         art1 = s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out1.id).order_by(db.ArtifactBody.created_at.desc()).first()

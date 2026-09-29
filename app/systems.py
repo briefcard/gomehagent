@@ -431,6 +431,11 @@ CATALOG = {
                 # it back and correct it next time.
                 dict(key="goal", label="Angle / concept (optional)",
                      required=False),
+                # WHAT'S NEW — facts, where the angle is direction: the drafter
+                # is told never to quote the angle, and states these as given
+                # (bundle.OWNER_INPUT, owner 2026-09-29).
+                dict(key="news", label="What's new — facts for this piece (optional)",
+                     required=False, kind="long"),
                 dict(key="subject", label="Subject line", required=False),
                 # WHAT THE SEND IS FOR. Left blank the planner rotates it, so
                 # a list is given to about three times for every time it is
@@ -582,6 +587,10 @@ CATALOG = {
                 # the planner proposes none; the drafter picks one and the run
                 # records which, so the owner can read it back and correct it.
                 dict(key="angle", label="Angle (optional)", required=False),
+                # WHAT'S NEW — facts the article carries and may state; the
+                # angle is only the way in (bundle.OWNER_INPUT, 2026-09-29).
+                dict(key="news", label="What's new — facts for this piece (optional)",
+                     required=False, kind="long"),
                 dict(key="entity_key", label="Featured entity", required=False,
                      kind="entity"),
                 # THE PIECE THAT IS ABOUT A PLACE, NOT A THING. Owner,
@@ -820,6 +829,9 @@ CATALOG = {
                 # reached them as a bare product and audience (2026-09-27).
                 dict(key="positioning", label="Angle — the moment or idea (optional)",
                      required=False, kind="text"),
+                # WHAT'S NEW — facts every variant may state (bundle.OWNER_INPUT)
+                dict(key="news", label="What's new — facts for this piece (optional)",
+                     required=False, kind="long"),
             ),
             artifact="proposal_rows",
             ship="approving marks the batch ready, then the copy is carried "

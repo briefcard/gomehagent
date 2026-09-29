@@ -60,7 +60,7 @@ def keyword_for(tenant: str, text: str) -> dict:
 
 def plan(tenant: str, *, topic: str, angle: str = "", starts: str = "", ends: str = "",
          channels=(), entity_key: str = "", audience_key: str = "", segment: str = "",
-         keyword: str = "", on: str = "", run_now: bool = False) -> dict:
+         keyword: str = "", on: str = "", news: str = "", run_now: bool = False) -> dict:
     """File the topic into each chosen channel. `{ok, keyword, from_map,
     channels: [{key, name, run_id, complete, missing, queued, error}]}`.
 
@@ -81,14 +81,18 @@ def plan(tenant: str, *, topic: str, angle: str = "", starts: str = "", ends: st
     # is (a chat handed the file asked for them, 2026-09-28).
     when = (f"{starts} to {ends}" if ends and ends != starts else starts) if starts else ""
     about = topic + (f" ({when})" if when else "") + (f" — {angle.strip()}" if angle.strip() else "")
+    # WHAT'S NEW goes to every piece that writes — the facts the topic's
+    # article, email and ads all carry (the post is made from the article).
+    news = str(news or "").strip()
     fields = {
         "blog": {"keyword": phrase, "cluster": found.get("cluster", ""), "role": "support",
-                 "angle": about, "entity_key": entity_key, "audience_key": audience_key},
+                 "angle": about, "entity_key": entity_key, "audience_key": audience_key,
+                 "news": news},
         "campaign_email": {"segment": segment, "audience_key": audience_key, "goal": about,
-                           "entity_key": entity_key,
+                           "entity_key": entity_key, "news": news,
                            "deadline": f"{topic} ends {ends}" if ends else ""},
         "ad_creative": {"entity_key": entity_key, "audience_key": audience_key,
-                        "positioning": about},
+                        "positioning": about, "news": news},
         "gbp_post": ({"kind": "event", "event_title": topic, "event_start": starts,
                       "event_end": ends or starts, "keyword": phrase} if starts else
                      {"kind": "update", "keyword": phrase}),

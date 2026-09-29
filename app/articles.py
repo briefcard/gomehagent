@@ -303,6 +303,9 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
         "questions": (("\nQUESTIONS PEOPLE SEARCH, to answer:\n" + "\n".join(f"- {q}" for q in (questions or [])[:8]) + "\n") if questions else "")
         + (f"\nTHE ANGLE this piece takes — the way in, chosen on the plan: {angle}\n" if angle else "")
         + (f"\nWHAT THE OWNER ASKED FOR ON THIS PIECE — outranks the angle and the brief:\n{notes[:1500]}\n" if notes else "")
+        + (f"\nWHAT'S NEW — facts the owner gave for this piece. They are TRUE AS WRITTEN and in the material; "
+           f"unlike the angle they are said, not implied: the story carries them, the beats that state them rest "
+           f"on them, names, dates and numbers exactly as given:\n{kit_['_news'][:1500]}\n" if kit_.get("_news") else "")
         + ("\n" + (kit_.get("_notes") or "") if kit_.get("_notes") else ""),
         "length": brief_.get("length_words") or 1400}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=8000)
@@ -314,19 +317,33 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
     return {"ok": True, "story": got, "why": "", "calls": 1}
 
 
-def article_material(kit_: dict, entity_key: str, keyword: str) -> str:
-    """What the article may state about what the brand sells: the hero
-    product's own text, then the products the keyword names (so a "melamine
-    vs porcelain" piece sees the brand's porcelain too), then the claims."""
+def article_material(kit_: dict, entity_key: str, keyword: str, *, claims: list | None = None,
+                     news: str = "") -> str:
+    """What the article may state: the owner's news for this piece, the hero
+    product's own text, the approved claims, then the products the keyword
+    names (so a "melamine vs porcelain" piece sees the brand's porcelain too).
+
+    `claims` are the ones the SKILL has in scope — the hero's own and its
+    collection's with the brand's, ranked for this piece — and the ones its
+    validator cites. The kit holds brand-wide claims only, so an article
+    about a product never saw that product's approved claims (2026-09-29).
+    NEWS FIRST and CLAIMS BEFORE THE RELATED PRODUCTS, because every caller
+    cuts this at 2,500–5,000 characters and eight related descriptions of
+    700 used to push both past the cut."""
     ents = kit_.get("entities") or []
     words = {w for w in re.findall(r"[a-z]{4,}", keyword.lower())}
     hero = [e for e in ents if entity_key and e.get("key") == entity_key]
     related = [e for e in ents if e not in hero and any(w in (e.get("name") or "").lower() for w in words)][:8]
+    def _line(e):
+        return f"{e.get('name', '')}" + (f" · {e.get('price')}" if e.get("price") else "") + f": {str(e.get('description') or '')[:700]}"
     lines = []
-    for e in hero + related:
-        lines.append(f"{e.get('name', '')}" + (f" · {e.get('price')}" if e.get("price") else "") + f": {str(e.get('description') or '')[:700]}")
-    for c in (kit_.get("claims") or [])[:12]:
-        lines.append("claim: " + str(c.get("claim") or ""))
+    if str(news or "").strip():
+        lines.append("what's new — the owner's own facts for this piece, true as written: " + str(news).strip())
+    lines += [_line(e) for e in hero]
+    said = ([str(c or "").strip() for c in claims] if claims is not None
+            else [str(c.get("claim") or "").strip() for c in kit_.get("claims") or []])
+    lines += ["claim: " + c for c in said[:12] if c]
+    lines += [_line(e) for e in related]
     return "\n".join(lines)
 
 
@@ -380,7 +397,7 @@ THE BRIEF — what ranks, and how ours is better:
 
 THE STORY — decided first; every H2 is a beat, every line belongs to one:
 %(story)s
-
+%(news)s
 THE BRAND
 name: %(name)s — %(positioning)s
 faces on file: heading %(heading_face)s · body %(body_face)s · accent colour %(accent)s
@@ -501,7 +518,11 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
         prompt = _COMPOSE_PROMPT % {
             "name": kit_.get("name") or "the brand", "positioning": kit_.get("positioning") or "", "keyword": keyword,
             "pattern": _pattern_text(pattern_), "brief": json.dumps({k: brief_.get(k) for k in ("answer_first", "must_cover", "gaps", "media", "tone", "beat", "length_words")}, ensure_ascii=False, indent=1)[:3500],
-            "story": _story_text(story_), "heading_face": (theme.get("font") or {}).get("heading") or "(the theme's)",
+            "story": _story_text(story_),
+            "news": ("\nWHAT'S NEW — the owner's facts for this piece, TRUE AS WRITTEN and part of the material: "
+                     "state them exactly as given (names, dates, numbers) where the story carries them:\n"
+                     + kit_["_news"][:1500] + "\n") if kit_.get("_news") else "",
+            "heading_face": (theme.get("font") or {}).get("heading") or "(the theme's)",
             "body_face": (theme.get("font") or {}).get("body") or "(the theme's)", "accent": (theme.get("colors") or {}).get("accent") or "(the theme's)",
             "rules_brand": rules_brand, "pictures": "\n".join(pics) or "(none on file)", "products": "\n".join(prods) or "(none named)",
             "collections": ", ".join(collections or []) or "(none)",
@@ -762,7 +783,8 @@ def judge(ours_png: bytes, rival_png: bytes, story_: dict, brief_: dict, keyword
 def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "", questions: list | None = None,
         rival_urls: list | None = None, approach_url: str = "", products: list | None = None,
         collections: list | None = None, links: list | None = None, angle: str = "",
-        angle_brief: str = "", notes: str = "", progress=None) -> dict:
+        angle_brief: str = "", notes: str = "", news: str = "", claims: list | None = None,
+        progress=None) -> dict:
     """Brief → story → write → check → shoot → judge → edit, best kept.
     Returns everything the card and the runner need; stores nothing but the
     pattern (a Phase 3 seam wires this into `blog_article` and the ledger)."""
@@ -778,11 +800,14 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
     _std, _std_is = _ex.standard(tenant, _ex.ARTICLE, fallback=exemplar())
     kit_["_standard"], kit_["_standard_is"] = _std, _std_is
     kit_["_notes"] = _ex.notes_text(tenant, _ex.ARTICLE)
+    # WHAT'S NEW rides the kit to the story and the writer, as the notes do;
+    # the material below carries it to every check that asks "is it on file".
+    kit_["_news"] = str(news or "").strip()
     if _ex.notes(tenant, _ex.ARTICLE):
         story.append(f"Held to what you have said about this brand's articles ({len(_ex.notes(tenant, _ex.ARTICLE))} note(s)).")
     say("reading what ranks")
     reads = rivals(tenant, keyword, urls=rival_urls)
-    material_ = article_material(kit_, entity_key, keyword)
+    material_ = article_material(kit_, entity_key, keyword, claims=claims, news=news)
     got_b = brief(tenant, keyword, reads, material=material_)
     calls += got_b.get("calls", 0)
     if not got_b.get("ok"):
