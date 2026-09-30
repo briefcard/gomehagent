@@ -254,6 +254,48 @@ def main() -> int:
        "writing the resolved default back would make the first account sticky "
        "the moment anyone arrived without one — the bug, cached")
 
+    print("\n— Systems unfolds this account's systems, no page load —")
+    # Owner, 2026-09-30: "have a submenu navigation when I press 'Systems' so
+    # I don't have to load the systems page every time".
+    systems.create("ironside", "campaign_email", "Ironside campaign email")
+
+    def _fold(path):
+        side = c.get(path).text.split('<div class="main">', 1)[0]
+        return side, _re.search(r'<details class="navsub"( open)?>(.*?)</details>', side, _re.S)
+
+    side, sub = _fold("/admin/ui?key=s3cret&tab=brand&tenant=ironside")
+    ck("pressing Systems unfolds a list in the sidebar — a summary, not a link",
+       sub is not None and _re.search(r"<summary[^>]*>.*?Systems", sub.group(2), _re.S) is not None
+       and '<a class="" href="/admin/ironside/systems">' not in side.split("navsub")[0])
+    ck("  every system of this account, each linking to its own page",
+       sub is not None and '/admin/ironside/systems/lead_responder"' in sub.group(2)
+       and '/admin/ironside/systems/campaign_email"' in sub.group(2)
+       and "IRONMARK responder" in sub.group(2))
+    ck("  and the board itself, one press away",
+       sub is not None and 'href="/admin/ironside/systems">All systems' in sub.group(2))
+    ck("  only THIS account's systems", "BACIMARK" not in side)
+    ck("  shut on another tab", sub is not None and sub.group(1) is None)
+    side, sub = _fold("/admin/ironside/systems/campaign_email")
+    ck("open on a system's own page, with that system marked",
+       sub is not None and sub.group(1) == " open"
+       and 'class="on" href="/admin/ironside/systems/campaign_email"' in sub.group(2))
+    side, sub = _fold("/admin/ironside/systems")
+    ck("  and on the board, with All systems marked",
+       sub is not None and 'class="on" href="/admin/ironside/systems">All systems' in sub.group(2))
+    side, sub = _fold("/admin/all/systems")
+    ck("on All accounts it stays the plain link — systems belong to one account",
+       sub is None and 'href="/admin/all/systems"' in side)
+
+    print("\n— the current tab's link keeps its view as a query —")
+    t = c.get("/admin/ui?key=s3cret&tab=diagnostics&tenant=ironside&days=30").text
+    nav = t.split('<div class="main">', 1)[0].split('class="navlabel"', 1)[-1]
+    m = _re.search(r'href="(/admin/ironside/diagnostics[^"]*)"', nav)
+    ck("the view rides after a ?, not glued onto the path",
+       m is not None and m.group(1).startswith("/admin/ironside/diagnostics?days=30"),
+       m.group(1) if m else "no link")
+    ck("  and that link opens the page it names",
+       m is not None and "Diagnostics" in c.get(m.group(1).replace("&amp;", "&")).text)
+
     print()
     if _fail:
         print(f"{len(_fail)} FAILED:")

@@ -63,9 +63,50 @@ def _json(text: str):
     if not m:
         return None
     try:
-        return json.loads(m.group(0))
+        # strict=False: a raw line break inside a string is what "every
+        # visible word, line by line" produces, and it is still the answer
+        return json.loads(m.group(0), strict=False)
     except ValueError:
         return None
+
+
+def _brief_json(text: str):
+    """The brief in a reply — `_json`, and when that finds no object, the
+    first `{` that decodes to one carrying a concept and sections. A plan
+    run on 2026-09-30 failed "the reader did not answer with a JSON object"
+    and kept nothing of the reply, so its cause is not known. One shape that
+    fails that way with the object whole: a note after it ("the [footer] was
+    cropped") ends the greedy span on the note's bracket. `_unread` says
+    what came back when this still finds nothing."""
+    got = _json(text)
+    if isinstance(got, dict):
+        return got
+    t = str(text or "")
+    dec = json.JSONDecoder(strict=False)
+    for m in re.finditer(r"\{", t):
+        try:
+            val, _end = dec.raw_decode(t, m.start())
+        except ValueError:
+            continue
+        if isinstance(val, dict) and "concept" in val and "sections" in val:
+            return val
+    return got
+
+
+def _unread(text: str, stop: str) -> str:
+    """What came back when it was not a brief — its length, how it stopped,
+    where its JSON breaks and how it began — so the next failure names its
+    cause instead of "not a JSON object" and nothing else."""
+    t = str(text or "").strip()
+    at = ""
+    i, j = t.find("{"), t.rfind("}")
+    if i >= 0 and j > i:
+        try:
+            json.loads(t[i:j + 1], strict=False)
+        except ValueError as e:
+            at = f"; its JSON breaks at line {getattr(e, 'lineno', '?')} column {getattr(e, 'colno', '?')} ({getattr(e, 'msg', e)})"
+    return (f"it stopped: {stop or 'unknown'}, {len(t):,} characters{at}; "
+            f"it began: {t[:100]!r}" if t else f"it stopped: {stop or 'unknown'}, with no text")
 
 
 def _ask(purpose: str, blocks, *, tenant: str = "", max_tokens: int = 1500):
@@ -203,18 +244,22 @@ def brief(asset_id: str, *, tenant: str = "") -> dict:
     reply = _ask("email_brief", blocks, tenant=tenant, max_tokens=16000)
     if not getattr(reply, "ok", False):
         return {"ok": False, "why": f"the reader did not answer — {getattr(reply, 'error', '')}", "calls": 1}
-    got = _json(reply.text)
+    got = _brief_json(reply.text)
     why = brief_problem(got)
-    if why and getattr(reply, "stop_reason", "") == "max_tokens":
+    stop = getattr(reply, "stop_reason", "") or ""
+    if why and stop == "max_tokens":
         why = f"the reader's brief was cut off at the length limit ({len(reply.text or '')} characters) — {why}"
+    elif why:
+        why = f"{why} — {_unread(reply.text, stop)}"
     if why:
         return {"ok": False, "why": why, "calls": 1}
     got["read"] = {"tier": tier, "edge": edge, "strips": len(parts), "model": getattr(reply, "model", "")}
     if sid:
         with db.SessionLocal() as s:
             st = s.get(db.EmailStructure, sid)
-            st.brief = got
-            s.commit()
+            if st is not None:          # deleted while it was being read
+                st.brief = got
+                s.commit()
     return {"ok": True, "brief": got, "structure_id": sid, "calls": 1}
 
 

@@ -540,6 +540,20 @@ padding:9px 0;border-top:1px solid var(--rule2)}
 color:var(--mut)}
 .sysrow.bad .vd{color:var(--err)}
 .sysrow.warn .vd{color:var(--gap)}
+/* Systems unfolds its own list (2026-09-30) — the summary is dressed as a
+   sidebar link, the systems sit indented beneath it. */
+.side details.navsub>summary{display:flex;align-items:center;gap:9px;padding:8px 10px;
+border-radius:6px;color:var(--ink2);font-size:.88rem;cursor:pointer;list-style:none;
+user-select:none}
+.side details.navsub>summary::-webkit-details-marker{display:none}
+.side details.navsub>summary:hover{background:var(--rule2)}
+.side details.navsub>summary.on{background:var(--accs);color:var(--acc);font-weight:600}
+.side details.navsub .caret{margin-left:auto;font-size:.7em;opacity:.6;transition:transform .15s}
+.side details.navsub .navbadge+.caret{margin-left:6px}
+.side details.navsub[open] .caret{transform:rotate(90deg)}
+.side .subnav{display:flex;flex-direction:column;gap:1px;margin:2px 0 6px 17px;
+padding-left:8px;border-left:1px solid var(--rule)}
+.side .subnav a{padding:6px 10px;font-size:.84rem}
 .side .foot{margin-top:auto;padding-top:12px;border-top:1px solid var(--rule);
 display:flex;flex-direction:column;gap:1px}
 .side .foot a{font-size:.82rem;color:var(--mut)}
@@ -562,6 +576,8 @@ flex-wrap:wrap;padding:10px;gap:4px}
 .side .brand,.side .swlabel,.side .navlabel{display:none}
 .side .switch{flex-direction:row;flex-wrap:wrap}
 .side .foot{margin:0;border:0;flex-direction:row;padding:0}
+.side details.navsub[open]{flex-basis:100%}
+.side .subnav{flex-direction:row;flex-wrap:wrap;margin:4px 0 0;padding:0;border:0}
 .main{padding:16px}}
 .bulkbar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;
   flex-wrap:wrap;background:var(--panel);border:1px solid var(--rule);
@@ -1125,8 +1141,49 @@ def _job_pill(tenant: str) -> str:
 </script>"""
 
 
+def _joined(href: str, suffix: str) -> str:
+    """A view's query onto an address — `?` first, `&amp;` after. The suffix
+    predates the path addresses of 2026-09-23 and is written `&amp;days=…`;
+    glued straight on, the current tab's link read
+    `/admin/baci/diagnostics&amp;days=30`, a path the router took for a tab
+    of that name."""
+    if not suffix:
+        return href
+    rest = suffix[5:] if suffix.startswith("&amp;") else suffix.lstrip("&")
+    return href + ("&amp;" if "?" in href else "?") + rest
+
+
+def _systems_nav(tenant: str, tab: str, system: str, label: str, icon: str,
+                 badge: str) -> str:
+    """SYSTEMS OPENS ITS OWN LIST (owner, 2026-09-30: *"have a submenu
+    navigation when I press 'Systems' so I don't have to load the systems
+    page every time"*). The press unfolds this account's systems in the
+    sidebar, each a link to its own page; open on every Systems page, with
+    the one you are on marked. One query per page; on All accounts, or with
+    nothing installed, it stays the plain link."""
+    try:
+        from . import systems as _sysm
+        rows = ([] if tenant == ALL else
+                [r for r in _sysm.for_tenant(tenant) if (r.status or "") != "retired"])
+    except Exception:                                            # noqa: BLE001
+        rows = []                       # a frame must never fail on a list
+    here = tab == "systems"
+    if not rows:
+        return (f'<a class="{"on" if here else ""}" href="{_esc(url(tenant, "systems"))}">'
+                f'<span class="ico">{icon}</span>{label}{badge}</a>')
+    subs = "".join(
+        f'<a class="{"on" if here and r.key == system else ""}" '
+        f'href="{_esc(url(tenant, "systems", r.key))}">{_esc(r.name or r.key)}</a>'
+        for r in rows)
+    return (f'<details class="navsub"{" open" if here else ""}>'
+            f'<summary class="{"on" if here else ""}"><span class="ico">{icon}</span>'
+            f'{label}{badge}<span class="caret">&#9656;</span></summary>'
+            f'<div class="subnav"><a class="{"on" if here and not system else ""}" '
+            f'href="{_esc(url(tenant, "systems"))}">All systems</a>{subs}</div></details>')
+
+
 def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
-           tenant: str = "", head: str = "") -> str:
+           tenant: str = "", head: str = "", system: str = "") -> str:
     """Sidebar, client switcher, then the page.
 
     The console used a horizontal tab bar and a SEPARATE client picker inside
@@ -1165,14 +1222,16 @@ def _shell(key: str, tab: str, title: str, body: str, suffix: str = "",
                f'<span class="dot"></span>All accounts</a>')
 
     badges = _badges(tenant)
+
+    def _badge(t: str) -> str:
+        n_ = badges.get(t, 0)
+        return (f'<span class="navbadge" title="{_BADGE_TITLES[t]}">{n_}</span>'
+                if n_ else "")
     nav = "".join(
+        _systems_nav(tenant, tab, system, label, i, _badge(t)) if t == "systems" else
         f'<a class="{"on" if t == tab else ""}" '
-        f'href="{_esc(url(tenant, t))}{suffix if t == tab else ""}"'
-        f'><span class="ico">{i}</span>{label}'
-        + (f'<span class="navbadge" title="{_BADGE_TITLES[t]}">'
-           f'{_n}</span>'
-           if (_n := badges.get(t, 0)) else "")
-        + '</a>'
+        f'href="{_joined(_esc(url(tenant, t)), suffix if t == tab else "")}"'
+        f'><span class="ico">{i}</span>{label}{_badge(t)}</a>'
         for t, label, i in _TABS)
 
     # How many decisions are waiting, FOR THIS ACCOUNT, on every page.
@@ -3766,7 +3825,7 @@ def _system_view(key: str, row, flash: str, ppage: int = 1,
 </details>"""
     return _shell(key, "systems", f"{row.name} — workflow",
                   tenant=row.tenant, body=body,
-                  suffix=f"&amp;system={_esc(row.key)}")
+                  suffix=f"&amp;system={_esc(row.key)}", system=row.key)
 
 
 #: A board of systems is a list like any other, and this one was the last
@@ -7370,13 +7429,35 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
     <form method="post" action="/admin/email_reference" style="margin:8px 0">
       <input type="hidden" name="key" value="{_esc(key)}">
       <input type="hidden" name="tenant" value="{_esc(tenant)}">
-      <input name="url" size="46" placeholder="https://reallygoodemails.com/emails/…">
-      <button type="submit"{" disabled" if running else ""}>Add this reference</button>
-      <span class="when">one email's page. It is read in words, recreated for
+      <textarea name="urls" rows="2" style="width:100%;max-width:520px"
+        placeholder="https://reallygoodemails.com/emails/… &mdash; one per line"></textarea><br>
+      <button type="submit"{" disabled" if running else ""}>Add these references</button>
+      <span class="when">one email's page per line. Each is read in words, recreated for
       {_esc(tenant)} with its own pictures and copy, and judged beside the
-      reference &mdash; the review lands on its own page.</span>
+      reference &mdash; in turn, and the review lands on its own page.</span>
     </form>""" + (f'<p class="when">running &mdash; {_esc(bg.get("detail") or "queued")}</p>'
                   if running else "")
+    # START OVER (owner, 2026-09-30): every design, for every account, with
+    # the links they were read from shown FIRST, so they can be added again
+    # and read by today's reader. Folded: it is the one press on this page
+    # that cannot be taken back.
+    links = list(dict.fromkeys(st["source_url"] for st in rows
+                               if str(st.get("source_url") or "").startswith("http")))
+    if rows:
+        add += f"""
+    <details class="startover"><summary>Start over &mdash; delete all {len(rows)} designs</summary>
+      <p class="when">Deletes every design in the shared library, for every account, with
+      the reference pictures they were read from, and clears each brand&rsquo;s standing
+      choice and taken-out list. The emails already made from them are kept.
+      {"Copy the links first &mdash; pasted into the box above, each is read again by today&rsquo;s reader and recreated." if links else ""}</p>
+      {f'<textarea readonly rows="{min(8, len(links) + 1)}" style="width:100%;max-width:520px">{_esc(chr(10).join(links))}</textarea><br>' if links else ""}
+      <form method="post" action="/admin/references_delete_all" class="inl"
+        onsubmit="return confirm('Delete all {len(rows)} designs, for every account? This cannot be undone.')">
+        <input type="hidden" name="key" value="{_esc(key)}">
+        <input type="hidden" name="tenant" value="{_esc(tenant)}">
+        <button class="btn danger"{" disabled" if running else ""}>Delete all {len(rows)} designs</button>
+      </form>
+    </details>"""
     pool = [i for i in items if "rotation" in i["states"] and "unusable" not in i["states"]]
     says = (f'every campaign is built on <b>{_esc(next((i["name"] for i in items if i["id"] == standing), ""))}</b>'
             if standing else
@@ -7396,7 +7477,7 @@ def render_reference(key: str, tenant: str, structure_id: str,
     flash = (f'<div class="note">{_esc(msg)}</div>' if msg else "") + (
         f'<div class="note err">{_esc(err)}</div>' if err else "")
     return _shell(key, "systems", "Design", flash + _reference_page(key, tenant, structure_id),
-                  tenant=tenant)
+                  tenant=tenant, system="campaign_email")
 
 
 def _reference_page(key: str, tenant: str, structure_id: str) -> str:

@@ -343,6 +343,103 @@ SABOTAGES = [
         "why": "the Header pages box on the Brand tab is typed into and "
                "thrown away",
     },
+    # Starting the design library over (owner, 2026-09-30), adding the links
+    # back several at a time, and the reader that says what it was handed.
+    {
+        "name": "start_over_deletes_nothing",
+        "file": "app/email_structures.py",
+        "find": "        rows = s.query(db.EmailStructure).all()",
+        "replace": "        rows = []  # SABOTAGE",
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "Delete all says it went and every design is still in the library",
+    },
+    {
+        "name": "start_over_takes_a_brands_own_picture",
+        "file": "app/email_structures.py",
+        "find": "                     if a.rights != kb.OWNED and a.kind != SWIPE_KIND]",
+        "replace": "                     if a.kind != SWIPE_KIND]  # SABOTAGE",
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "a brand's own photograph a design pointed at is deleted with "
+               "the references",
+    },
+    {
+        "name": "start_over_under_a_running_job",
+        "file": "app/web.py",
+        "find": "    busy = _es.design_work_in_flight()",
+        "replace": '    busy = ""  # SABOTAGE',
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "the library is deleted while a design job or a campaign email "
+               "is reading it",
+    },
+    {
+        "name": "the_links_go_with_the_designs",
+        "file": "app/admin_ui.py",
+        "find": '                               if str(st.get("source_url") or "").startswith("http")))',
+        "replace": "                               if False))  # SABOTAGE",
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "Start over deletes the designs without showing the links they "
+               "were read from, so nothing can be added back",
+    },
+    {
+        "name": "several_links_queue_one",
+        "file": "app/web.py",
+        "find": "        for u in todo:",
+        "replace": "        for u in todo[:1]:  # SABOTAGE",
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "a pasted list of references queues the first and says it "
+               "queued them all",
+    },
+    {
+        "name": "a_note_after_the_brief_fails_the_read",
+        "file": "app/recreate.py",
+        "find": '        if isinstance(val, dict) and "concept" in val and "sections" in val:',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_the_model_makes_the_email.py"],
+        "why": "a whole brief followed by a note is 'not a JSON object' and the "
+               "run fails",
+    },
+    {
+        "name": "a_raw_line_break_fails_a_reply",
+        "file": "app/recreate.py",
+        "find": "        return json.loads(m.group(0), strict=False)",
+        "replace": "        return json.loads(m.group(0))  # SABOTAGE",
+        "suites": ["test_the_model_makes_the_email.py"],
+        "why": "a reply with a line break inside a string reads as no answer",
+    },
+    {
+        "name": "the_failed_read_says_nothing_of_the_reply",
+        "file": "app/recreate.py",
+        "find": '        why = f"{why} — {_unread(reply.text, stop)}"',
+        "replace": "        why = why  # SABOTAGE",
+        "suites": ["test_the_model_makes_the_email.py"],
+        "why": "'the reader did not answer with a JSON object' and nothing of "
+               "what it did answer — the 2026-09-30 failure, undiagnosable again",
+    },
+    {
+        "name": "systems_is_a_plain_link_again",
+        "file": "app/admin_ui.py",
+        "find": '        _systems_nav(tenant, tab, system, label, i, _badge(t)) if t == "systems" else',
+        "replace": "        _systems_nav(tenant, tab, system, label, i, _badge(t)) if False else  # SABOTAGE",
+        "suites": ["test_console_frame.py"],
+        "why": "pressing Systems loads the board again to reach one system",
+    },
+    {
+        "name": "the_open_system_is_not_marked",
+        "file": "app/admin_ui.py",
+        "find": 'suffix=f"&amp;system={_esc(row.key)}", system=row.key)',
+        "replace": 'suffix=f"&amp;system={_esc(row.key)}")  # SABOTAGE',
+        "suites": ["test_console_frame.py"],
+        "why": "on a system's page the sidebar does not say which system it is",
+    },
+    {
+        "name": "the_view_is_glued_onto_the_path",
+        "file": "app/admin_ui.py",
+        "find": '    return href + ("&amp;" if "?" in href else "?") + rest',
+        "replace": "    return href + suffix  # SABOTAGE",
+        "suites": ["test_console_frame.py"],
+        "why": "the current tab's link reads /admin/baci/diagnostics&days=30 "
+               "and opens the Review page",
+    },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the
     # reason cut at "Validati"; and "audiences OR segments".

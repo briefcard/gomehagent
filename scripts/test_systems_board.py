@@ -142,6 +142,10 @@ def main() -> int:
                       "&page=2").text
     finally:
         admin_ui.SYSTEMS_PAGE = real_cap
+    # THE BOARD, not the frame: since 2026-09-30 the sidebar's Systems fold
+    # names every system of the account on every page
+    paged = paged.split('<div class="main">', 1)[-1]
+    page2 = page2.split('<div class="main">', 1)[-1]
     ck("a pager appears once there is more than one page",
        'class="pager"' in paged and "older &rarr;" in paged, "was unpaginated")
     ck("  and it reports the real depth",

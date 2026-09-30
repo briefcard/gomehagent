@@ -14,7 +14,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ## Coverage
 
-- HTTP routes: **259** (259 reached)
+- HTTP routes: **260** (260 reached)
 - Approval kinds: **14** (11 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
@@ -637,6 +637,8 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`brief`**(structure) → `str`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`can_hero`**(tenant) → `bool`  ·  **from nothing**
 - **`delete`**(structure_id) → `str`  ·  from `compliance.py`, `digest.py`, `email_harvest.py`, `embed.py`, `harvest.py`, `hosting.py`, `kb.py`, `media.py`, `ops_jobs.py`, `reset.py`, `shopify_webhooks.py`, `tenants.py`, `test_can_the_engines_read_us.py`, `test_canva.py`, `test_gbp_post.py`, `test_job_lease.py`, `test_keyword_progress.py`, `test_klaviyo.py`, `test_plan_mix.py`, `test_publish_gap.py`, `test_tenant_scope.py`, `test_toolcalls.py`, `web.py`
+- **`delete_all`**() → `dict`  ·  from `web.py`
+- **`design_work_in_flight`**() → `str`  ·  from `test_the_designs_shelf.py`, `web.py`
 - **`designate`**(tenant, structure_id?) → `str`  ·  from `test_the_designs_shelf.py`, `test_the_model_makes_the_email.py`, `web.py`
 - **`eligible`**(tenant, intent?, fmt?, recent_shapes?, recent_designs?) → `list[dict]`  ·  from `test_the_designs_shelf.py`
 - **`file_reference`**(asset_id, brief?, source_url?) → `dict`  ·  from `recreate.py`, `test_the_model_makes_the_email.py`
@@ -645,7 +647,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`mark_used`**(structure_id) → `None`  ·  from `skill_pack.py`
 - **`may_use`**(tenant, structure) → `tuple[bool, str]`  ·  from `admin_ui.py`
 - **`note_of`**(structure_id) → `str`  ·  from `admin_ui.py`, `test_the_designs_shelf.py`
-- **`out_for`**(tenant) → `set`  ·  from `admin_ui.py`
+- **`out_for`**(tenant) → `set`  ·  from `admin_ui.py`, `test_the_designs_shelf.py`
 - **`pick`**(tenant, intent?, fmt?, recent_shapes?, designated?, recent_designs?) → `dict`  ·  from `skill_pack.py`, `test_creative_seam.py`, `test_the_board_reaches_the_generator.py`, `test_the_designs_shelf.py`, `test_the_model_makes_the_email.py`
 - **`profile_of`**(blocks) → `dict`  ·  **from nothing**
 - **`reject`**(structure_id, by?) → `str`  ·  from `test_the_model_makes_the_email.py`, `web.py`
@@ -862,10 +864,10 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`again`**(job_id) → `dict`  ·  from `recreate_once.py`, `test_job_queue.py`, `web.py`
 - **`as_dict`**(row) → `dict`  ·  from `handoff.py`, `test_job_queue.py`
 - **`board`**(tenant, done?) → `dict`  ·  from `admin_ui.py`, `creative.py`, `test_article_review.py`, `test_keyword_attention.py`, `test_keywords.py`, `test_mute_replacement.py`, `test_plan_lifecycle.py`, `test_systems.py`, `test_the_board_reaches_the_generator.py`, `test_the_queue_is_visible.py`, `web.py`
-- **`cancel`**(job_id) → `str`  ·  from `web.py`
+- **`cancel`**(job_id) → `str`  ·  from `test_the_designs_shelf.py`, `web.py`
 - **`claim`**(tenant, holder) → `str`  ·  from `test_a_job_is_a_file_for_claude.py`, `test_creative_batch.py`, `test_job_queue.py`, `test_propose.py`, `test_the_model_takes_what_the_docs_say.py`, `test_the_queue_is_visible.py`, `web.py`
 - **`drain`**(tenant, holder, limit?) → `dict`  ·  from `test_a_run_that_made_nothing_says_why.py`, `test_article_review.py`, `test_connections_tab.py`, `test_gbp_listing.py`, `test_job_queue.py`, `test_plans.py`, `test_workflow_ui.py`
-- **`enqueue`**(tenant, kind_, payload?, system_key?, label?, dedupe?) → `dict`  ·  from `test_a_job_is_a_file_for_claude.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_a_run_that_made_nothing_says_why.py`, `test_brand_sources.py`, `test_creative_batch.py`, `test_job_queue.py`, `test_review_tab.py`, `test_the_model_takes_what_the_docs_say.py`, `test_the_queue_is_visible.py`, `test_whats_new_reaches_every_writer.py`, `topics.py`, `web.py`, `worker.py`
+- **`enqueue`**(tenant, kind_, payload?, system_key?, label?, dedupe?) → `dict`  ·  from `test_a_job_is_a_file_for_claude.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_a_run_that_made_nothing_says_why.py`, `test_brand_sources.py`, `test_creative_batch.py`, `test_job_queue.py`, `test_review_tab.py`, `test_the_designs_shelf.py`, `test_the_model_takes_what_the_docs_say.py`, `test_the_queue_is_visible.py`, `test_whats_new_reaches_every_writer.py`, `topics.py`, `web.py`, `worker.py`
 - **`finish`**(job_id, state, detail?, run_id?) → `None`  ·  from `test_a_job_is_a_file_for_claude.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_brand_sources.py`, `test_creative_batch.py`, `test_job_queue.py`, `test_review_tab.py`, `test_the_model_takes_what_the_docs_say.py`, `test_the_queue_is_visible.py`
 - **`heartbeat`**(job_id, detail?) → `None`  ·  from `test_creative_batch.py`, `test_job_queue.py`, `test_the_model_takes_what_the_docs_say.py`, `test_the_queue_is_visible.py`
 - **`kind`**(name) → `dict`  ·  **from nothing**
@@ -2003,6 +2005,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`reference_page`**(request, key?, tenant?, id?, ok?, err?) → `—`  ·  route `GET /admin/reference`  ·  **from nothing**
 - **`reference_rename`**(request, key?) → `—`  ·  route `POST /admin/reference_rename`  ·  **from nothing**
 - **`reference_rotation`**(request, key?) → `—`  ·  route `POST /admin/reference_rotation`  ·  **from nothing**
+- **`references_delete_all`**(request, key?) → `—`  ·  route `POST /admin/references_delete_all`  ·  **from nothing**
 - **`register_owner`**(key?, chat_id?, name?) → `dict`  ·  route `GET /admin/register_owner`  ·  **from nothing**
 - **`renotify`**(key?) → `dict`  ·  route `GET /admin/renotify`  ·  **from nothing**
 - **`repair_fingerprints`**(key?, tenant?, apply?) → `dict`  ·  route `GET /admin/repair_fingerprints`  ·  from `test_provenance.py`

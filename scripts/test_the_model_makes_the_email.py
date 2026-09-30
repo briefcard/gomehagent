@@ -200,6 +200,28 @@ def main() -> int:
     ck("no sections is refused by name", rc.brief_problem({**BRIEF, "sections": []}) == "the brief has no sections")
     ck("a section that does not say what it is is refused by name",
        rc.brief_problem({**BRIEF, "sections": [{"n": 1}]}) == "section 1 does not say what it is")
+    # A plan run, 2026-09-30: "the reader did not answer with a JSON object",
+    # and nothing of what it DID answer. The whole object is taken when a note
+    # follows it or a line break sits raw in a string; when there is still no
+    # brief, the failure says how the reply stopped, where its JSON breaks
+    # and how it began.
+    answers["email_brief"] = json.dumps(BRIEF) + "\n\nNote: the [footer] was cropped in the strips."
+    got = rc.brief(ref_id, tenant="baci")
+    ck("a note after the brief does not hide the brief", got["ok"], str(got.get("why")))
+    answers["email_brief"] = json.dumps({**BRIEF, "reference_text": "SAUCE THE MEAT\\nthen the rest"}).replace("\\\\n", "\n")
+    got = rc.brief(ref_id, tenant="baci")
+    ck("  nor a line break left raw inside a string", got["ok"], str(got.get("why")))
+    ck("  and every reply the maker reads takes one", rc._json('{"a": "x\ny"}') == {"a": "x\ny"})
+    answers["email_brief"] = json.dumps(BRIEF)[:-60] + '"}'
+    got = rc.brief(ref_id, tenant="baci")
+    ck("a reply that is not a brief says where its JSON breaks and how it began",
+       not got["ok"] and "its JSON breaks at line" in got["why"] and "it began: '{" in got["why"],
+       str(got.get("why"))[:200])
+    answers["email_brief"] = "I can't make out this image [it is blank]."
+    got = rc.brief(ref_id, tenant="baci")
+    ck("  and a reply with no JSON at all is quoted",
+       not got["ok"] and "it began: \"I can't make out" in got["why"], str(got.get("why"))[:200])
+    answers["email_brief"] = BRIEF
 
     print("— 1b. the concept is FORM, and a declared turn is the design working —")
     # The squeeze this closes: a brief whose concept named the REFERENCE's own

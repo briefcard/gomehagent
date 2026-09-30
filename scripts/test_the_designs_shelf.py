@@ -31,6 +31,7 @@ import os
 import re
 import sys
 import tempfile
+from urllib.parse import unquote
 
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'shelf.db')}"
 os.environ["APPROVAL_SECRET"] = "s3cret"
@@ -58,8 +59,9 @@ def _png(w=240, h=560):
 
 
 def _visible(html: str) -> str:
-    """The page as it LOOKS: the menus are folds, and a fold is shut."""
-    return re.sub(r'<details class="fix">.*?</details>', "", html, flags=re.S)
+    """The page as it LOOKS: the menus are folds, and a fold is shut — a
+    row's menu, and the one fold that starts the library over."""
+    return re.sub(r'<details class="(?:fix|startover)">.*?</details>', "", html, flags=re.S)
 
 
 def main() -> int:
@@ -271,6 +273,91 @@ def main() -> int:
     gone = c.get(f"/admin/reference?key={KEY}&tenant=baci&id=nope")
     ck("a design that is gone says so instead of rendering an empty page",
        gone.status_code == 200 and "No such design" in gone.text)
+
+    print("\n— start over: every design, with the links kept to add again —")
+    # Owner, 2026-09-30: "I'm going to delete all email references from the
+    # DB … so we can process them the way we have them set up in the later
+    # iterations."
+    from app import jobs, kb
+    left = [st["id"] for st in es.library()]
+    with db.SessionLocal() as s:
+        owned = db.KbAsset(tenant="baci", kind="image", subject="photo", rights=kb.OWNED,
+                           title="the brand's own table", url="https://cdn.example.test/own.jpg",
+                           review="approved")
+        swipe = db.KbAsset(tenant=es.SWIPE_TENANT, kind=es.SWIPE_KIND, subject="scene",
+                           rights=kb.REFERENCE, title="a swipe that never became a design",
+                           url="https://images.example.test/never.png", review="approved")
+        s.add_all([owned, swipe]); s.flush()
+        own_id, swipe_id = owned.id, swipe.id
+        s.get(db.EmailStructure, left[0]).source_asset_id = own_id
+        ref_ids = [s.get(db.EmailStructure, i).source_asset_id for i in left[1:]]
+        made = db.Recreation(tenant="baci", structure_id=left[1], status="kept")
+        s.add(made); s.flush(); made_id = made.id
+        s.commit()
+    es.designate("baci", left[2])
+    es.set_out("baci", left[3], True)
+    page = ui._structures_card(KEY, "baci", view={})
+    fold = re.search(r'<details class="startover">(.*?)</details>', page, re.S)
+    ck("the shelf offers to start over, folded shut",
+       fold is not None and f"Delete all {len(left)} designs" in fold.group(1))
+    ck("  and shows the links the designs were read from BEFORE they go",
+       fold is not None and "https://reallygoodemails.com/emails/0" in fold.group(1)
+       and "<textarea readonly" in fold.group(1))
+
+    busy = jobs.enqueue("eien", "email_recreate", payload={"mode": "run"})
+    r = c.post("/admin/references_delete_all", params={"key": KEY}, data={"tenant": "baci"},
+               follow_redirects=False)
+    ck("while a design job is queued for ANY account, nothing is deleted, and it says why",
+       r.status_code == 303 and "err=" in r.headers.get("location", "")
+       and "eien" in unquote(r.headers.get("location", ""))
+       and len(es.library()) == len(left))
+    jobs.cancel(busy["id"])
+    run_ = jobs.enqueue("baci", "system_run", system_key="campaign_email", payload={})
+    ck("  nor while a campaign email is being made", "campaign email" in es.design_work_in_flight())
+    jobs.cancel(run_["id"])
+
+    r = c.post("/admin/references_delete_all", params={"key": KEY}, data={"tenant": "baci"},
+               follow_redirects=False)
+    said = unquote(r.headers.get("location", ""))
+    ck("deleting all posts and says what went", r.status_code == 303
+       and f"deleted {len(left)} design(s)" in said, said[:160])
+    ck("  every design is gone from the library", es.library() == [])
+    with db.SessionLocal() as s:
+        ck("  with the reference pictures they were read from",
+           all(s.get(db.KbAsset, a) is None for a in ref_ids if a))
+        ck("  and the swipe that never became a design", s.get(db.KbAsset, swipe_id) is None)
+        ck("  but NEVER a brand's own picture a design pointed at",
+           s.get(db.KbAsset, own_id) is not None)
+        ck("  and the emails already made are kept", s.get(db.Recreation, made_id) is not None)
+    ck("  the standing choice and the taken-out list are cleared — they named designs that are gone",
+       es.standing_designation("baci") == "" and not es.out_for("baci"))
+    ck("  and the links come back in the answer, ready to paste",
+       "https://reallygoodemails.com/emails/1" in said)
+    ck("  a campaign now says the maker designs it, rather than failing on a design that is gone",
+       es.pick("baci")["structure"] is None and "designs this one itself" in es.pick("baci")["why"])
+    ck("  and the empty shelf offers no start-over",
+       'class="startover"' not in ui._structures_card(KEY, "baci", view={}))
+
+    print("\n— adding them again, several links in one press —")
+    r = c.post("/admin/email_reference", params={"key": KEY}, follow_redirects=False, data={
+        "tenant": "baci", "urls": "https://reallygoodemails.com/emails/a\n"
+                                  "reallygoodemails.com/emails/b\n"
+                                  "https://example.com/not-a-swipe\n"
+                                  "https://reallygoodemails.com/emails/a"})
+    said = unquote(r.headers.get("location", ""))
+    with db.SessionLocal() as s:
+        queued = sorted(str((j.payload or {}).get("url")) for j in s.query(db.JobQueue).filter(
+            db.JobQueue.tenant == "baci", db.JobQueue.kind == "email_recreate",
+            db.JobQueue.state == "queued").all())
+    ck("each good link is its own job, once",
+       queued == ["https://reallygoodemails.com/emails/a", "https://reallygoodemails.com/emails/b"],
+       str(queued))
+    ck("  and the one that is not a swipe is named, not dropped",
+       "queued 2 reference(s)" in said and "example.com/not-a-swipe" in said, said[:200])
+    r = c.post("/admin/email_reference", params={"key": KEY}, follow_redirects=False, data={
+        "tenant": "baci", "urls": "https://reallygoodemails.com/emails/a\nhttps://reallygoodemails.com/emails/b"})
+    ck("  pressing again queues nothing twice",
+       "nothing new queued; 2 already queued" in unquote(r.headers.get("location", "")))
 
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}\n  " + "\n  ".join(_fail))

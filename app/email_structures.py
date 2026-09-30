@@ -210,6 +210,60 @@ def delete(structure_id: str) -> str:
     return said + (f" — {', '.join(freed)} draw at random again" if freed else "")
 
 
+def delete_all() -> dict:
+    """START OVER. Owner, 2026-09-30: *"I'm going to delete all email
+    references from the DB … This way we can process them the way we have
+    them set up in the later iterations."* Every design in the shared
+    library goes, with the reference pictures they were read from (never a
+    brand's own picture) and every swipe filed on the board; every brand's
+    standing choice and taken-out list are cleared, since they name designs
+    that no longer exist. The recreations stay, for the reason `delete`
+    gives. `links` are the pages the designs were read from — added again,
+    each is read by today's reader. `{designs, pictures, links, brands}`."""
+    from . import kb, tenants
+    with db.SessionLocal() as s:
+        rows = s.query(db.EmailStructure).all()
+        links = list(dict.fromkeys(r.source_url for r in rows
+                                   if str(r.source_url or "").startswith("http")))
+        read_from = {r.source_asset_id for r in rows if r.source_asset_id}
+        for r in rows:
+            s.delete(r)
+        pics = [a for a in s.query(db.KbAsset).filter(db.KbAsset.kind == SWIPE_KIND).all()]
+        if read_from:
+            pics += [a for a in s.query(db.KbAsset).filter(db.KbAsset.id.in_(read_from)).all()
+                     if a.rights != kb.OWNED and a.kind != SWIPE_KIND]
+        for a in pics:
+            s.delete(a)
+        s.commit()
+    brands = []
+    for t in [t_.key for t_ in tenants.all_tenants(include_paused=True)]:
+        b = kb.brand(t)
+        visual = dict(getattr(b, "visual", None) or {}) if b else {}
+        if visual.get(DESIGNATED_FIELD) or visual.get(_OUT):
+            visual[DESIGNATED_FIELD], visual[_OUT] = "", []
+            kb.set_brand(t, visual=visual)
+            brands.append(t)
+    return {"designs": len(rows), "pictures": len(pics), "links": links, "brands": brands}
+
+
+def design_work_in_flight() -> str:
+    """What would be building on a design while it was deleted — a design
+    job, or a campaign email run, queued or running for any account — as a
+    sentence, or "" when nothing is. The library is shared, so every
+    account's queue counts."""
+    from . import jobs
+    with db.SessionLocal() as s:
+        busy = (s.query(db.JobQueue)
+                .filter(db.JobQueue.state.in_(jobs.IN_FLIGHT),
+                        (db.JobQueue.kind == "email_recreate")
+                        | ((db.JobQueue.kind == "system_run")
+                           & (db.JobQueue.system_key == "campaign_email")))
+                .all())
+        said = sorted({f"{'a design job' if j.kind == 'email_recreate' else 'a campaign email'}"
+                       f" for {j.tenant} is {j.state}" for j in busy})
+    return "; ".join(said)
+
+
 #: WHICH DESIGNS THIS BRAND HAS TAKEN OUT. Kept per brand, because the library
 #: is shared and the decision is not: "not this one" for Baci said nothing
 #: about Eien, and until 2026-09-23 it rejected the design for every account

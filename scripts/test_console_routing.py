@@ -102,7 +102,7 @@ def main() -> int:
         ck(f"  {path} answers", got.status_code == 200, str(got.status_code))
     room = c.get("/admin/baci/systems/campaign_email/designs", headers=BROWSER)
     ck("the room named in the PATH is the room that renders",
-       "Designs" in room.text and "Add this reference" in room.text)
+       "Designs" in room.text and "Add these references" in room.text)
     one = c.get(f"/admin/baci/systems/campaign_email/designs/{design}", headers=BROWSER)
     ck("  and one design has an address of its own that says what it is",
        "A design" in one.text and "every design" in one.text)

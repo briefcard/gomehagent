@@ -1423,15 +1423,68 @@ async def email_reference(request: Request, key: str = Depends(admin_key)):
         return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
-    url, why = _es.swipe_url(str(form.get("url", "")))
+    # SEVERAL AT ONCE (owner, 2026-09-30, starting the library over): one
+    # link per line, each its own job, so a restart stops one reference and
+    # not the batch. A link already queued or running is not queued twice.
+    import re
+    raw = [x for x in re.split(r"\s+", f'{form.get("urls", "")} {form.get("url", "")}') if x]
+    raw = list(dict.fromkeys(raw))[:REFERENCES_PER_PRESS]
+    checked = [(x,) + _es.swipe_url(x) for x in raw]
+    good = list(dict.fromkeys(u for _x, u, _w in checked if u))
+    bad = [f"{x} ({w})" for x, u, w in checked if not u]
     if not tenant:
         arg = ("err", "a brand is needed")
-    elif not url:
-        arg = ("err", why)
-    else:
+    elif not good:
+        arg = ("err", "; ".join(bad) or "no link")
+    elif len(raw) == 1:
         got = _jobs.enqueue(tenant, "email_recreate", payload={
-            "mode": "swipe", "url": url, "entity_key": str(form.get("entity", ""))})
+            "mode": "swipe", "url": good[0], "entity_key": str(form.get("entity", ""))})
         arg = _queued(got, "reading the reference and recreating it for this brand")
+    else:
+        with db.SessionLocal() as s:
+            open_ = {str((j.payload or {}).get("url") or "") for j in s.query(db.JobQueue).filter(
+                db.JobQueue.tenant == tenant, db.JobQueue.kind == "email_recreate",
+                db.JobQueue.state.in_(_jobs.IN_FLIGHT)).all()}
+        todo = [u for u in good if u not in open_]
+        for u in todo:
+            _jobs.enqueue(tenant, "email_recreate", dedupe=False, payload={
+                "mode": "swipe", "url": u, "entity_key": str(form.get("entity", ""))})
+        arg = ("ok", (f"queued {len(todo)} reference(s) — each is read, recreated for {tenant} "
+                      f"and judged in turn, and lands here when it is done" if todo else
+                      "nothing new queued")
+                     + (f"; {len(good) - len(todo)} already queued" if len(good) > len(todo) else "")
+                     + (f"; not queued: {'; '.join(bad)}" if bad else ""))
+    return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
+
+
+#: How many links one press may queue — each is a reference read, a
+#: recreation and a judge, so a pasted page of links is a bill, not a list.
+REFERENCES_PER_PRESS = 30
+
+
+@app.post("/admin/references_delete_all")
+async def references_delete_all(request: Request, key: str = Depends(admin_key)):
+    """START OVER: every design in the shared library, for every account,
+    with the reference pictures they were read from (`email_structures.
+    delete_all`). Refused while a design job or a campaign email is queued
+    or running anywhere — that work is reading the library."""
+    from fastapi.responses import RedirectResponse
+
+    from . import email_structures as _es
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    busy = _es.design_work_in_flight()
+    if busy:
+        arg = ("err", f"nothing was deleted — {busy}; delete when it has finished")
+    else:
+        got = _es.delete_all()
+        arg = ("ok", f"deleted {got['designs']} design(s) and {got['pictures']} reference "
+                     f"picture(s)" + (f"; {', '.join(got['brands'])} draw at random again"
+                                      if got["brands"] else "")
+                     + (f". To read them again, paste these into Add references: "
+                        f"{' '.join(got['links'])}" if got["links"] else ""))
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
 
