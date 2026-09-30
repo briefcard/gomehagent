@@ -33,7 +33,8 @@ def spy(jobs):
     seen: list[dict] = []
     real = jobs.enqueue
 
-    def fake(tenant, kind_, *, payload=None, system_key="", label="", dedupe=True):
+    def fake(tenant, kind_, *, payload=None, system_key="", label="", dedupe=True,
+             dedupe_on=()):
         no = _refuse(jobs, kind_)
         if no:
             return no
@@ -55,7 +56,8 @@ def run_now(jobs):
     seen: list[dict] = []
     real = jobs.enqueue
 
-    def fake(tenant, kind_, *, payload=None, system_key="", label="", dedupe=True):
+    def fake(tenant, kind_, *, payload=None, system_key="", label="", dedupe=True,
+             dedupe_on=()):
         no = _refuse(jobs, kind_)
         if no:
             return no

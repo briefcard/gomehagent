@@ -215,7 +215,8 @@ def _resolve(target: str):
 # ---------------------------------------------------------------------------
 
 def enqueue(tenant: str, kind_: str, *, payload: dict | None = None,
-            system_key: str = "", label: str = "", dedupe: bool = True) -> dict:
+            system_key: str = "", label: str = "", dedupe: bool = True,
+            dedupe_on: tuple = ()) -> dict:
     """Put work on the queue. `{ok, id, why, already}`.
 
     `dedupe` refuses a second identical job while one is still outstanding.
@@ -223,19 +224,29 @@ def enqueue(tenant: str, kind_: str, *, payload: dict | None = None,
     retryable, the expensive one: two runs, two model calls, two approvals
     for one intent. The existing job is returned rather than an error,
     because "it is already running" is the answer the presser wanted.
+
+    `dedupe_on` names the payload keys that make two jobs THE SAME one.
+    Empty, any open job of the kind counts — right for a system's run, and
+    wrong for design work: a second reference is not a double press of the
+    first, and was refused as "already running" (owner, 2026-09-30: "why
+    doesn't it let me add another reference run to the queue while there is
+    one running?"). The queue already takes one job at a time, in order.
     """
     if not tenant:
         return {"ok": False, "why": "a job belongs to an account", "id": ""}
     if kind_ not in KINDS:
         return {"ok": False, "why": f"no such kind of job: {kind_}", "id": ""}
+    mine = dict(payload or {})
     with db.SessionLocal() as s:
         if dedupe:
-            open_ = (s.query(db.JobQueue)
-                     .filter(db.JobQueue.tenant == tenant,
-                             db.JobQueue.kind == kind_,
-                             db.JobQueue.system_key == (system_key or ""),
-                             db.JobQueue.state.in_(("queued", "running")))
-                     .order_by(db.JobQueue.created_at.desc()).first())
+            open_ = next((r for r in (
+                s.query(db.JobQueue)
+                .filter(db.JobQueue.tenant == tenant,
+                        db.JobQueue.kind == kind_,
+                        db.JobQueue.system_key == (system_key or ""),
+                        db.JobQueue.state.in_(("queued", "running")))
+                .order_by(db.JobQueue.created_at.desc()).all())
+                if all((r.payload or {}).get(k) == mine.get(k) for k in dedupe_on)), None)
             if open_ is not None:
                 return {"ok": True, "id": open_.id, "already": True,
                         "why": ("it is already running" if open_.state == "running"
@@ -291,6 +302,35 @@ def _line(s):
     return (s.query(db.JobQueue)
             .filter(db.JobQueue.state == "queued", db.JobQueue.tenant.in_(active))
             .order_by(db.JobQueue.created_at.asc()))
+
+
+def _memory() -> str:
+    """This process's memory as the log reads it, now and at its peak. An
+    out-of-memory kill prints nothing of its own — the worker restarted
+    with no word why (owner, 2026-09-30: "my worker keeps crashing") — so
+    the last of these lines before a restart says how high it got, and in
+    which step."""
+    try:
+        with open("/proc/self/status") as f:
+            got = dict(ln.split(":", 1) for ln in f if ln.startswith(("VmRSS", "VmHWM")))
+        return (f"memory {int(got['VmRSS'].split()[0]) // 1024} MB, "
+                f"peak {int(got['VmHWM'].split()[0]) // 1024} MB")
+    except (OSError, KeyError, ValueError):
+        try:
+            import resource
+            import sys
+            peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+            return f"memory peak {peak // (1 << 20) if sys.platform == 'darwin' else peak // 1024} MB"
+        except Exception:                                        # noqa: BLE001
+            return "memory unread"
+
+
+def _step(job_id: str, text) -> None:
+    """One step of a job: on its row for the page, and in the log with the
+    memory it has reached."""
+    said = str(text or "")[:600]
+    heartbeat(job_id, said)
+    log.info("job %s: %s · %s", job_id[:8], said[:160], _memory())
 
 
 def heartbeat(job_id: str, detail: str | None = None) -> None:
@@ -602,7 +642,7 @@ def run_one(job_id: str) -> dict:
     # "in the worker I'm not seeing the run").
     import time as _time
     t0 = _time.monotonic()
-    log.info("job %s: %s for %s — started", job_id[:8], kind_, tenant)
+    log.info("job %s: %s for %s — started · %s", job_id[:8], kind_, tenant, _memory())
 
     stop = threading.Event()
 
@@ -623,11 +663,11 @@ def run_one(job_id: str) -> dict:
         except (TypeError, ValueError):
             takes = False
         if takes and "progress" not in payload:
-            payload["progress"] = lambda text: heartbeat(job_id, str(text or "")[:600])
+            payload["progress"] = lambda text: _step(job_id, text)
         result = fn(tenant=tenant, **payload)
     except Exception as exc:                                     # noqa: BLE001
-        log.exception("job %s: %s for %s — failed after %ds", job_id[:8], kind_,
-                      tenant, _time.monotonic() - t0)
+        log.exception("job %s: %s for %s — failed after %ds · %s", job_id[:8], kind_,
+                      tenant, _time.monotonic() - t0, _memory())
         finish(job_id, "failed", f"{exc.__class__.__name__}: {exc}")
         return {"ok": False, "state": "failed", "detail": str(exc)[:300]}
     finally:
@@ -640,8 +680,8 @@ def run_one(job_id: str) -> dict:
     status = str((result or {}).get("status") or "") if isinstance(result, dict) else ""
     state = "failed" if status in ("failed", "refused", "blocked") else "done"
     finish(job_id, state, _summary(result), run_id=run_id)
-    log.info("job %s: %s for %s — %s after %ds: %s", job_id[:8], kind_, tenant,
-             state, _time.monotonic() - t0, _summary(result)[:200])
+    log.info("job %s: %s for %s — %s after %ds · %s: %s", job_id[:8], kind_, tenant,
+             state, _time.monotonic() - t0, _memory(), _summary(result)[:200])
     return {"ok": state == "done", "state": state, "detail": _summary(result)}
 
 

@@ -1219,7 +1219,8 @@ async def email_recreate(request: Request, key: str = Depends(admin_key)):
         arg = ("err", "a brand and a structure are needed")
     else:
         reread = bool(str(form.get("reread") or ""))
-        got = _jobs.enqueue(tenant, "email_recreate", payload={
+        # the same design twice is a double press; another design waits its turn
+        got = _jobs.enqueue(tenant, "email_recreate", dedupe_on=("mode", "structure"), payload={
             "mode": "again" if reread else "run", "structure": structure, "entity_key": entity,
             "seed": f"{structure}:{tenant}:{db.utcnow().isoformat(timespec='minutes')}"})
         arg = _queued(got, "reading the reference again and recreating" if reread else "recreating")
@@ -1437,22 +1438,19 @@ async def email_reference(request: Request, key: str = Depends(admin_key)):
     elif not good:
         arg = ("err", "; ".join(bad) or "no link")
     elif len(raw) == 1:
-        got = _jobs.enqueue(tenant, "email_recreate", payload={
+        got = _jobs.enqueue(tenant, "email_recreate", dedupe_on=("mode", "url"), payload={
             "mode": "swipe", "url": good[0], "entity_key": str(form.get("entity", ""))})
         arg = _queued(got, "reading the reference and recreating it for this brand")
     else:
-        with db.SessionLocal() as s:
-            open_ = {str((j.payload or {}).get("url") or "") for j in s.query(db.JobQueue).filter(
-                db.JobQueue.tenant == tenant, db.JobQueue.kind == "email_recreate",
-                db.JobQueue.state.in_(_jobs.IN_FLIGHT)).all()}
-        todo = [u for u in good if u not in open_]
-        for u in todo:
-            _jobs.enqueue(tenant, "email_recreate", dedupe=False, payload={
-                "mode": "swipe", "url": u, "entity_key": str(form.get("entity", ""))})
-        arg = ("ok", (f"queued {len(todo)} reference(s) — each is read, recreated for {tenant} "
-                      f"and judged in turn, and lands here when it is done" if todo else
+        put = [_jobs.enqueue(tenant, "email_recreate", dedupe_on=("mode", "url"), payload={
+                   "mode": "swipe", "url": u, "entity_key": str(form.get("entity", ""))})
+               for u in good]
+        n_new = sum(1 for g in put if g.get("ok") and not g.get("already"))
+        n_had = sum(1 for g in put if g.get("already"))
+        arg = ("ok", (f"queued {n_new} reference(s) — each is read, recreated for {tenant} "
+                      f"and judged in turn, and lands here when it is done" if n_new else
                       "nothing new queued")
-                     + (f"; {len(good) - len(todo)} already queued" if len(good) > len(todo) else "")
+                     + (f"; {n_had} already queued" if n_had else "")
                      + (f"; not queued: {'; '.join(bad)}" if bad else ""))
     return RedirectResponse(_designs_back(tenant, str(form.get("key") or ""), arg), 303)
 
@@ -1746,7 +1744,8 @@ def admin_email_structure(key: str = Depends(admin_key), tenant: str = "",
         # is made now if none exists, so the room shows it.
         from . import recreate
         if recreate.latest(id, tenant) is None:
-            _jobs.enqueue(tenant, "email_recreate", payload={"mode": "run", "structure": id})
+            _jobs.enqueue(tenant, "email_recreate", dedupe_on=("mode", "structure"),
+                          payload={"mode": "run", "structure": id})
     if not ui:
         return {"id": id, "said": said}
     return RedirectResponse(_designs_back(tenant, key, ("ok", said)), 303)

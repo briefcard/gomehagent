@@ -528,6 +528,21 @@ def deadline_alerts() -> None:
         )
 
 
+def _inbox_failed(what: str, alias: str) -> None:
+    """One inbox's failure, said once and plainly. Google refusing a saved
+    login is a reconnect, not a crash — and its thirty-line traceback every
+    five minutes read as the worker falling over (owner, 2026-09-30: "my
+    worker keeps crashing"). Anything else keeps its traceback."""
+    import sys
+    exc = sys.exc_info()[1]
+    if type(exc).__name__ == "RefreshError":
+        log.warning("%s %s: Google refused the saved login (%s) — reconnect its Google "
+                    "account on Connections; the other inboxes carry on", what, alias,
+                    str(exc.args[0] if exc.args else exc)[:120])
+    else:
+        log.exception("%s %s failed", what, alias)
+
+
 def poll_all() -> None:
     new_approvals: list[str] = []
     for alias, tenant in inboxes():
@@ -535,7 +550,7 @@ def poll_all() -> None:
             process_emails(alias, gmail_client.fetch_unread(alias),
                            new_approvals, tenant=tenant)
         except Exception:  # noqa: BLE001 — one bad inbox must not kill the loop
-            log.exception("inbox %s failed", alias)
+            _inbox_failed("inbox", alias)
     # NOTE: no notification here — approvals.notify_pending runs on its own
     # schedule so Gomeh gets at most one batch email per APPROVAL_BATCH_MINUTES.
 
@@ -551,7 +566,7 @@ def backlog_sweep() -> None:
                      alias, tenant or "unattributed", len(emails))
             process_emails(alias, emails, new_approvals, tenant=tenant)
         except Exception:  # noqa: BLE001
-            log.exception("backlog sweep %s failed", alias)
+            _inbox_failed("backlog sweep", alias)
     if new_approvals:
         approvals.notify_pending(
             title=f"[Assistant · BACKLOG] {len(new_approvals)} unanswered emails — drafts ready",

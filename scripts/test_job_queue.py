@@ -457,6 +457,72 @@ def main() -> int:
        _state(redo) == "queued")
     ck("  and another worker's job is not touched", _state(other) == "running")
 
+    print("\n— two different jobs of one kind are two jobs (2026-09-30) —")
+    # "why doesn't it let me add another reference run to the queue while
+    # there is one running?" — every design job counted as the same one.
+    a1 = jobs.enqueue("eien", "_t_ok", payload={"url": "a"}, dedupe_on=("url",))
+    b1 = jobs.enqueue("eien", "_t_ok", payload={"url": "b"}, dedupe_on=("url",))
+    a2 = jobs.enqueue("eien", "_t_ok", payload={"url": "a"}, dedupe_on=("url",))
+    ck("a second job naming something else is queued behind the first",
+       b1["id"] != a1["id"] and not b1.get("already"))
+    ck("  the same thing pressed twice is still one job",
+       a2.get("already") and a2["id"] == a1["id"])
+    ck("  and with nothing named, any open job of the kind is the same one, as before",
+       jobs.enqueue("eien", "_t_ok", payload={"url": "c"}).get("already"))
+
+    print("\n— the log says how much memory each step of a job reached —")
+    # An out-of-memory kill prints nothing (owner, 2026-09-30: "my worker
+    # keeps crashing"); the last of these lines says how high it got.
+    import logging
+
+    class _Keep(logging.Handler):
+        def __init__(self):
+            super().__init__()
+            self.got = []
+
+        def emit(self, record):
+            self.got.append(record)
+
+    keep = _Keep()
+    logging.getLogger("jobs").addHandler(keep)
+    logging.getLogger("jobs").setLevel(logging.INFO)
+
+    def _steps(tenant, progress=None, **kw):
+        progress("reading the reference")
+        progress("recreating it")
+        return {"status": "done"}
+    jobs.KINDS["_t_steps"] = {"what": "a job with steps", "target": "t:steps", "retryable": False}
+    was = jobs._resolve
+    jobs._resolve = lambda target: _steps if target == "t:steps" else was(target)
+    sid = jobs.enqueue("coverings", "_t_steps")["id"]
+    jobs.claim("coverings", "instance-A")
+    jobs.run_one(sid)
+    lines = [r.getMessage() for r in keep.got if sid[:8] in r.getMessage()]
+    ck("its start, each step and its end carry the worker's memory",
+       len(lines) >= 4 and all(" MB" in ln for ln in lines)
+       and any("reading the reference" in ln for ln in lines), "\n    ".join(lines)[:300])
+
+    print("\n— a refused Google login is one plain line, not a traceback —")
+    wkeep = _Keep()
+    logging.getLogger(worker.log.name).addHandler(wkeep)
+
+    class RefreshError(Exception):
+        pass
+    try:
+        raise RefreshError("unauthorized_client: Unauthorized", {"error": "unauthorized_client"})
+    except Exception:
+        worker._inbox_failed("inbox", "personal")
+    try:
+        raise ValueError("something else broke")
+    except Exception:
+        worker._inbox_failed("inbox", "baci")
+    said = [(r.levelname, r.getMessage(), r.exc_info) for r in wkeep.got]
+    ck("the refused login says what to do, with no traceback",
+       any(lv == "WARNING" and "reconnect" in m and "unauthorized_client" in m and not ex
+           for lv, m, ex in said), str(said)[:240])
+    ck("  and any other failure keeps its traceback",
+       any("baci failed" in m and ex for _lv, m, ex in said))
+
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}")
     return 1 if _fail else 0

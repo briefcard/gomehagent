@@ -383,8 +383,8 @@ SABOTAGES = [
     {
         "name": "several_links_queue_one",
         "file": "app/web.py",
-        "find": "        for u in todo:",
-        "replace": "        for u in todo[:1]:  # SABOTAGE",
+        "find": "               for u in good]",
+        "replace": "               for u in good[:1]]  # SABOTAGE",
         "suites": ["test_the_designs_shelf.py"],
         "why": "a pasted list of references queues the first and says it "
                "queued them all",
@@ -439,6 +439,41 @@ SABOTAGES = [
         "suites": ["test_console_frame.py"],
         "why": "the current tab's link reads /admin/baci/diagnostics&days=30 "
                "and opens the Review page",
+    },
+    {
+        "name": "every_design_job_is_the_same_job",
+        "file": "app/jobs.py",
+        "find": "                if all((r.payload or {}).get(k) == mine.get(k) for k in dedupe_on)), None)",
+        "replace": "                if True), None)  # SABOTAGE",
+        "suites": ["test_job_queue.py", "test_the_designs_shelf.py"],
+        "why": "a second reference pressed while one runs is refused as "
+               "'already running' and never queued",
+    },
+    {
+        "name": "add_is_grey_while_one_runs",
+        "file": "app/admin_ui.py",
+        "find": '      <button type="submit">Add these references</button>',
+        "replace": '      <button type="submit" disabled>Add these references</button><!-- # SABOTAGE -->',
+        "suites": ["test_the_designs_shelf.py"],
+        "why": "the Add button cannot be pressed while a design job runs",
+    },
+    {
+        "name": "the_job_log_carries_no_memory",
+        "file": "app/jobs.py",
+        "find": '    log.info("job %s: %s · %s", job_id[:8], said[:160], _memory())',
+        "replace": '    log.info("job %s: %s", job_id[:8], said[:160])  # SABOTAGE',
+        "suites": ["test_job_queue.py"],
+        "why": "a worker killed for its memory restarts with nothing in the "
+               "log to say how high it got",
+    },
+    {
+        "name": "a_refused_login_is_a_traceback_again",
+        "file": "app/worker.py",
+        "find": '    if type(exc).__name__ == "RefreshError":',
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_job_queue.py"],
+        "why": "one inbox needing a reconnect prints thirty lines every five "
+               "minutes and reads as the worker crashing",
     },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the
@@ -910,7 +945,7 @@ SABOTAGES = [
     {
         "name": 'approving_a_reference_starts_its_review',
         "file": 'app/web.py',
-        "find": '        if recreate.latest(id, tenant) is None:\n            _jobs.enqueue(tenant, "email_recreate", payload={"mode": "run", "structure": id})\n',
+        "find": '        if recreate.latest(id, tenant) is None:\n            _jobs.enqueue(tenant, "email_recreate", dedupe_on=("mode", "structure"),\n                          payload={"mode": "run", "structure": id})\n',
         "replace": '        if False:\n            pass\n',
         "suites": ['test_the_model_makes_the_email.py'],
         "why": "an approved reference sits in the room with no review until somebody finds another button — the step the owner asked to remove",

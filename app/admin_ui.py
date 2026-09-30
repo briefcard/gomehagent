@@ -7040,6 +7040,35 @@ SHELF_PAGE = 8
 SHELF_SORTS = (("recent", "newest first"), ("used", "most used"), ("name", "by name"))
 
 
+def _design_queue(tenant: str) -> dict:
+    """THE DESIGN WORK IN THE AIR for this brand — what is running and how
+    many wait behind it. The queue takes them one at a time, in order, so a
+    press while one runs is a place in line, never a greyed-out button
+    (owner, 2026-09-30: "why doesn't it let me add another reference run to
+    the queue while there is one running?")."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.JobQueue)
+                .filter(db.JobQueue.tenant == tenant, db.JobQueue.kind == "email_recreate",
+                        db.JobQueue.state.in_(_jobs.IN_FLIGHT))
+                .order_by(db.JobQueue.created_at.asc()).all())
+        run = [r for r in rows if r.state == "running"]
+        return {"busy": bool(rows), "running": len(run),
+                "detail": str(run[0].detail or "") if run else "",
+                "waiting": sum(1 for r in rows if r.state == "queued")}
+
+
+def _design_queue_line(q: dict) -> str:
+    if not q["busy"]:
+        return ""
+    if q["running"]:
+        said = ((f'{q["running"]} running &mdash; one is ' if q["running"] > 1 else "running &mdash; ")
+                + _esc(q["detail"] or "starting")
+                + (f'; {q["waiting"]} more waiting their turn' if q["waiting"] else ""))
+    else:
+        said = f'{q["waiting"]} waiting for a worker'
+    return f'<p class="when">{said}. More can be added &mdash; each waits its turn.</p>'
+
+
 def _shelf(key: str, *, title: str, says: str, add: str, items: list, view: dict,
            back: str, states: tuple = ()) -> str:
     """ONE SHELF FOR EVERY KIND OF REFERENCE — the email designs today, the
@@ -7199,9 +7228,7 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
     if concept and concept[:120] != (st.get("name") or "")[:120]:
         # said once: a design named by its concept does not repeat it
         brief_line = f'<br><span class="mut">brief: {_esc(concept)}</span>'
-    bg = _jobs.status(tenant, "email_recreate")
     last = recreate.latest(st["id"], tenant)
-    running = bg.get("state") in _jobs.IN_FLIGHT
     ents = kb.entities(tenant)[:24]
     about = ('<select name="entity" style="max-width:260px"><option value="">the brand</option>'
              + "".join(f'<option value="{_esc(e.key)}">{_esc(e.name)}</option>' for e in ents)
@@ -7210,12 +7237,10 @@ def _recreation_block(key: str, tenant: str, st: dict, shot: dict | None) -> str
             f'<input type="hidden" name="key" value="{_esc(key)}">'
             f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
             f'<input type="hidden" name="structure" value="{_esc(st["id"])}">'
-            f'about {about} <button type="submit" class="sec"'
-            + (" disabled" if running else "") + '>Recreate again</button> '
-            '<button type="submit" name="reread" value="1" class="sec"'
-            + (" disabled" if running else "") + '>Read the reference again</button></form>')
-    if running:
-        form += f' <span class="when">running — {_esc(bg.get("detail") or "")}</span>'
+            f'about {about} <button type="submit" class="sec">Recreate again</button> '
+            '<button type="submit" name="reread" value="1" class="sec">'
+            'Read the reference again</button></form>'
+            + _design_queue_line(_design_queue(tenant)))
     # CHOOSE, where the review is: into the rotation, or not; and the standing
     # choice for every campaign of this brand.
     base = f'/admin/email_structure?key={_esc(key)}&amp;tenant={_esc(tenant)}&amp;id={_esc(st["id"])}'
@@ -7323,8 +7348,8 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
     rows = _es.library()
     standing = _es_standing(tenant)
     taken_out = _es.out_for(tenant)
-    bg = _jobs.status(tenant, "email_recreate")
-    running = bg.get("state") in _jobs.IN_FLIGHT
+    queue = _design_queue(tenant)
+    running = queue["busy"]
     base = url(tenant, "systems", "campaign_email", "designs")
     shots = {}
     with db.SessionLocal() as s:
@@ -7343,7 +7368,6 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
                 + f'<input type="hidden" name="key" value="{_esc(key)}">'
                 + f'<input type="hidden" name="tenant" value="{_esc(tenant)}">' + hid
                 + f'<button class="{cls}"{f" title={title!r}" if title else ""}'
-                + (" disabled" if running and action.endswith("email_recreate") else "")
                 + f">{_esc(label)}</button></form>")
 
     items = []
@@ -7431,12 +7455,11 @@ def _structures_card(key: str, tenant: str, preview_entity: str = "",
       <input type="hidden" name="tenant" value="{_esc(tenant)}">
       <textarea name="urls" rows="2" style="width:100%;max-width:520px"
         placeholder="https://reallygoodemails.com/emails/… &mdash; one per line"></textarea><br>
-      <button type="submit"{" disabled" if running else ""}>Add these references</button>
+      <button type="submit">Add these references</button>
       <span class="when">one email's page per line. Each is read in words, recreated for
       {_esc(tenant)} with its own pictures and copy, and judged beside the
       reference &mdash; in turn, and the review lands on its own page.</span>
-    </form>""" + (f'<p class="when">running &mdash; {_esc(bg.get("detail") or "queued")}</p>'
-                  if running else "")
+    </form>""" + _design_queue_line(queue)
     # START OVER (owner, 2026-09-30): every design, for every account, with
     # the links they were read from shown FIRST, so they can be added again
     # and read by today's reader. Folded: it is the one press on this page

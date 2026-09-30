@@ -359,6 +359,51 @@ def main() -> int:
     ck("  pressing again queues nothing twice",
        "nothing new queued; 2 already queued" in unquote(r.headers.get("location", "")))
 
+    print("\n— another while one runs: a place in line, not a grey button —")
+    # Owner, 2026-09-30: "why doesn't it let me add another reference run to
+    # the queue while there is one running?"
+    with db.SessionLocal() as s:
+        first = (s.query(db.JobQueue).filter(db.JobQueue.tenant == "baci",
+                                             db.JobQueue.kind == "email_recreate")
+                 .order_by(db.JobQueue.created_at).first())
+        first.state, first.detail = "running", "reading the reference into a brief"
+        x = db.EmailStructure(name="Design X", source="swipe", review="approved",
+                              sequence=["hero", "cta"], brief={"concept": "x"})
+        y = db.EmailStructure(name="Design Y", source="swipe", review="approved",
+                              sequence=["hero", "cta"], brief={"concept": "y"})
+        s.add_all([x, y]); s.commit()
+        x_id, y_id = x.id, y.id
+    page = ui._structures_card(KEY, "baci", view={})
+    ck("Add stays pressable while a design job runs",
+       "Add these references</button>" in page
+       and not re.search(r"<button[^>]*disabled[^>]*>Add these references", page))
+    ck("  and so does every design's Recreate",
+       not re.search(r"<button[^>]*disabled[^>]*>(Recreate|Read the reference)", page))
+    ck("  the page says what runs and how many wait behind it",
+       "running &mdash; reading the reference into a brief; 1 more waiting their turn" in page,
+       re.search(r'<p class="when">[^<]*', page).group(0)[:160] if re.search(r'<p class="when">[^<]*', page) else "")
+
+    def _n_jobs():
+        with db.SessionLocal() as s:
+            return s.query(db.JobQueue).filter(db.JobQueue.tenant == "baci",
+                                               db.JobQueue.kind == "email_recreate",
+                                               db.JobQueue.state.in_(jobs.IN_FLIGHT)).count()
+    before = _n_jobs()
+    r = c.post("/admin/email_reference", params={"key": KEY}, follow_redirects=False,
+               data={"tenant": "baci", "url": "https://reallygoodemails.com/emails/c"})
+    said = unquote(r.headers.get("location", ""))
+    ck("one new link while another runs is queued behind it, not refused",
+       _n_jobs() == before + 1 and "queued" in said and "already" not in said, said[-160:])
+    r = c.post("/admin/email_reference", params={"key": KEY}, follow_redirects=False,
+               data={"tenant": "baci", "url": "https://reallygoodemails.com/emails/c"})
+    ck("  the same link pressed twice is still one job",
+       _n_jobs() == before + 1 and "already" in unquote(r.headers.get("location", "")))
+    for sid in (x_id, y_id, x_id):
+        r = c.post("/admin/email_recreate", params={"key": KEY}, follow_redirects=False,
+                   data={"tenant": "baci", "structure": sid})
+    ck("recreating a second design while the first waits queues both, the same one once",
+       _n_jobs() == before + 3 and "already" in unquote(r.headers.get("location", "")))
+
     print()
     print("PASS" if not _fail else f"FAILED: {len(_fail)}\n  " + "\n  ".join(_fail))
     return 1 if _fail else 0
