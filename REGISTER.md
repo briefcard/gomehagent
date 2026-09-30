@@ -201,7 +201,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`creative_bar`**() → `int`  ·  **from nothing**
 - **`entity_select`**(tenant, current?, name?, blank?, multiple?) → `str`  ·  **from nothing**
 - **`model_select`**(name?, allow_both?, current?) → `str`  ·  from `test_the_image_model_is_chosen_where_the_set_starts.py`, `test_the_model_takes_what_the_docs_say.py`
-- **`render`**(key, tenant?, msg?, err?, link?, ilink?, plink?, sub?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(key, tenant?, msg?, err?, link?, ilink?, plink?, sub?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `test_the_email_is_the_brands.py`, `web.py`
 - **`render_assurance`**(key, tenant?, days?, system?, rule?, started?, page?, gap?) → `str`  ·  from `test_assurance_tab.py`, `test_claim_trace.py`, `test_kb_ui.py`, `web.py`
 - **`render_brand`**(key, tenant?, msg?, err?, derive_voice?, pick?, preview_entity?) → `str`  ·  from `test_a_kept_frame_has_its_placements_and_no_painted_type.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_ban_list.py`, `test_brand_sources.py`, `test_brand_theme.py`, `test_every_system_draws.py`, `test_kb_ui.py`, `test_the_board_reaches_the_generator.py`, `test_the_brand_tab_owns_the_boards_and_the_channel_rules.py`, `test_the_email_is_the_brands.py`, `test_the_model_makes_the_email.py`, `test_the_queue_is_visible.py`, `web.py`
 - **`render_connect`**(link, tenant, rows, msg?, err?) → `str`  ·  from `web.py`
@@ -626,7 +626,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`nav`**(tenant, theme) → `list[dict]`  ·  from `test_the_email_is_the_brands.py`
 - **`place`**(html, tenant, kit_, width) → `tuple[str, str]`  ·  from `recreate.py`, `test_the_email_is_the_brands.py`, `test_the_render_is_read.py`
-- **`render`**(tenant, kit_, ground, ink, width, inset?, scale?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(tenant, kit_, ground, ink, width, inset?, scale?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `test_the_email_is_the_brands.py`, `web.py`
 - **`system_of`**(html) → `tuple[int | None, list[int]]`  ·  **from nothing**
 
 ### `email_structures.py`
@@ -750,7 +750,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`audit`**(listing?, state?, reviews?, posts?, media?, banned?, keywords?, entities?, domain?, open_post_plans?, today?) → `dict`  ·  from `skill_pack.py`, `test_bundle_contract.py`, `test_gbp_listing.py`
 - **`latest`**(tenant) → `dict`  ·  from `admin_ui.py`, `recreate_once.py`, `test_creative_batch.py`, `test_gbp_listing.py`, `test_job_queue.py`, `test_the_model_makes_the_email.py`, `test_workflow_ui.py`, `web.py`
-- **`render`**(report, when?, title?, proposed?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(report, when?, title?, proposed?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `test_the_email_is_the_brands.py`, `web.py`
 - **`trend`**(tenant) → `dict`  ·  from `admin_ui.py`, `test_claim_trace.py`, `test_gbp_listing.py`, `test_learning.py`
 
 ### `gbp_post.py`
@@ -815,7 +815,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `grounding.py`
 
 - **`for_mail`**(tenant, email, bucket?) → `dict`  ·  from `test_grounding.py`, `triage.py`
-- **`render`**(bundle) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(bundle) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `test_the_email_is_the_brands.py`, `web.py`
 - **`utterance_from`**(email) → `str`  ·  from `test_grounding.py`
 - **`verify`**(offered, claimed) → `list[str]`  ·  from `resolve.py`, `test_bundle_contract.py`, `test_grounding.py`, `triage.py`, `web.py`
 
@@ -1087,7 +1087,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `landing.py`
 
-- **`render`**() → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**() → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `test_the_email_is_the_brands.py`, `web.py`
 - **`signin`**(err?, next?) → `str`  ·  from `web.py`
 
 ### `layers.py`
@@ -1358,7 +1358,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `portal_ui.py`
 
-- **`render`**(tenant, tab?, days?, who?, notice?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `web.py`
+- **`render`**(tenant, tab?, days?, who?, notice?) → `str`  ·  from `skill_pack.py`, `test_craft.py`, `test_gbp_listing.py`, `test_grounding.py`, `test_rehearse.py`, `test_the_email_is_the_brands.py`, `web.py`
 - **`render_signin`**(error?, sent?) → `str`  ·  from `web.py`
 
 ### `propose.py`
@@ -1393,6 +1393,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`check`**(html, kit_, brief_, copy_?, links?, reference_host?) → `list[dict]`  ·  from `ab_context.py`, `admin_ui.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_can_the_engines_read_us.py`, `test_claim_trace.py`, `test_seo_guard.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_email_is_the_brands.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `triage.py`, `web.py`, `wordpress_seo.py`
 - **`compose`**(brief_, kit_, cast_, message?, tenant?, fitted?, html?, findings?, png?, story_?) → `dict`  ·  from `skill_pack.py`, `test_the_email_is_the_brands.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `test_whats_new_reaches_every_writer.py`
 - **`decide_story`**(brief_, kit_, message, tenant?, entity_key?) → `dict`  ·  from `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `test_whats_new_reaches_every_writer.py`
+- **`drawn_shapes`**(raw) → `list[dict]`  ·  from `test_the_email_is_the_brands.py`
 - **`exemplar`**() → `str`  ·  **from nothing**
 - **`fit`**(tenant, url, aspect, width?) → `str`  ·  from `test_the_model_makes_the_email.py`
 - **`fits`**(tenant, cast_) → `dict`  ·  from `test_the_email_is_the_brands.py`, `test_the_model_makes_the_email.py`

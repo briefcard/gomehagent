@@ -315,6 +315,88 @@ def main() -> int:
     ck("  and an emptied box goes back to the site's own menu",
        brand_theme.live_theme(T).get("nav") == [] and [i["label"] for i in eh.nav(T, brand_theme.live_theme(T))][:1] == ["Shop"])
 
+    print("\n— one masthead, a mark that can be seen, no figure drawn from boxes (2026-09-30) —")
+    # Owner: "there are two headers in the email because of the programmed one
+    # and the one that is read from an email", with a slate mark on a navy
+    # band, a 90px "BACI MILANO" under it, and a figure of a circle and two
+    # rectangles standing on the "Apply to Stock" button.
+    slate = dict(kit, logo_ink="#35556e", logo_tone="dark")
+    on_navy, _n = eh.place(email('<tr><td style="padding:0"><!--brand-header: #1b1c2e #f0ede6--></td></tr>'
+                                 '<tr><td>Hello</td></tr>'), T, slate, 600)
+    on_cream, _n = eh.place(email('<tr><td style="padding:0"><!--brand-header: #f0ede6 #1b1c2e--></td></tr>'
+                                  '<tr><td>Hello</td></tr>'), T, slate, 600)
+    ck("a slate mark on a navy band is set as the name in type — judged by its measured contrast",
+       f'src="{LOGO}"' not in on_navy.split("Hello")[0] and ">Baci Milano</a>" in on_navy)
+    ck("  and the same mark on a cream band is shown", f'src="{LOGO}"' in on_cream.split("Hello")[0])
+    import io as _io
+    from PIL import Image as _Im
+    _buf = _io.BytesIO()
+    _mark = _Im.new("RGBA", (200, 60), (0, 0, 0, 0))
+    _mark.paste((0x35, 0x55, 0x6e, 255), (20, 20, 180, 40))
+    _mark.save(_buf, "PNG")
+    from app import pictures as _pics
+    _real_fetch = _pics._fetch_bounded
+    _pics._fetch_bounded = lambda url, **k: _buf.getvalue()
+    try:
+        tone_, ink_ = rc._logo_read("https://cdn.example.test/mark.png")
+    finally:
+        _pics._fetch_bounded = _real_fetch
+    ck("  the mark's colour is read off its own opaque pixels", (tone_, ink_) == ("dark", "#35556e"), f"{tone_} {ink_}")
+
+    brief_ = {"concept": "x", "sections": [{"what": "x"}], "reference_text": []}
+    twice = eh.place(email('<tr><td style="padding:0"><!--brand-header: #f0ede6 #1b1c2e--></td></tr>'
+                           f'<tr><td align="center"><img src="{LOGO}" alt="Baci" width="160"></td></tr>'
+                           f'<tr><td><img src="{SCENE}" alt="the table" width="600"></td></tr>'), T, kit, 600)[0]
+    signed = eh.place(email('<tr><td style="padding:0"><!--brand-header: #f0ede6 #1b1c2e--></td></tr>'
+                            f'<tr><td><img src="{SCENE}" alt="the table" width="600"></td></tr>'
+                            '<tr><td><a href="https://bacimilanousa.com/collections/all">Shop</a></td></tr>'
+                            f'<tr><td align="center"><img src="{LOGO}" alt="Baci" width="100"></td></tr>'), T, kit, 600)[0]
+    pics_kit = dict(kit, pictures=[{"url": SCENE, "kind": "lifestyle"}])
+    ck("the mark drawn again under the header is a second masthead, and blocks",
+       any(f["code"] == "second_masthead" and f["severity"] == "blocks" for f in rc.check(twice, pics_kit, brief_)))
+    ck("  a sign-off mark in the footer, after the pictures and the links, is not",
+       not any(f["code"] == "second_masthead" for f in rc.check(signed, pics_kit, brief_)))
+    read = {"texts": [{"text": "BACI", "size": 90, "weight": 700, "color": "rgb(240,237,230)", "rects": [],
+                       "covered": 0},
+                      {"text": "Baci Milano", "size": 28, "weight": 400, "color": "rgb(240,237,230)", "rects": [],
+                       "covered": 0},
+                      {"text": "Room for a few American stockists", "size": 56, "weight": 700,
+                       "color": "rgb(240,237,230)", "rects": [], "covered": 0}]}
+    shouted = [f for f in rc.render_check(read, kit) if f["code"] == "second_masthead"]
+    ck("the brand's name set as a 90px headline under the header blocks — read off the render",
+       len(shouted) == 1 and shouted[0]["severity"] == "blocks" and "90px" in shouted[0]["what"])
+    ck("  while the header's own name (28px) and a 56px headline of the email's idea do not",
+       "BACI" in shouted[0]["where"] if shouted else False)
+    big_steps = eh.render(T, dict(kit, logo_ink="#35556e"), "#1b1c2e", "#f0ede6", 600, scale=[11, 38, 72])
+    ck("  the header's name in type is capped under the masthead size, whatever the email's scale",
+       "font-size:32px" in big_steps, big_steps[:200])
+    ck("position:absolute blocks — Gmail and Outlook drop it",
+       any(f["code"] == "positioned" for f in rc.check(email(
+           '<tr><td><div style="position:absolute;top:-20px">x</div></td></tr>'), kit, brief_)))
+    figure = ('<!--bake--><table><tr><td>'
+              '<div style="width:30px;height:30px;border-radius:50%;background:#2330f0"></div>'
+              '<div style="width:40px;height:60px;background:#2330f0;margin-top:-6px"></div>'
+              '<a style="display:inline-block;padding:14px 40px;border-radius:40px;background:#2330f0;'
+              'color:#fff">Apply to Stock</a></td></tr></table><!--/bake-->')
+    one_dot = '<div style="width:30px;height:30px;border-radius:50%;background:#2330f0"></div>'
+    framed = ('<div style="width:200px;height:200px;border-radius:50%;background:#f0ede6">'
+              f'<img src="{PACK}" alt="plates" width="180"></div>')
+    got = rc.drawn_shapes(figure)
+    ck("a figure of empty painted boxes blocks — inside a baked block too, read before baking",
+       len(got) == 1 and got[0]["severity"] == "blocks" and "2 empty painted boxes" in got[0]["what"],
+       str(got)[:200])
+    ck("  one decorative dot, a pill button with its words, a product on a round ground do not",
+       rc.drawn_shapes(one_dot) == [] and rc.drawn_shapes(framed) == []
+       and rc.drawn_shapes('<a style="display:inline-block;width:200px;height:48px;border-radius:40px;'
+                           'background:#2330f0">Apply</a>') == [])
+    ck("the maker is told the header IS the reference's masthead, and a figure is a picture",
+       "THE HEADER IS THE REFERENCE'S MASTHEAD" in rc._COMPOSE_PROMPT
+       and "the reference's opening is recreated BELOW" not in rc._COMPOSE_PROMPT
+       and "NEVER built from boxes, circles and borders" in rc._COMPOSE_PROMPT
+       and "a drawn thing" not in rc._COMPOSE_PROMPT)
+    ck("  and the judge that a generic stand-in BLOCKS, in the owner's own examples",
+       "instance in disguise BLOCKS" in rc._JUDGE_PROMPT and '"Bellissimo!"' in rc._JUDGE_PROMPT)
+
     print()
     print("ALL GREEN" if not _fail else f"FAILED: {len(_fail)}")
     return 1 if _fail else 0

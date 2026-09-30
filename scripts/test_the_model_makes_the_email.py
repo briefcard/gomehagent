@@ -113,7 +113,7 @@ def email_html(*, photo_a=PHOTO_A, photo_b=PHOTO_B, logo=LOGO, address=ADDRESS, 
 <body style="margin:0;background:{page}"><!-- system: faces headline=Georgia body=Helvetica · scale: 96/13/12/11/11 · space: 8/16/30/34 · inset: 34 · radius: 14 -->{extra}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{page}"><tr><td align="center">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px">
-<tr><td align="center" style="padding:30px"><img src="{logo}" alt="the brand" width="150"></td></tr>
+<tr><td style="padding:0"><!--brand-header: {page} {cream}--></td></tr>
 <tr><td align="center" style="color:{cream};font-family:Helvetica,Arial,sans-serif;font-size:12px">Don't just set the table.</td></tr>
 {head_row}
 <tr><td style="padding:0 34px 30px"><table role="presentation" width="100%" style="background:{cream};border:1px solid {ink};border-radius:14px">
@@ -127,6 +127,7 @@ def email_html(*, photo_a=PHOTO_A, photo_b=PHOTO_B, logo=LOGO, address=ADDRESS, 
 </table></td></tr>
 <tr><td align="center" style="background:{cream}"><table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px">
 <tr><td style="padding:30px 34px 0"><img src="{photo_b}" alt="the pieces at the table" width="532" style="width:100%"></td></tr>
+<tr><td align="center" style="padding:10px"><img src="{logo}" alt="the brand" width="120"></td></tr>
 <tr><td align="center" style="padding:0 20px 30px;color:#6b4a3a;font-family:Helvetica,Arial,sans-serif;font-size:11px">{address}<br>
 <a href="{unsub}" style="color:#6b4a3a">Unsubscribe</a></td></tr>
 </table></td></tr></table></body></html>"""

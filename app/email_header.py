@@ -23,6 +23,7 @@ import re
 MARK_HEIGHT = 40      # px — the mark's height in the header
 MARK_MAX_WIDTH = 220  # px — a very wide mark is held to this
 NAV_MAX = 4           # links in the nav row
+MARK_CONTRAST = 3.0   # WCAG's floor for a graphic: under it the name is set in type
 
 _MARKER = re.compile(r"<!--\s*brand-header\s*:?\s*(#[0-9a-fA-F]{3,8})?\s*(#[0-9a-fA-F]{3,8})?\s*-->", re.I)
 _COLUMN_PAT = r"<table\b[^>]*(?:width=[\"']?%d[\"']?|max-width:\s*%dpx)[^>]*>(\s*<tbody[^>]*>)?"
@@ -119,8 +120,11 @@ def render(tenant: str, kit_: dict, ground: str, ink: str, width: int, *,
     steps = sorted(set(scale or []))
     nav_px = next((x for x in steps if x >= 11), 12) if steps else 12
     in_range = [x for x in steps if 18 <= x <= 32]
-    name_px = (max(in_range) if in_range else
-               min(steps, key=lambda x: abs(x - 26)) if steps else 26)
+    # capped under recreate.MASTHEAD_PX: the name standing in for a mark is a
+    # mark, not a headline, and the render check counts a larger one as a
+    # second masthead
+    name_px = min(32, (max(in_range) if in_range else
+                       min(steps, key=lambda x: abs(x - 26)) if steps else 26))
     from . import type_system
     theme = kit_.get("theme") or {}
     pairing = type_system.for_theme(theme)
@@ -130,7 +134,11 @@ def render(tenant: str, kit_: dict, ground: str, ink: str, width: int, *,
     ground_light = _lum(_rgb(ground) or (255, 255, 255)) > 0.5
     tone = str(kit_.get("logo_tone") or "")
     logo = str(theme.get("logo_url") or "")
-    vanishes = (tone == "light" and ground_light) or (tone == "dark" and not ground_light)
+    # BY RATIO where the mark's colour was read: a mid-tone mark is neither
+    # "light" nor "dark" and vanished on a band of its own depth (2026-09-30)
+    mark_ink = str(kit_.get("logo_ink") or "")
+    vanishes = (_ratio(mark_ink, ground) < MARK_CONTRAST if _rgb(mark_ink) else
+                (tone == "light" and ground_light) or (tone == "dark" and not ground_light))
     if logo and not vanishes:
         size = _mark_size(logo)
         if size:

@@ -179,8 +179,8 @@ SABOTAGES = [
     {
         "name": "the_type_is_guessed_again",
         "file": "app/recreate.py",
-        "find": "                  + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_))",
-        "replace": "                  + system_check(html, seen=shot) + story_check(html, story_, kit_))",
+        "find": "                  + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_)\n",
+        "replace": "                  + system_check(html, seen=shot) + story_check(html, story_, kit_)\n",
         "suites": ["test_the_model_makes_the_email.py"],
         "why": "the run counts faces instead of holding them to the brand's "
                "pairing, and a script word in the headline ships",
@@ -248,8 +248,8 @@ SABOTAGES = [
     {
         "name": "a_vanishing_mark_is_drawn_anyway",
         "file": "app/email_header.py",
-        "find": '    vanishes = (tone == "light" and ground_light) or (tone == "dark" and not ground_light)',
-        "replace": "    vanishes = False  # SABOTAGE",
+        "find": '                (tone == "light" and ground_light) or (tone == "dark" and not ground_light))',
+        "replace": "                False)  # SABOTAGE",
         "suites": ["test_the_email_is_the_brands.py"],
         "why": "a dark mark is set on a dark header and the brand disappears",
     },
@@ -474,6 +474,73 @@ SABOTAGES = [
         "suites": ["test_job_queue.py"],
         "why": "one inbox needing a reconnect prints thirty lines every five "
                "minutes and reads as the worker crashing",
+    },
+    # One masthead, a mark that can be seen, no figure drawn from boxes
+    # (owner, 2026-09-30, of a Baci email: two headers, a slate mark on navy,
+    # a stick figure on the button, "Bellissimo!").
+    {
+        "name": "the_mark_twice_passes",
+        "file": "app/recreate.py",
+        "find": "    if marks and marks[0] < min(others, default=len(below)):",
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the brand's mark is drawn again under the header and nothing blocks the second masthead",
+    },
+    {
+        "name": "the_name_as_a_headline_passes",
+        "file": "app/recreate.py",
+        "find": '        if name_words and words and words <= name_words and float(t.get("size") or 0) >= MASTHEAD_PX:',
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "'BACI MILANO' in 90px under the header ships as the email's headline",
+    },
+    {
+        "name": "a_slate_mark_on_navy_is_kept",
+        "file": "app/email_header.py",
+        "find": "    vanishes = (_ratio(mark_ink, ground) < MARK_CONTRAST if _rgb(mark_ink) else",
+        "replace": "    vanishes = (False if _rgb(mark_ink) else  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a mid-tone mark on a band of its own depth is drawn and all but vanishes",
+    },
+    {
+        "name": "the_mark_colour_is_not_read",
+        "file": "app/recreate.py",
+        "find": '        ink = "#%02x%02x%02x" % tuple(round(sum(p[i] for p in px) / len(px)) for i in range(3))',
+        "replace": '        ink = ""  # SABOTAGE',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the header has no colour to hold the mark to, and falls back to light and dark",
+    },
+    {
+        "name": "a_drawn_figure_passes",
+        "file": "app/recreate.py",
+        "find": "    if len(p.found) < 2:",
+        "replace": "    if True:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "a figure of a circle and two rectangles stands on the button and ships",
+    },
+    {
+        "name": "positioned_passes",
+        "file": "app/recreate.py",
+        "find": '    if re.search(r"position\\s*:\\s*(?:absolute|fixed)", html, re.I):',
+        "replace": "    if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "an absolutely placed element ships and lands elsewhere in Gmail and Outlook",
+    },
+    {
+        "name": "the_masthead_is_recreated_below_again",
+        "file": "app/recreate.py",
+        "find": "  THE HEADER IS THE REFERENCE'S MASTHEAD: its logo, its wordmark, its name set large and its",
+        "replace": "  the reference's opening is recreated BELOW the header: its logo, its wordmark, its name set large and its  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the maker is told to recreate the reference's opening under the header — its masthead included",
+    },
+    {
+        "name": "the_judge_lets_a_stand_in_pass",
+        "file": "app/recreate.py",
+        "find": "a figure or doodle built from shapes) or the reference's own instance in disguise BLOCKS — say",
+        "replace": "a figure or doodle built from shapes) or the reference's own instance in disguise is a fault — say  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "'Bellissimo!' and a stick figure are cosmetic to the judge and the email ships with them",
     },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the

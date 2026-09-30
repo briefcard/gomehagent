@@ -335,7 +335,7 @@ def kit(tenant: str) -> dict:
     caps = esp.caps(tenant)
     hosts = {urlparse(p["url"]).netloc for p in pics} | {urlparse(theme.get("logo_url") or "").netloc,
                                                         urlparse(config.PUBLIC_BASE_URL).netloc}
-    logo_tone = _logo_tone(theme.get("logo_url") or "")
+    logo_tone, logo_ink = _logo_read(theme.get("logo_url") or "")
     return {"tenant": tenant, "name": theme.get("name") or (getattr(b, "display_name", "") if b else tenant),
             "positioning": str(getattr(b, "positioning", "") or "") if b else "",
             "voice": {k: voice.get(k) for k in ("tone", "do_say", "never_say") if voice.get(k)},
@@ -343,7 +343,7 @@ def kit(tenant: str) -> dict:
             "rules": {"channel": kb.channel_rules(tenant, "campaign_email") or ""},
             "esp": {"provider": esp.provider_for(tenant), "tokens": list(esp.TOKENS),
                     "webview": bool(caps.get("webview", True))},
-            "logo_tone": logo_tone,
+            "logo_tone": logo_tone, "logo_ink": logo_ink,
             "hosts": {h for h in hosts if h}}
 
 
@@ -351,24 +351,33 @@ def _logo_tone(url: str) -> str:
     """"light" | "dark" | "" — the mark's own luminance over its opaque pixels,
     so the composer knows which ground it needs. Baci's only mark on file is
     white; the maker set it on a yellow page (2026-09-17)."""
+    return _logo_read(url)[0]
+
+
+def _logo_read(url: str) -> tuple[str, str]:
+    """`(tone, ink)` — the tone as `_logo_tone` says it, and the mark's own
+    colour as hex (the mean of its opaque pixels), so the header can hold it
+    to a contrast RATIO on its ground: a slate mark on a navy band is "dark"
+    and "dark on dark" by tone, and by eye all but gone (owner, 2026-09-30)."""
     if not url:
-        return ""
+        return "", ""
     try:
         import io
         from PIL import Image
         from . import pictures
         blob = pictures._fetch_bounded(url)
         if not blob:
-            return ""
+            return "", ""
         im = Image.open(io.BytesIO(blob)).convert("RGBA")
         im.thumbnail((256, 256))
         px = [(r, g, b) for r, g, b, a in im.getdata() if a > 128]
         if not px:
-            return ""
+            return "", ""
         lum = sum(0.2126 * r + 0.7152 * g + 0.0722 * b for r, g, b in px) / (255 * len(px))
-        return "light" if lum > 0.6 else "dark" if lum < 0.4 else ""
+        ink = "#%02x%02x%02x" % tuple(round(sum(p[i] for p in px) / len(px)) for i in range(3))
+        return ("light" if lum > 0.6 else "dark" if lum < 0.4 else ""), ink
     except Exception:                                             # noqa: BLE001
-        return ""
+        return "", ""
 
 
 # ---------------------------------------------------------------------------
@@ -683,8 +692,9 @@ its type roles, its colour logic and its rhythm. Its devices are of two kinds:
   RE-AUTHORED FROM THIS BRAND'S WORLD so it means something here: the same role and the same
   effect, played by a thing of this brand — its products, its place, its voice, what its
   photographs show. A snack brand's crunch word becomes a word that is TRUE of this product
-  and of this email's idea; its cartoon shopper becomes a drawn thing from this brand's own
-  world; its badge carries a fact from the material%(no_stickers)s. Never the reference's instance, never a
+  and of this email's idea; its cartoon shopper becomes one of this brand's own
+  pictures playing the same part (a product alone on its ground, set where the shopper stood) —
+  a figure, a mascot, an icon or a doodle is NEVER built from boxes, circles and borders; its badge carries a fact from the material%(no_stickers)s. Never the reference's instance, never a
   generic stand-in (a random exclamation, a random emoji), never decoration that says
   nothing. The standard below shows the move: a sauce brand's "SAUCE THE MEAT!" became a
   tableware brand's "Set the scene!"; its recipe's last step became "Mangia!". If nothing in
@@ -761,8 +771,11 @@ RULES
   a full-width cell with no padding (<tr><td style="padding:0">…</td></tr>) — GROUND and INK two
   hex colours from this email's own palette, INK reading on GROUND. The brand's mark over its
   navigation is drawn there for you, the same layout on every email. Never draw a logo row, a
-  navigation bar or anything above the header — no band, no divider, no wave opens the email;
-  the reference's opening is recreated BELOW the header.
+  navigation bar or anything above the header — no band, no divider, no wave opens the email.
+  THE HEADER IS THE REFERENCE'S MASTHEAD: its logo, its wordmark, its name set large and its
+  navigation are all played by the header and never drawn again — not the mark a second time,
+  not the brand's name as a headline. Below the header the email opens on the reference's
+  first section AFTER its masthead.
 - SECTION EDGES: a shaped edge between two grounds — a wave, a curve, a slant, a zigzag, a
   scallop — is NEVER drawn by you (no SVG path, no clip-path, no border trick). Write
   <!--divider: SHAPE ABOVE BELOW--> alone in a full-width cell with no padding
@@ -1386,6 +1399,28 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
             add("product_cropped", "blocks", src[:100],
                 "a product photograph cut to fit a slot — a packshot is shown whole: its listed URL, "
                 "its width set, its height its own")
+    # 1c. ONE MASTHEAD. The header is placed for the maker and IS the
+    # reference's masthead; the mark drawn again below it is a second header
+    # (owner, 2026-09-30: "there are two headers in the email because of the
+    # programmed one and the one that is read from an email").
+    # A mark BEFORE the email's first picture or first link is a masthead; a
+    # sign-off mark in the footer, after them, is not.
+    logo_base = _base(theme.get("logo_url") or "") if theme.get("logo_url") else ""
+    below = re.sub(r"<table\b[^>]*data-brand-header=[\"']?1.*?</table>", "", html, count=1, flags=re.S | re.I)
+    marks = [m_.start() for m_ in re.finditer(r"<img\b[^>]*\bsrc=[\"']([^\"']+)", below, re.I)
+             if logo_base and _base(m_.group(1)) == logo_base]
+    others = [m_.start() for m_ in re.finditer(r"<img\b[^>]*\bsrc=[\"']([^\"']+)", below, re.I)
+              if _base(m_.group(1)) != logo_base] + [m_.start() for m_ in re.finditer(r"<a\b", below, re.I)]
+    if marks and marks[0] < min(others, default=len(below)):
+        add("second_masthead", "blocks", "the top",
+            "the brand's mark drawn again below the header — the header IS the masthead; open on the "
+            "reference's first section after its masthead")
+    # 1d. Gmail and Outlook drop `position` — whatever it placed lands
+    # somewhere else in the inbox (a figure "sitting" on a button, 2026-09-30).
+    if re.search(r"position\s*:\s*(?:absolute|fixed)", html, re.I):
+        add("positioned", "blocks", "email",
+            "position:absolute — Gmail and Outlook drop it, so the element lands elsewhere; lay it out "
+            "in the table, or put the overlap inside a baked block")
     # 2. nothing from the reference
     ref_words = brief_.get("reference_text") or []
     ref_grams = _grams(" ".join(map(str, ref_words)))
@@ -1503,6 +1538,9 @@ _SYSTEM = re.compile(r"<!--\s*system:(.*?)-->", re.S | re.I)
 #: WCAG 2 AA: text reads at 4.5:1 against its ground; LARGE text — 24 px, or
 #: 18.66 px at bold — at 3:1.
 CONTRAST_BODY, CONTRAST_LARGE = 4.5, 3.0
+#: A line this large made only of the brand's name is a masthead — the header's
+#: own name, when it stands in for the mark, is capped below it.
+MASTHEAD_PX = 36
 #: A colour is a COLOUR (not a near-black, near-white or grey — nobody's)
 #: from this much chroma, and it is the brand's or a photograph's when its hue
 #: sits this close to one of theirs: a tint or a shade of it, not a new one.
@@ -1528,6 +1566,18 @@ def render_check(shot: dict, kit_: dict, cast_: dict | None = None) -> list[dict
     out: list[dict] = []
     add = lambda code, sev, where, what: out.append({"code": code, "severity": sev, "where": where, "what": what})  # noqa: E731
     texts = shot.get("texts") or []
+    # ONE MASTHEAD, on the render: the brand's NAME set as a display line
+    # below the header is the reference's masthead drawn a second time
+    # (owner, 2026-09-30: "BACI / MILANO" in 90 px under the header). The
+    # header's own name, standing in for a mark, is set under MASTHEAD_PX.
+    name_words = set(re.findall(r"[a-z0-9]+", str(kit_.get("name") or "").lower()))
+    for t in texts:
+        words = set(re.findall(r"[a-z0-9]+", str(t.get("text") or "").lower()))
+        if name_words and words and words <= name_words and float(t.get("size") or 0) >= MASTHEAD_PX:
+            add("second_masthead", "blocks", str(t.get("text") or "")[:40],
+                f"the brand's name set as a {round(float(t['size']))}px headline under the header — the "
+                f"header IS the masthead; open on the email's own idea")
+            break
     ground = Image.open(io.BytesIO(shot["ground"])).convert("RGB") if shot.get("ground") else None
     said: set = set()
     for t in texts if ground else []:
@@ -1743,6 +1793,89 @@ def system_check(html: str, seen: dict | None = None, *, pairing: dict | None = 
     return out
 
 
+class _Shapes(HTMLParser):
+    """EMPTY PAINTED BOXES — an element with a ground and a size of its own
+    and nothing in it, no word and no picture, rounded or placed over its
+    neighbours. Built into a figure (a head, a body, a box in its hand), it
+    is HTML drawing: owner, 2026-09-30, of a blue figure of a circle and two
+    rectangles standing on the "Apply to Stock" button."""
+
+    _VOID = {"br", "img", "hr", "input", "meta", "link", "col", "source", "wbr", "area", "base"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.stack: list = []
+        self.found: list = []
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag in self._VOID:
+            if tag == "img":
+                for e in self.stack:
+                    e["full"] = True
+            return
+        style = str(a.get("style") or "")
+        for k in ("width", "height"):
+            if str(a.get(k) or "").isdigit() and not re.search(rf"(?<![-\w]){k}\s*:", style):
+                style += f";{k}:{a[k]}px"
+        if a.get("bgcolor"):
+            style += f";background-color:{a['bgcolor']}"
+        self.stack.append({"tag": tag, "style": style.lower(), "full": False})
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i]["tag"] == tag:
+                el = self.stack[i]
+                del self.stack[i:]
+                if not el["full"]:
+                    self._judge(el["style"])
+                return
+
+    def handle_data(self, data):
+        if data.strip():
+            for e in self.stack:
+                e["full"] = True
+
+    def _judge(self, s: str) -> None:
+        bg = re.search(r"background(?:-color)?\s*:\s*([^;]+)", s)
+        if not bg or re.search(r"transparent|none|inherit|initial|rgba\([^)]*,\s*0\)", bg.group(1)):
+            return
+        w = re.search(r"(?<![-\w])width\s*:\s*(\d+(?:\.\d+)?)px", s)
+        h = re.search(r"(?<![-\w])height\s*:\s*(\d+(?:\.\d+)?)px", s)
+        if not (w and h) or min(float(w.group(1)), float(h.group(1))) < 10:
+            return                                   # a dot, a rule, a spacer line
+        side = min(float(w.group(1)), float(h.group(1)))
+        rad = re.search(r"border-radius\s*:\s*(\d+(?:\.\d+)?)(px|%)", s)
+        rounded = bool(rad) and (float(rad.group(1)) >= 20 if rad.group(2) == "%"
+                                 else float(rad.group(1)) >= side * 0.2)
+        placed = bool(re.search(r"position\s*:\s*(?:absolute|relative|fixed)", s)
+                      and re.search(r"(?<![-\w])(?:top|left|right|bottom)\s*:\s*-?\d", s)) \
+            or bool(re.search(r"margin(?:-\w+)?\s*:[^;]*-\d", s))
+        if rounded or placed:
+            self.found.append(f"{w.group(1)}×{h.group(1)}px" + (" rounded" if rounded else "")
+                              + (" placed over its neighbours" if placed else ""))
+
+
+def drawn_shapes(raw: str) -> list[dict]:
+    """A figure, mascot, icon or doodle built from empty boxes, in live HTML
+    or inside a baked block (read off the maker's own HTML, before baking).
+    Two such shapes make a figure and block; HTML cannot draw one, and it
+    reads as a placeholder. A figure is one of the brand's own pictures, or
+    the device is left out."""
+    p = _Shapes()
+    try:
+        p.feed(raw or "")
+    except Exception:                                            # noqa: BLE001
+        return []
+    if len(p.found) < 2:
+        return []
+    return [{"code": "drawn_figure", "severity": "blocks", "where": "a drawn device",
+             "what": f"a figure built from {len(p.found)} empty painted boxes ({'; '.join(p.found[:3])}) — "
+                     "HTML cannot draw a figure, a mascot or an icon, and this one reads as a placeholder: "
+                     "play the role with one of the brand's own pictures, or leave the device out and say so "
+                     "in the turned comment"}]
+
+
 def story_check(html: str, story_: dict | None, kit_: dict) -> list[dict]:
     """A beat about the category or the reader is never set in the same
     row as, or the row next to, a photograph of the brand's product. Held
@@ -1903,9 +2036,9 @@ not a claim — allowed once, as a closer, never as the argument).
 %(notes)sDRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
 to this brand and EARNS its place: re-authored from this brand's world — its products, its
 place, its voice — it is correct however much it differs from the reference's; a generic
-stand-in (a random exclamation, an emoji, a doodle that means nothing) or the reference's own
-instance in disguise is a fault — say "cut it" or say what of this brand's world should play
-the role instead. Never ask for the reference's prop, word, mascot, lettering or colours, and
+stand-in (a random exclamation — the owner's own examples: "Bella!", "Bellissimo!" — an emoji,
+a figure or doodle built from shapes) or the reference's own instance in disguise BLOCKS — say
+"cut it" or say what of this brand's world should play the role instead. Never ask for the reference's prop, word, mascot, lettering or colours, and
 never quote the reference's words."""
 
 
@@ -2344,7 +2477,8 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         shot = shots.shoot(_inline_media(html), read=True)
         took["rendering"] = round(_time.monotonic() - _t)
         checks = (checks + told["findings"] + bake_findings
-                  + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_))
+                  + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_)
+                  + drawn_shapes(raw))
         if "texts" in shot:
             # MEASURED ON THE RENDER where it could be read, in place of what
             # the inline styles could say about contrast — they miss classes,
