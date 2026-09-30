@@ -778,6 +778,31 @@ def segments_sharded() -> dict:
     return _each_tenant("segments sweep", _segments_one)
 
 
+def _site_pages_one(key: str) -> dict:
+    """One account's site read — its pages (sitemap) and its header menu,
+    filed for the email's header and for buttons whose words name a page
+    (owner, 2026-09-29: "Request a Partnership should take you to the
+    wholesale page"). `links.read_site` skips an account with no domain and
+    says so; what it read is filed here, where `links.site_pages` finds it."""
+    import json as _json
+    from . import links
+    got = links.read_site(key)
+    if got.get("skipped"):
+        return got
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, links.SITE_KEY.format(key))
+        if row is None:
+            row = db.Setting(key=links.SITE_KEY.format(key))
+            s.add(row)
+        row.value = _json.dumps(got)
+        s.commit()
+    return {"pages": len(got["pages"]), "menu": len(got["menu"])}
+
+
+def site_pages_sharded() -> dict:
+    return _each_tenant("site pages", _site_pages_one)
+
+
 def media_sweep() -> None:
     """Drop the bytes behind pictures nobody approved.
 
@@ -1396,6 +1421,13 @@ def main() -> None:
     # 07:00 tick plans the week's posts against what it found.
     sched.add_job(_safe(gbp_audit_sharded, "business profile audit", sharded=True),
                   "cron", day_of_week="mon", hour=5, minute=45)
+    # THE SITE'S PAGES AND MENU — the links under the email's header and the
+    # pages a button's words name. Daily, first a few minutes after every
+    # start, so a new build is not a day without them. One registration: the
+    # lease is per job, and a second would read the same site twice.
+    import datetime as _dt
+    sched.add_job(_safe(site_pages_sharded, "site pages", sharded=True), "interval", hours=24,
+                  next_run_time=_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(minutes=3))
     # Segment upkeep: re-link and report drift before the 07:00 tick plans
     # the week's campaigns against those segments.
     sched.add_job(_safe(segments_sharded, "segments sweep", sharded=True), "cron",

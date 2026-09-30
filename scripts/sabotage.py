@@ -283,11 +283,65 @@ SABOTAGES = [
     {
         "name": "the_brand_tab_offers_no_type_choice",
         "file": "app/admin_ui.py",
-        "find": "        if choices:",
-        "replace": "        if False:  # SABOTAGE",
+        "find": "        elif choices:",
+        "replace": "        elif False:  # SABOTAGE",
         "suites": ["test_the_email_is_the_brands.py"],
         "why": "the pairing and the sticker rule are free-text boxes nobody "
                "can fill correctly",
+    },
+    # The site's own pages and menu — what the header and the buttons need,
+    # found missing on the deployed account the same day.
+    {
+        "name": "site_pages_never_swept",
+        "file": "app/worker.py",
+        "find": '    return _each_tenant("site pages", _site_pages_one)',
+        "replace": "    return {}  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "no site is ever read, and the header and the buttons have no "
+               "pages but home, collections and products",
+    },
+    {
+        "name": "the_site_pages_never_reach_destinations",
+        "file": "app/links.py",
+        "find": "    site = site_pages(tenant)",
+        "replace": "    site = {}  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "'Request a Partnership' finds no wholesale page though the "
+               "site's own sitemap lists one",
+    },
+    {
+        "name": "a_catalogue_path_is_read_as_a_page",
+        "file": "app/links.py",
+        "find": "        if not m or m.group(1).lower() in _NOT_A_PAGE:",
+        "replace": "        if not m:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "/collections and /search are filed as pages a button may go to",
+    },
+    {
+        "name": "the_cart_is_in_the_header",
+        "file": "app/links.py",
+        "find": "        if any(p.path.startswith(x) for x in _NOT_IN_MENU):",
+        "replace": "        if False:  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the email's header links the cart and the account login",
+    },
+    {
+        "name": "the_header_ignores_the_sites_menu",
+        "file": "app/email_header.py",
+        "find": '    items = usable(theme.get("nav")) or usable(links.site_pages(tenant).get("menu"))',
+        "replace": '    items = usable(theme.get("nav"))  # SABOTAGE',
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "with no pages set on the Brand tab the header has one link, "
+               "though the site's own menu was read",
+    },
+    {
+        "name": "the_header_pages_box_files_nothing",
+        "file": "app/web.py",
+        "find": '                        if a.strip() and b.strip().startswith("http")]',
+        "replace": "                        if False]  # SABOTAGE",
+        "suites": ["test_the_email_is_the_brands.py"],
+        "why": "the Header pages box on the Brand tab is typed into and "
+               "thrown away",
     },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the

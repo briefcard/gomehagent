@@ -1147,7 +1147,13 @@ async def brand_theme_approve(request: Request, key: str = Depends(admin_key)):
     # back to the brand's default, which a blank box never could.
     edits = {path: str(form.get(path, ""))
              for path, *_ in ui._THEME_EDIT_FIELDS
-             if str(form.get(path, "")).strip()}
+             if path != "nav" and str(form.get(path, "")).strip()}
+    # THE HEADER'S LINKS arrive as lines of "Label | URL" and are filed as the
+    # list the theme holds; an emptied box is an empty list — the site's menu.
+    if "nav" in form:
+        edits["nav"] = [{"label": a.strip(), "url": b.strip()}
+                        for a, _, b in (ln.partition("|") for ln in str(form.get("nav") or "").splitlines())
+                        if a.strip() and b.strip().startswith("http")]
     got = brand_theme.approve(tenant, edits)
     arg = (("ok", "approved" + (" — " + got["note"] if got.get("note") else ""))
            if got.get("ok") else ("err", got.get("error", "approve failed")))

@@ -77,13 +77,19 @@ def _mark_size(url: str) -> tuple[int, int] | None:
 
 
 def nav(tenant: str, theme: dict) -> list[dict]:
-    """The pages the header links: the owner-approved nav, else the shop."""
-    items = [{"label": str(i.get("label") or "").strip(), "url": str(i.get("url") or "").strip()}
-             for i in (theme.get("nav") or []) if isinstance(i, dict)]
-    items = [i for i in items if i["label"] and i["url"].startswith("http")][:NAV_MAX]
+    """The pages the header links: the ones set on the Brand tab, else the
+    site's own menu as the worker last read it, else the shop alone."""
+    from . import links
+
+    def usable(rows) -> list[dict]:
+        items = [{"label": str(i.get("label") or "").strip(), "url": str(i.get("url") or "").strip()}
+                 for i in (rows or []) if isinstance(i, dict)]
+        home = (links.destinations(tenant, fetch=False)[:1] or [{"url": ""}])[0]["url"].rstrip("/")
+        return [i for i in items if i["label"] and i["url"].startswith("http")
+                and i["url"].rstrip("/") != home][:NAV_MAX]
+    items = usable(theme.get("nav")) or usable(links.site_pages(tenant).get("menu"))
     if items:
         return items
-    from . import links
     shop = links.shop_url(tenant)
     return [{"label": "Shop", "url": shop}] if shop else []
 
@@ -178,8 +184,10 @@ def place(html: str, tenant: str, kit_: dict, width: int) -> tuple[str, str]:
         ink = brand_theme._on(ground)
     inset, scale = system_of(html)
     head = render(tenant, kit_, ground, ink, width, inset=inset, scale=scale)
-    if not nav(tenant, kit_.get("theme") or {}):
-        notes.append("no pages on file for the header — add the site's pages to the nav on the Brand tab")
+    from . import links as _links
+    if not ((kit_.get("theme") or {}).get("nav") or _links.site_pages(tenant).get("menu")):
+        notes.append("no pages on file for the header — they are read off the site's own menu daily, "
+                     "or set them under Header pages on the Brand tab")
     if m:
         out = html[:m.start()] + head + _MARKER.sub("", html[m.end():])
         return out, "; ".join(notes)

@@ -256,6 +256,65 @@ def main() -> int:
        and (brand_theme.live_theme(T).get("font") or {}).get("pairing") == "",
        str((brand_theme.live_theme(T).get("font") or {}).get("pairing")))
 
+    print("\n— the site's own pages and menu, read by the worker, filed for the email —")
+    # The theme's nav was never filled — nothing derived it, nothing set it —
+    # so on the deployed account the header had one link and "Request a
+    # Partnership" had no wholesale page to find (found on the ship, 2026-09-29).
+    dom = "bacimilanousa.com"
+    # NO PAGES SET ON THE BRAND TAB — the state the deployed account is in, so
+    # what follows can only have come from the site itself.
+    with db.SessionLocal() as s:
+        row = s.get(db.KbBrand, T)
+        row.theme = {**(row.theme or {}), "nav": []}
+        s.commit()
+    ck("(the account has no pages set on the Brand tab, and none reach the destinations)",
+       not any(d["url"].endswith("/pages/wholesale") for d in links.destinations(T, fetch=False)))
+    sitemap = [f"https://{dom}/pages/wholesale", f"https://{dom}/pages/contact-us", f"https://{dom}/products/aqua-plate",
+               f"https://{dom}/collections/aqua", f"https://{dom}/blogs/news/a-post", f"https://{dom}/collections",
+               f"https://{dom}/search"]
+    ck("the sitemap's pages are the site's pages — never a product, a collection or a post",
+       links.pages_from(sitemap, dom) == [{"label": "Wholesale", "url": f"https://{dom}/pages/wholesale"},
+                                          {"label": "Contact Us", "url": f"https://{dom}/pages/contact-us"}])
+    home = (f'<header><a href="/"><img alt="Baci"></a><a href="/collections/shop">Shop</a>'
+            f'<a href="/collections/new-arrivals">New <span>arrivals</span></a><a href="/pages/wholesale">Wholesale</a>'
+            f'<a href="/cart">Cart</a><a href="/account/login">Log in</a></header><main><a href="/pages/x">X</a></main>')
+    ck("the header's own links are the menu — in order, in their words, never the cart or the account",
+       [m["label"] for m in links.menu_from(home, dom)] == ["Shop", "New arrivals", "Wholesale"],
+       str(links.menu_from(home, dom)))
+    from app import compliance
+    real_sm, real_fp = compliance._sitemap_urls, brand_theme.fetch_page
+    compliance._sitemap_urls = lambda base, limit=300: [{"url": u} for u in sitemap]
+    brand_theme.fetch_page = lambda url: home
+    try:
+        from app import worker
+        swept = worker.site_pages_sharded()
+    finally:
+        compliance._sitemap_urls, brand_theme.fetch_page = real_sm, real_fp
+    ck("the worker's sweep reads each site and files what it found",
+       swept.get(T) == {"pages": 2, "menu": 3} and links.site_pages(T).get("menu"), str(swept.get(T)))
+    d2 = links.destinations(T, fetch=False)
+    ck("the filed pages join the site's destinations, read with no network",
+       any(d["url"] == f"https://{dom}/pages/wholesale" and d["kind"] == "page" for d in d2))
+    ck("  so 'Request a Partnership' finds the wholesale page from what the site itself says",
+       (links.for_words("Request a Partnership", d2) or {}).get("url") == f"https://{dom}/pages/wholesale")
+    ck("a header with no pages set on the Brand tab carries the site's own menu",
+       [i["label"] for i in eh.nav(T, {"nav": []})] == ["Shop", "New arrivals", "Wholesale"],
+       str(eh.nav(T, {"nav": []})))
+    page = ui.render_brand("s3cret", T)
+    ck("the Brand tab has a Header pages box, saying what blank means",
+       "<textarea name='nav'" in page and "own menu — Shop, New arrivals, Wholesale" in page)
+    c.post("/admin/brand_theme/approve", data={"tenant": T, "nav": "Wholesale | https://bacimilanousa.com/pages/wholesale\nnot a line",
+                                                "footer.address": "1 Main St, Hallandale Beach, FL 33009"},
+           follow_redirects=False)
+    ck("  its lines are filed as the header's pages — a line without a URL is dropped",
+       brand_theme.live_theme(T).get("nav") == [{"label": "Wholesale", "url": "https://bacimilanousa.com/pages/wholesale"}],
+       str(brand_theme.live_theme(T).get("nav")))
+    c.post("/admin/brand_theme/approve", data={"tenant": T, "nav": "",
+                                                "footer.address": "1 Main St, Hallandale Beach, FL 33009"},
+           follow_redirects=False)
+    ck("  and an emptied box goes back to the site's own menu",
+       brand_theme.live_theme(T).get("nav") == [] and [i["label"] for i in eh.nav(T, brand_theme.live_theme(T))][:1] == ["Shop"])
+
     print()
     print("ALL GREEN" if not _fail else f"FAILED: {len(_fail)}")
     return 1 if _fail else 0

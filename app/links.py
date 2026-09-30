@@ -30,7 +30,10 @@ not four lines inside the email skill.
 """
 from __future__ import annotations
 
+import html as _html
+import json
 import re
+from urllib.parse import urljoin, urlparse
 
 #: Handles a store might use for "everything we sell". Ordered by how likely
 #: they are to be the real catalogue rather than a subset. Only ever used to
@@ -43,6 +46,88 @@ def _domain(tenant: str) -> str:
     from . import tenants
     t = tenants.get(tenant)
     return (getattr(t, "domain", "") or "").strip().lower()
+
+
+#: THE SITE'S OWN PAGES AND ITS MENU, read off the site by the worker — a
+#: daily sweep and once after each deploy, never inside a request or a run.
+#: Owner, 2026-09-29: the email's header needs the site's navigation and
+#: "Request a Partnership" needs the wholesale page — pages no catalogue read
+#: names, and the theme's nav that should have held them was never filled
+#: (nothing derived it, nothing on the Brand tab set it).
+SITE_KEY = "site_pages:{}"
+_NOT_A_PAGE = {"products", "collections", "blogs", "search", "cart", "account", "pages",
+               "sitemap", "policies", "checkout", "password", "tagged", "feed"}
+_NOT_IN_MENU = ("/account", "/cart", "/search", "/login", "/checkout", "/policies", "/password")
+
+
+def pages_from(urls: list[str], dom: str) -> list[dict]:
+    """The site's own pages out of its sitemap: Shopify's `/pages/<slug>`, or
+    a top-level `/<slug>` on a site with no `/pages/` (Squarespace) — never a
+    product, a collection, a post or a tag. Labelled from the slug."""
+    out, seen = [], set()
+    for u in urls:
+        p = urlparse(str(u or ""))
+        if dom not in (p.netloc or "").lower():
+            continue
+        path = p.path.rstrip("/")
+        m = re.fullmatch(r"/pages/([\w-]+)", path) or re.fullmatch(r"/([\w-]+)", path)
+        if not m or m.group(1).lower() in _NOT_A_PAGE:
+            continue
+        url = f"https://{dom}{path}"
+        if url not in seen:
+            seen.add(url)
+            out.append({"label": re.sub(r"[-_]+", " ", m.group(1)).strip().title(), "url": url})
+    return out[:80]
+
+
+def menu_from(page: str, dom: str) -> list[dict]:
+    """The links in the site's own header — its navigation as a visitor sees
+    it at the top of the home page — in their order, with their words."""
+    block = re.search(r"<header\b.*?</header>", page or "", re.S | re.I)
+    scope = block.group(0) if block else " ".join(re.findall(r"<nav\b.*?</nav>", page or "", re.S | re.I))
+    out, seen = [], set()
+    for href, text in re.findall(r"<a\b[^>]*?href=[\"']([^\"'#]+)[\"'][^>]*>(.*?)</a>", scope, re.S | re.I):
+        label = _html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text))).strip()
+        p = urlparse(urljoin(f"https://{dom}/", href.strip()))
+        if not label or len(label) > 24 or dom not in (p.netloc or "").lower():
+            continue
+        if any(p.path.startswith(x) for x in _NOT_IN_MENU):
+            continue
+        url = f"https://{dom}{p.path.rstrip('/')}" if p.path not in ("", "/") else f"https://{dom}"
+        if url not in seen:
+            seen.add(url)
+            out.append({"label": label, "url": url})
+    return out[:8]
+
+
+def read_site(tenant: str) -> dict:
+    """`{at, pages, menu}` read off the site — its sitemap's pages and its
+    header's links. NETWORK, so the worker's to call, never a request's; the
+    worker files what this returns (it already writes the settings table, and
+    a second writer is what the register's ratchet refuses)."""
+    from . import brand_theme, compliance, db
+    dom = _domain(tenant)
+    if not dom:
+        return {"skipped": "no domain on file"}
+    base = f"https://{dom}"
+    urls = [str(r.get("url") or "") for r in compliance._sitemap_urls(base, limit=2000)]
+    try:
+        home = brand_theme.fetch_page(base)
+    except Exception:                                             # noqa: BLE001
+        home = ""
+    return {"at": db.utcnow().isoformat(), "pages": pages_from(urls, dom), "menu": menu_from(home, dom)}
+
+
+def site_pages(tenant: str) -> dict:
+    """`{at, pages, menu}` as last read off the site — `{}` when never read."""
+    from . import db
+    with db.SessionLocal() as s:
+        row = s.get(db.Setting, SITE_KEY.format(tenant))
+        value = row.value if row is not None else ""
+    try:
+        return json.loads(value) if value else {}
+    except ValueError:
+        return {}
 
 
 def _fetch_collections(tenant: str) -> int:
@@ -103,6 +188,14 @@ def destinations(tenant: str, *, fetch: bool = True) -> list[dict]:
     # The owner-approved nav: pages a human chose, which no catalogue read
     # would surface (an About page, a stockists list, a size guide).
     for item in (brand_theme.live_theme(tenant) or {}).get("nav") or []:
+        u = str((item or {}).get("url") or "").strip()
+        if u.startswith("http") and dom in u:
+            out.append({"kind": "page", "key": "", "url": u,
+                        "label": str(item.get("label") or "")})
+    # THE SITE'S OWN MENU AND PAGES, as the worker last read them — a
+    # wholesale page, a contact page — so a button's words can find theirs.
+    site = site_pages(tenant)
+    for item in list(site.get("menu") or []) + list(site.get("pages") or []):
         u = str((item or {}).get("url") or "").strip()
         if u.startswith("http") and dom in u:
             out.append({"kind": "page", "key": "", "url": u,

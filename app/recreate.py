@@ -791,7 +791,8 @@ def _pages(tenant: str) -> list[dict]:
         dests = links.destinations(tenant, fetch=False)
     except Exception:                                             # noqa: BLE001
         return []
-    return ([d for d in dests if d.get("kind") in ("home", "page")]
+    return ([d for d in dests if d.get("kind") == "home"]
+            + [d for d in dests if d.get("kind") == "page"][:20]
             + [d for d in dests if d.get("kind") == "collection"][:10])
 
 

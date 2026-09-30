@@ -4204,6 +4204,10 @@ _THEME_EDIT_FIELDS = (
      + tuple((k, p["name"]) for k, p in _type_pairings.PAIRINGS.items())),
     ("design.stickers", "Stickers and badges", "starbursts, seals, “NEW!” stars in an email",
      (("(default)", "This brand's default"), ("allowed", "Allowed"), ("never", "Never"))),
+    # THE HEADER'S LINKS — one per line, "Label | URL". Blank: the site's own
+    # menu as the worker last read it (owner, 2026-09-29: "a strong email
+    # header with a consistent layout for navigating to the website").
+    ("nav", "Header pages", "the links under the logo in every email — one per line: Label | https://…"),
 )
 
 _BRAND_CSS = """<style>
@@ -4854,7 +4858,17 @@ def render_brand(key: str, tenant: str = "", msg: str = "", err: str = "",
         node: object = prop.get("theme") or live or {}
         for part in path.split("."):
             node = node.get(part, "") if isinstance(node, dict) else ""
-        if choices:
+        if path == "nav":
+            from . import links as _links_mod
+            rows_ = ((prop.get("theme") or {}).get("nav") or (live or {}).get("nav") or [])
+            lines = "\n".join(f"{r.get('label', '')} | {r.get('url', '')}" for r in rows_ if isinstance(r, dict))
+            menu = _links_mod.site_pages(tenant).get("menu") or []
+            field = (f"<textarea name='nav' rows='4' style='width:100%' placeholder='Wholesale | https://…'>"
+                     f"{_esc(lines)}</textarea><br><small class='mut'>"
+                     + _esc(("blank: the site's own menu — " + ", ".join(m.get("label", "") for m in menu[:6]))
+                            if menu else "blank: the site's own menu, once the worker has read it")
+                     + "</small>")
+        elif choices:
             # WHAT "DEFAULT" MEANS HERE, said — the brand's own faces by name,
             # the brand's own sticker rule by value.
             now = (_ts.for_theme(live or {})["name"] if path == "font.pairing"
