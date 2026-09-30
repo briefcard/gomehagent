@@ -686,8 +686,9 @@ def run_one(job_id: str) -> dict:
 
 
 #: ONE JOB AT A TIME PER WORKER PROCESS. Memory is the limit, not CPU: a
-#: worker has 512 MB, about 130 of them the app itself, and a campaign email
-#: with its pictures takes most of the rest. Two instances, two jobs at once.
+#: worker had 512 MB, about 130 of them the app itself, and a campaign email
+#: with its pictures took most of the rest — it has 2 GB since 2026-09-30
+#: (render.yaml `plan: standard`). Two instances, two jobs at once.
 _SLOT = threading.Lock()
 
 

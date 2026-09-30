@@ -15,13 +15,17 @@ services:
   - type: worker
     name: assistant-worker
     runtime: python
-    plan: starter
+    # STANDARD, 2 GB per instance (owner, 2026-09-30). The plan lives HERE: a
+    # Blueprint sync applies this file, so an upgrade made only in the
+    # dashboard was set back to `starter` (512 MB) by the next push, and the
+    # worker went on being killed for memory the owner had paid to raise.
+    plan: standard
     # Two instances, and safe to be two: every cron takes a lease (worker._safe)
     # and the per-account jobs shard across holders (worker._each_tenant), so
     # the second instance splits the work instead of repeating it. Queued work
     # splits by a claim on each row (jobs.claim), one job per instance at a
-    # time — memory, not CPU, is the limit at 512 MB. Committed
-    # here rather than set in the dashboard so the count survives a sync.
+    # time — memory, not CPU, is the limit. Committed here rather than set in
+    # the dashboard so the count survives a sync.
     # Verify it is real, not assumed: /health/workers counts distinct holders.
     numInstances: 2
     buildCommand: pip install -r requirements.txt
