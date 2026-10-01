@@ -1028,8 +1028,8 @@ def _message_text(message: dict | None) -> str:
     if message.get("claims"):
         lines.append("- approved claims — use VERBATIM or not at all:\n" + "\n".join(f"  · {c}" for c in message["claims"][:8]))
     if str(message.get("news") or "").strip():
-        lines.append("- what's new — the owner's facts for this send, TRUE AS WRITTEN; the email carries "
-                     "them, stated exactly (names, dates, numbers as given) — " + _bundle.NEWS_RULE + ":\n"
+        lines.append("- what's new — the owner's facts for this send, true as given; the email carries "
+                     "them, names, dates and numbers as given — " + _bundle.NEWS_RULE + ":\n"
                      + str(message["news"]).strip()[:1500])
     if message.get("text"):
         lines.append("- what the drafter wrote, to carry (its facts and its ask, not its shape):\n" + str(message["text"])[:2200])

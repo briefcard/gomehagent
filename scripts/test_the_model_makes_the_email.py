@@ -705,7 +705,8 @@ def main() -> int:
     skill.run("campaign_email", "baci", segment="reorder_due", structure=new["id"], intent="education",
               entity_key="portofino", generate_visual="no", news=NEWS)
     ck("What's new reaches the maker as facts to state, not as the angle",
-       any(NEWS in p and "TRUE AS WRITTEN" in p for p in compose_seen if "THE MESSAGE this email carries" in p),
+       any(NEWS in p and "true as given" in p and "brand's own voice" in p
+           for p in compose_seen if "THE MESSAGE this email carries" in p),
        str([p[:60] for p in compose_seen][:4]))
     _truths = [p[-1]["text"] for p in seen["email_judge"]
                if isinstance(p, list) and p[-1]["text"].startswith("The words of an email")]

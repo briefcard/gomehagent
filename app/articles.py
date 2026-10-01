@@ -304,9 +304,9 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
         "questions": (("\nQUESTIONS PEOPLE SEARCH, to answer:\n" + "\n".join(f"- {q}" for q in (questions or [])[:8]) + "\n") if questions else "")
         + (f"\nTHE ANGLE this piece takes — the way in, chosen on the plan: {angle}\n" if angle else "")
         + (f"\nWHAT THE OWNER ASKED FOR ON THIS PIECE — outranks the angle and the brief:\n{notes[:1500]}\n" if notes else "")
-        + (f"\nWHAT'S NEW — facts the owner gave for this piece. They are TRUE AS WRITTEN and in the material; "
+        + (f"\nWHAT'S NEW — facts the owner gave for this piece. They are true as given and in the material; "
            f"unlike the angle they are said, not implied: the story carries them, the beats that state them rest "
-           f"on them, names, dates and numbers exactly as given — {_bundle.NEWS_RULE}:\n{kit_['_news'][:1500]}\n"
+           f"on them, names, dates and numbers as given — {_bundle.NEWS_RULE}:\n{kit_['_news'][:1500]}\n"
            if kit_.get("_news") else "")
         + ("\n" + (kit_.get("_notes") or "") if kit_.get("_notes") else ""),
         "length": brief_.get("length_words") or 1400}
@@ -521,8 +521,8 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
             "name": kit_.get("name") or "the brand", "positioning": kit_.get("positioning") or "", "keyword": keyword,
             "pattern": _pattern_text(pattern_), "brief": json.dumps({k: brief_.get(k) for k in ("answer_first", "must_cover", "gaps", "media", "tone", "beat", "length_words")}, ensure_ascii=False, indent=1)[:3500],
             "story": _story_text(story_),
-            "news": ("\nWHAT'S NEW — the owner's facts for this piece, TRUE AS WRITTEN and part of the material: "
-                     "state them exactly as given (names, dates, numbers) where the story carries them — "
+            "news": ("\nWHAT'S NEW — the owner's facts for this piece, true as given and part of the material: "
+                     "state them where the story carries them (names, dates, numbers as given) — "
                      + _bundle.NEWS_RULE + ":\n"
                      + kit_["_news"][:1500] + "\n") if kit_.get("_news") else "",
             "heading_face": (theme.get("font") or {}).get("heading") or "(the theme's)",

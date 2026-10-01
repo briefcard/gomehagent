@@ -579,8 +579,8 @@ SABOTAGES = [
     {
         "name": 'the_maker_is_not_told_whose_fact',
         "file": 'app/recreate.py',
-        "find": '                     "them, stated exactly (names, dates, numbers as given) — " + _bundle.NEWS_RULE + ":\\n"',
-        "replace": '                     "them, stated exactly (names, dates, numbers as given):\\n"  # SABOTAGE',
+        "find": '                     "them, names, dates and numbers as given — " + _bundle.NEWS_RULE + ":\\n"',
+        "replace": '                     "them, names, dates and numbers as given:\\n"  # SABOTAGE',
         "suites": ['test_whats_new_reaches_every_writer.py'],
         "why": 'the maker is never told the brand owns its facts, or that a number keeps its qualifier',
     },
@@ -591,6 +591,22 @@ SABOTAGES = [
         "replace": 'pinned elsewhere (a city, a region or the category owning what the brand owns —  # SABOTAGE',
         "suites": ['test_whats_new_reaches_every_writer.py'],
         "why": "'Milan has 500 stockists' passes the fact check because the number is on file",
+    },
+    {
+        "name": 'the_writers_copy_the_owners_words',
+        "file": 'app/bundle.py',
+        "find": 'NEWS_RULE = ("the owner\'s notes, not lines to copy: say them in the brand\'s own voice and keep the "',
+        "replace": 'NEWS_RULE = ("state them exactly as given and keep the "  # SABOTAGE',
+        "suites": ['test_whats_new_reaches_every_writer.py'],
+        "why": "every writer repeats the owner's own words instead of saying the facts in the brand's voice",
+    },
+    {
+        "name": 'five_hundred_plus_is_a_dropped_qualifier',
+        "file": 'app/bundle.py',
+        "find": '                return bool(re.search(rf"\\b(?:{_MORE})\\s*\\$?$", before) or re.match(r"[\\s-]?(?:\\+|plus\\b)", after))',
+        "replace": '                return bool(re.search(rf"\\b(?:{_MORE})\\s*\\$?$", before) or re.match(r"\\s?(?:\\+|plus\\b)", after))  # SABOTAGE',
+        "suites": ['test_whats_new_reaches_every_writer.py'],
+        "why": "'a 500-plus retailer network' — the brand's own way of saying it — is blocked as a dropped qualifier",
     },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the
@@ -748,7 +764,7 @@ SABOTAGES = [
     {
         "name": "the_story_is_not_told_to_state_whats_new",
         "file": "app/articles.py",
-        "find": '           f"on them, names, dates and numbers exactly as given — {_bundle.NEWS_RULE}:\\n{kit_[\'_news\'][:1500]}\\n"\n           if kit_.get("_news") else "")',
+        "find": '           f"on them, names, dates and numbers as given — {_bundle.NEWS_RULE}:\\n{kit_[\'_news\'][:1500]}\\n"\n           if kit_.get("_news") else "")',
         "replace": '           f"" if False else "")  # SABOTAGE',
         "suites": ["test_whats_new_reaches_every_writer.py"],
         "why": "the story treats the news as one more fact it may use, and the "

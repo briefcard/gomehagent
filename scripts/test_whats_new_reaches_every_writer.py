@@ -144,8 +144,9 @@ def main() -> int:
     ck("the drafter is told What's new as facts to SAY — the angle stays direction",
        "WHAT'S NEW" in p and NEWS in p and "to be said" in p and p.index(NEWS) < p.index("THE ANGLE"), p[:160])
     msg = {"news": NEWS, "claims": [PRODUCT_CLAIM]}
-    ck("the maker is told it as true, to state exactly",
-       NEWS in rc._message_text(msg) and "TRUE AS WRITTEN" in rc._message_text(msg))
+    ck("the maker is told it as true, to state in the brand's voice",
+       NEWS in rc._message_text(msg) and "true as given" in rc._message_text(msg)
+       and "brand's own voice" in rc._message_text(msg))
     mat = rc._material({"entities": kit_["entities"][:1], "claims": [{"claim": BRAND_CLAIM}]}, "portofino", msg)
     ck("the email's fact check reads the news first and the claim the email cites",
        mat.splitlines()[0].endswith(NEWS) and PRODUCT_CLAIM in mat and BRAND_CLAIM in mat, mat[:160])
@@ -163,7 +164,8 @@ def main() -> int:
     given = "We have over 500 retailers in Europe. Up to 30% off the Aqua line."
     said = {"Milan has 500 European stockists.": True, "Take 30% off the Aqua line.": True,
             "More than 500 retailers in Europe carry us.": False, "500+ European retailers.": False,
-            "Up to 30% off the Aqua line.": False, "Our 500ml carafe.": False}
+            "Up to 30% off the Aqua line.": False, "Our 500ml carafe.": False,
+            "A 500-plus retailer network across Europe.": False}
     wrong = {w: bundle.news_changed(w, given) for w in said}
     ck("a number the owner qualified is held to its qualifier wherever the copy states it",
        all(bool(wrong[w]) == flag for w, flag in said.items()), str({w: bool(v) for w, v in wrong.items()}))
@@ -172,6 +174,12 @@ def main() -> int:
     ck("every writer is told who a fact is about and that a number keeps its qualifier",
        bundle.NEWS_RULE in p and bundle.NEWS_RULE in rc._message_text(msg) and bundle.NEWS_RULE in ap
        and bundle.NEWS_RULE in story_p, "drafter / maker / ads / the article's story")
+    # "I don't necessarily want it to be the same words I use. Just for it to
+    # be on brand." The facts are held; the wording is the brand's.
+    ck("  in the brand's own voice — no writer is told to copy the owner's words",
+       "not lines to copy" in bundle.NEWS_RULE and "brand's own voice" in bundle.NEWS_RULE
+       and not any("exactly as given" in x or "TRUE AS WRITTEN" in x
+                   for x in (p, rc._message_text(msg), ap, story_p)))
     blog = ar.check("<h1>Tables</h1><p>Milan has 500 European stockists.</p>", "Tables", "meta", "",
                     {}, {"_news": given})
     ck("the article's checks block it", any(f["code"] == "news_changed" and f["severity"] == "blocks"

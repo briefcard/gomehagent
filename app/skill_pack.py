@@ -1234,7 +1234,7 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
     news = str(bundle.get("news") or "").strip()
     if news:
         parts.append("\n## What's new — facts the owner gave for this batch, "
-                     "TRUE AS WRITTEN: state them exactly as given — " + _pkg.NEWS_RULE + "\n" + news)
+                     "true as given — " + _pkg.NEWS_RULE + "\n" + news)
     aud = bundle.get("audiences") or []
     if aud:
         parts.append("\n## Who is reading")
@@ -2607,8 +2607,8 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
         if news:
             parts.append(
                 "\n## WHAT'S NEW — facts the owner gave for this send\n" + news
-                + "\nTRUE AS WRITTEN, and the news this email exists to carry: "
-                  "state them plainly — names, dates and numbers exactly as "
+                + "\nTrue as given, and the news this email exists to carry: "
+                  "say them plainly — names, dates and numbers as "
                   "given; " + _pkg.NEWS_RULE + ". Unlike the angle, these are to be said.")
         contested = bundle.get("contested_positioning") or []
         if contested:

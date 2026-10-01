@@ -86,11 +86,14 @@ OWNER_INPUT = ("offer", "deadline", "revision_notes", "news")
 #: HOW A WRITER STATES THE OWNER'S NEWS, said the same way to every writer.
 #: Owner, 2026-10-01, of "Milan has 500 European stockists" for what they had
 #: given as "over 500 retailers in Europe": "that language isn't very good
-#: is it?" — the city made the subject and the "over" dropped, while every
-#: writer was already told to state the news "exactly as given".
-NEWS_RULE = ("who a fact is about stays who it is about — the brand by its name, or \"we\"; never a "
-             "city, a place or the category standing in for it — and a number keeps its qualifier "
-             "(\"over 500\" stays \"over 500\", \"up to 30%\" stays \"up to 30%\")")
+#: is it?" — the city made the subject and the "over" dropped. And then: "I
+#: don't necessarily want it to be the same words I use. Just for it to be on
+#: brand." THE FACTS ARE THE OWNER'S, THE WORDS ARE THE BRAND'S: what stays
+#: put is who a fact is about and what its number means.
+NEWS_RULE = ("the owner's notes, not lines to copy: say them in the brand's own voice and keep the "
+             "facts — who a fact is about stays who it is about (the brand by its name, or \"we\"; never "
+             "a city, a place or the category standing in for it), and a number keeps its qualifier "
+             "(\"over 500\" may be \"more than 500\" or \"500-plus\", never a bare \"500\")")
 
 #: The qualifiers a number of the owner's may carry, by the way they bend it.
 _MORE = r"over|more than|upwards of|at least|in excess of|north of"
@@ -119,7 +122,7 @@ def news_changed(words: str, news: str) -> list[str]:
             before = (words or "")[max(0, m.start() - 24):m.start()].lower()
             after = (words or "")[m.end():m.end() + 6].lower()
             if more:
-                return bool(re.search(rf"\b(?:{_MORE})\s*\$?$", before) or re.match(r"\s?(?:\+|plus\b)", after))
+                return bool(re.search(rf"\b(?:{_MORE})\s*\$?$", before) or re.match(r"[\s-]?(?:\+|plus\b)", after))
             return bool(re.search(rf"\b(?:{_LESS})\s*\$?$", before))
         if not any(kept(m) for m in said):
             gave = f"{n}+" if q == "+" else f"{q} {n}"
