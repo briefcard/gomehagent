@@ -83,6 +83,50 @@ import pathlib
 #: because news goes stale and a claim would outlive it.
 OWNER_INPUT = ("offer", "deadline", "revision_notes", "news")
 
+#: HOW A WRITER STATES THE OWNER'S NEWS, said the same way to every writer.
+#: Owner, 2026-10-01, of "Milan has 500 European stockists" for what they had
+#: given as "over 500 retailers in Europe": "that language isn't very good
+#: is it?" — the city made the subject and the "over" dropped, while every
+#: writer was already told to state the news "exactly as given".
+NEWS_RULE = ("who a fact is about stays who it is about — the brand by its name, or \"we\"; never a "
+             "city, a place or the category standing in for it — and a number keeps its qualifier "
+             "(\"over 500\" stays \"over 500\", \"up to 30%\" stays \"up to 30%\")")
+
+#: The qualifiers a number of the owner's may carry, by the way they bend it.
+_MORE = r"over|more than|upwards of|at least|in excess of|north of"
+_LESS = r"up to|nearly|almost|close to|just under|under|less than|fewer than"
+_NUMBER = r"\$?\d[\d,]*(?:\.\d+)?\s?%?(?![A-Za-z\d])"
+
+
+def news_changed(words: str, news: str) -> list[str]:
+    """Each fact in `news` whose NUMBER the copy states without the qualifier
+    the owner gave it — "over 500" written "500", "up to 30%" written "30%" —
+    as a sentence. The enforcement behind `NEWS_RULE`: an instruction alone
+    did not hold. A number the copy does not use is not this check's to say;
+    a paraphrase that keeps the qualifier ("more than 500", "500+") passes."""
+    import re
+    out: list[str] = []
+    norm = lambda n: re.sub(r"[\s,$]", "", n)  # noqa: E731
+    given = [(m.group(1), m.group(2).strip()) for m in
+             re.finditer(rf"\b({_MORE}|{_LESS})\s+({_NUMBER})", news or "", re.I)]
+    given += [("+", m.group(1).strip()) for m in re.finditer(rf"({_NUMBER})\s?\+", news or "")]
+    for q, n in given:
+        more = q == "+" or re.fullmatch(_MORE, q, re.I) is not None
+        said = [m for m in re.finditer(_NUMBER, words or "") if norm(m.group(0)) == norm(n)]
+        if not said:
+            continue
+        def kept(m) -> bool:
+            before = (words or "")[max(0, m.start() - 24):m.start()].lower()
+            after = (words or "")[m.end():m.end() + 6].lower()
+            if more:
+                return bool(re.search(rf"\b(?:{_MORE})\s*\$?$", before) or re.match(r"\s?(?:\+|plus\b)", after))
+            return bool(re.search(rf"\b(?:{_LESS})\s*\$?$", before))
+        if not any(kept(m) for m in said):
+            gave = f"{n}+" if q == "+" else f"{q} {n}"
+            out.append(f"what's new says \u201c{gave}\u201d and the copy says \u201c{said[0].group(0).strip()}\u201d "
+                       f"without it — the qualifier is part of the fact")
+    return out
+
 #: KEYS IN AN ENTITY'S `attributes` THAT ARE NOT FACTS ABOUT THE PRODUCT.
 #:
 #: The bag holds two different kinds of thing and they had never been told

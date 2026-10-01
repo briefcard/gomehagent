@@ -27,6 +27,7 @@ import re
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
+from . import bundle as _bundle
 from . import config, db, dividers, email_header, type_system
 
 #: Rounds: the first, then up to this many edits. The hand-made proof took two.
@@ -1028,7 +1029,8 @@ def _message_text(message: dict | None) -> str:
         lines.append("- approved claims — use VERBATIM or not at all:\n" + "\n".join(f"  · {c}" for c in message["claims"][:8]))
     if str(message.get("news") or "").strip():
         lines.append("- what's new — the owner's facts for this send, TRUE AS WRITTEN; the email carries "
-                     "them, stated exactly (names, dates, numbers as given):\n" + str(message["news"]).strip()[:1500])
+                     "them, stated exactly (names, dates, numbers as given) — " + _bundle.NEWS_RULE + ":\n"
+                     + str(message["news"]).strip()[:1500])
     if message.get("text"):
         lines.append("- what the drafter wrote, to carry (its facts and its ask, not its shape):\n" + str(message["text"])[:2200])
     return ":\n" + "\n".join(lines)
@@ -2061,8 +2063,12 @@ rather than says: "the plastic is gone" about a melamine plate implies it is not
 merely describes (beautiful, complete, ready) is not a fact; a contrast that names the
 CATEGORY's failing ("most melamine fades") is not a claim about this product — but a NUMBER about the
 category (a temperature, a percentage, a year, a price band, "studies show") that the material
-does not give is fabricated. Answer JSON only: {"fabricated": [{"words": the exact words in the
-email, "why": what the material says instead, or that it says nothing}]}
+does not give is fabricated. A fact the material DOES give is listed too when the email changes it:
+pinned on a different subject (a city, a region or the category owning what the brand owns —
+"Milan has 500 stockists" for the brand's own retailers), its qualifier dropped ("over 500" said
+"500", "up to 30%%" said "30%%"), or its scope widened or narrowed. Answer JSON only:
+{"fabricated": [{"words": the exact words in the email, "why": what the material says instead,
+or that it says nothing}]}
 
 THE EMAIL'S WORDS
 %(words)s
@@ -2471,6 +2477,9 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         _t = _time.monotonic()
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         told = truth(_Walk_words(html), material_, tenant=tenant)
+        # THE OWNER'S NEWS AS GIVEN: a number keeps its qualifier (2026-10-01)
+        checks += [{"code": "news_changed", "severity": "blocks", "where": "the copy", "what": p_}
+                   for p_ in _bundle.news_changed(_Walk_words(html), str((message or {}).get("news") or ""))]
         calls += told.get("calls", 0)
         took["checking"] = round(_time.monotonic() - _t)
         _t = _time.monotonic()

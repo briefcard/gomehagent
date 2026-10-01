@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import re
 
+from . import bundle as _bundle
 from . import config, db
 from .recreate import (_Walk_words, _ask, _devices_text, _json, _material, _norm,  # noqa: F401
                        blocking, truth)
@@ -305,7 +306,8 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
         + (f"\nWHAT THE OWNER ASKED FOR ON THIS PIECE — outranks the angle and the brief:\n{notes[:1500]}\n" if notes else "")
         + (f"\nWHAT'S NEW — facts the owner gave for this piece. They are TRUE AS WRITTEN and in the material; "
            f"unlike the angle they are said, not implied: the story carries them, the beats that state them rest "
-           f"on them, names, dates and numbers exactly as given:\n{kit_['_news'][:1500]}\n" if kit_.get("_news") else "")
+           f"on them, names, dates and numbers exactly as given — {_bundle.NEWS_RULE}:\n{kit_['_news'][:1500]}\n"
+           if kit_.get("_news") else "")
         + ("\n" + (kit_.get("_notes") or "") if kit_.get("_notes") else ""),
         "length": brief_.get("length_words") or 1400}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=8000)
@@ -520,7 +522,8 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
             "pattern": _pattern_text(pattern_), "brief": json.dumps({k: brief_.get(k) for k in ("answer_first", "must_cover", "gaps", "media", "tone", "beat", "length_words")}, ensure_ascii=False, indent=1)[:3500],
             "story": _story_text(story_),
             "news": ("\nWHAT'S NEW — the owner's facts for this piece, TRUE AS WRITTEN and part of the material: "
-                     "state them exactly as given (names, dates, numbers) where the story carries them:\n"
+                     "state them exactly as given (names, dates, numbers) where the story carries them — "
+                     + _bundle.NEWS_RULE + ":\n"
                      + kit_["_news"][:1500] + "\n") if kit_.get("_news") else "",
             "heading_face": (theme.get("font") or {}).get("heading") or "(the theme's)",
             "body_face": (theme.get("font") or {}).get("body") or "(the theme's)", "accent": (theme.get("colors") or {}).get("accent") or "(the theme's)",
@@ -564,6 +567,9 @@ def check(html: str, title: str, meta: str, keyword: str, pattern_: dict, kit_: 
     out: list[dict] = []
     add = lambda code, sev, where, what: out.append({"code": code, "severity": sev, "where": str(where)[:100], "what": str(what)[:300]})  # noqa: E731
     words = _Walk_words(html)
+    # THE OWNER'S NEWS AS GIVEN: a number keeps its qualifier (2026-10-01)
+    for p_ in _bundle.news_changed(words, kit_.get("_news") or ""):
+        add("news_changed", "blocks", "the copy", p_)
     want = set(_kw.tokens(keyword))
     if not title:
         add("title", "blocks", "title", "no title")

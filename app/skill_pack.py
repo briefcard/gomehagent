@@ -1234,7 +1234,7 @@ def ad_prompt(bundle: dict, claim: dict, angle: str,
     news = str(bundle.get("news") or "").strip()
     if news:
         parts.append("\n## What's new — facts the owner gave for this batch, "
-                     "TRUE AS WRITTEN: state them exactly as given\n" + news)
+                     "TRUE AS WRITTEN: state them exactly as given — " + _pkg.NEWS_RULE + "\n" + news)
     aud = bundle.get("audiences") or []
     if aud:
         parts.append("\n## Who is reading")
@@ -1700,7 +1700,8 @@ def _run_ad_copy(ctx: Context) -> dict:
                 body=text, headline=headline, angle=angle,
                 offer=str(ctx.bundle.get("offer") or ""), levers=levers,
                 urgency_backed_by=str(ctx.bundle.get("deadline") or ""),
-                proof=str(claim.get("evidence") or ""))
+                proof=str(claim.get("evidence") or ""),
+                news=str(ctx.bundle.get("news") or ""))
             blocked = ad_craft.block_reasons(craft_findings)
             if blocked:
                 # ONE redraft, and KEEP IT ONLY IF THE BLOCKS WENT DOWN — the
@@ -1720,7 +1721,8 @@ def _run_ad_copy(ctx: Context) -> dict:
                         offer=str(ctx.bundle.get("offer") or ""),
                         levers=r["levers"],
                         urgency_backed_by=str(ctx.bundle.get("deadline") or ""),
-                        proof=str(claim.get("evidence") or ""))
+                        proof=str(claim.get("evidence") or ""),
+                news=str(ctx.bundle.get("news") or ""))
                     now = ad_craft.block_reasons(left)
                     if len(now) < len(blocked) or (
                             len(now) == len(blocked)
@@ -1834,13 +1836,15 @@ def _run_ad_copy(ctx: Context) -> dict:
                 angle=_held["angle"], offer=str(ctx.bundle.get("offer") or ""),
                 levers=_p2["levers"],
                 urgency_backed_by=str(ctx.bundle.get("deadline") or ""),
-                proof=str(_held["claim"].get("evidence") or ""))
+                proof=str(_held["claim"].get("evidence") or ""),
+                news=str(ctx.bundle.get("news") or ""))
             # KEEP IT UNLESS IT BROKE THE CRAFT RULES WORSE. Following the
             # brief is the point; trading a blocked hook for it is not.
             if len(ad_craft.block_reasons(_left)) <= len(
                     ad_craft.block_reasons(ad_craft.review(
                         body=_held["text"], angle=_held["angle"],
-                        offer=str(ctx.bundle.get("offer") or "")))):
+                        offer=str(ctx.bundle.get("offer") or ""),
+                        news=str(ctx.bundle.get("news") or "")))):
                 _held["text"] = _p2["body"]
                 _held["headline"] = _p2["headline"] or _held["headline"]
                 _held["applied"] = list(_row.get("ignored") or [])
@@ -2605,7 +2609,7 @@ def _draft_campaign_live(bundle: dict, seg: dict, goal: str,
                 "\n## WHAT'S NEW — facts the owner gave for this send\n" + news
                 + "\nTRUE AS WRITTEN, and the news this email exists to carry: "
                   "state them plainly — names, dates and numbers exactly as "
-                  "given. Unlike the angle, these are to be said.")
+                  "given; " + _pkg.NEWS_RULE + ". Unlike the angle, these are to be said.")
         contested = bundle.get("contested_positioning") or []
         if contested:
             parts.append(

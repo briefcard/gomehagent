@@ -542,6 +542,56 @@ SABOTAGES = [
         "suites": ["test_the_email_is_the_brands.py"],
         "why": "'Bellissimo!' and a stick figure are cosmetic to the judge and the email ships with them",
     },
+    # The owner's news stated as given (owner, 2026-10-01: "Milan has 500
+    # European stockists" for "over 500 retailers in Europe").
+    {
+        "name": 'a_dropped_qualifier_passes',
+        "file": 'app/bundle.py',
+        "find": '        if not any(kept(m) for m in said):',
+        "replace": '        if False:  # SABOTAGE',
+        "suites": ['test_whats_new_reaches_every_writer.py', 'test_the_model_makes_the_email.py'],
+        "why": "'over 500 retailers' becomes '500 stockists' and nothing says the fact changed",
+    },
+    {
+        "name": 'the_maker_never_checks_the_news',
+        "file": 'app/recreate.py',
+        "find": '                   for p_ in _bundle.news_changed(_Walk_words(html), str((message or {}).get("news") or ""))]',
+        "replace": '                   for p_ in []]  # SABOTAGE',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "an email states the owner's number without its qualifier and ships",
+    },
+    {
+        "name": 'the_article_never_checks_the_news',
+        "file": 'app/articles.py',
+        "find": '    for p_ in _bundle.news_changed(words, kit_.get("_news") or ""):',
+        "replace": '    for p_ in []:  # SABOTAGE',
+        "suites": ['test_whats_new_reaches_every_writer.py'],
+        "why": "an article states the owner's number without its qualifier and publishes",
+    },
+    {
+        "name": 'the_ad_never_checks_the_news',
+        "file": 'app/ad_craft.py',
+        "find": '    for p_ in _news_changed(f"{headline} {text}", news):',
+        "replace": '    for p_ in []:  # SABOTAGE',
+        "suites": ['test_whats_new_reaches_every_writer.py'],
+        "why": "an ad states the owner's number without its qualifier and is offered",
+    },
+    {
+        "name": 'the_maker_is_not_told_whose_fact',
+        "file": 'app/recreate.py',
+        "find": '                     "them, stated exactly (names, dates, numbers as given) — " + _bundle.NEWS_RULE + ":\\n"',
+        "replace": '                     "them, stated exactly (names, dates, numbers as given):\\n"  # SABOTAGE',
+        "suites": ['test_whats_new_reaches_every_writer.py'],
+        "why": 'the maker is never told the brand owns its facts, or that a number keeps its qualifier',
+    },
+    {
+        "name": 'the_fact_check_ignores_a_changed_fact',
+        "file": 'app/recreate.py',
+        "find": 'pinned on a different subject (a city, a region or the category owning what the brand owns —',
+        "replace": 'pinned elsewhere (a city, a region or the category owning what the brand owns —  # SABOTAGE',
+        "suites": ['test_whats_new_reaches_every_writer.py'],
+        "why": "'Milan has 500 stockists' passes the fact check because the number is on file",
+    },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the
     # reason cut at "Validati"; and "audiences OR segments".
@@ -698,8 +748,8 @@ SABOTAGES = [
     {
         "name": "the_story_is_not_told_to_state_whats_new",
         "file": "app/articles.py",
-        "find": "           f\"on them, names, dates and numbers exactly as given:\\n{kit_['_news'][:1500]}\\n\" if kit_.get(\"_news\") else \"\")",
-        "replace": "           f\"\" if False else \"\")  # SABOTAGE",
+        "find": '           f"on them, names, dates and numbers exactly as given — {_bundle.NEWS_RULE}:\\n{kit_[\'_news\'][:1500]}\\n"\n           if kit_.get("_news") else "")',
+        "replace": '           f"" if False else "")  # SABOTAGE',
         "suites": ["test_whats_new_reaches_every_writer.py"],
         "why": "the story treats the news as one more fact it may use, and the "
                "article is about something else",

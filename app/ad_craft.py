@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import re
 
+from .bundle import news_changed as _news_changed
 from .bundle import stateable as _stateable
 from .email_craft import PLATITUDES, URGENCY, _find, _words
 
@@ -242,7 +243,7 @@ def levers_present(text: str, levers: list[str] | None) -> list[str]:
 
 def review(*, body: str = "", headline: str = "", angle: str = "",
            offer: str = "", levers: list[str] | None = None,
-           urgency_backed_by: str = "", proof: str = "") -> list[dict]:
+           urgency_backed_by: str = "", proof: str = "", news: str = "") -> list[dict]:
     """Craft findings for one ad variant. `[]` means nothing to say.
 
     Severities match `email_craft`: "block" is a defect the owner should not
@@ -256,6 +257,10 @@ def review(*, body: str = "", headline: str = "", angle: str = "",
         out.append({"severity": sev, "rule": rule, "detail": detail, "fix": fix})
 
     text = (body or "").strip()
+
+    # --- the owner's news as given: a number keeps its qualifier ----------
+    for p_ in _news_changed(f"{headline} {text}", news):
+        add("block", "news_changed", p_, "state it as the owner gave it, qualifier and all")
 
     # --- the hook: the first five words are the whole audition -------------
     if text:

@@ -845,6 +845,20 @@ def main() -> int:
     ck("  and every round says how long each step took",
        set(r0.get("took") or {}) == {"writing", "drawing", "checking", "rendering", "judging"}
        and "took" in (got_b.get("note") or ""), str(r0.get("took")))
+    # THE OWNER'S NEWS AS GIVEN (2026-10-01): "Milan has 500 European
+    # stockists" for "over 500 retailers in Europe". Through `run`.
+    news_ = "We have over 500 retailers in Europe."
+    _line = '<p style="color:#f4e8d3;font-family:Helvetica,Arial,sans-serif;font-size:13px">%s</p>'
+    answers["email_compose"] = reply_email(email_html(extra=_line % "Milan has 500 European stockists."))
+    got_n = rc.run(sid, "baci", "portofino", seed="news", message={"subject": "Set the scene", "news": news_})
+    n0 = (got_n.get("rounds") or [{}])[0]
+    ck("a number from What's new stated without its qualifier blocks the round, and says which",
+       any(c.get("code") == "news_changed" and c.get("severity") == "blocks" and "over 500" in c.get("what", "")
+           for c in n0.get("check") or []), str([c.get("code") for c in n0.get("check") or []]))
+    answers["email_compose"] = reply_email(email_html(extra=_line % "Over 500 retailers in Europe carry us."))
+    got_k = rc.run(sid, "baci", "portofino", seed="news-kept", message={"subject": "Set the scene", "news": news_})
+    ck("  stated as given, it does not",
+       not any(c.get("code") == "news_changed" for r_ in got_k.get("rounds") or [] for c in r_.get("check") or []))
     # A GUARD THAT CAUGHT NOTHING (found 2026-09-29, missed on bebf031 too):
     # the "cannot be made" outcome was never asserted through `run`.
     answers["email_cast"] = {"picks": [], "none": [{"section": 3, "needs": "a photograph of food on the plate"}]}

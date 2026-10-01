@@ -157,6 +157,31 @@ def main() -> int:
     pp = "\n".join(ad_craft.panel_prompt(b, [{"n": 1, "claim": {"claim": BRAND_CLAIM}, "angle": "benefit"}]))
     ck("  and the panel's brief is written knowing it", NEWS in pp)
 
+    print("\n— stated as given: who it is about, and a number's qualifier (2026-10-01) —")
+    # Owner, of "Milan has 500 European stockists" for "over 500 retailers in
+    # Europe": "that language isn't very good is it?"
+    given = "We have over 500 retailers in Europe. Up to 30% off the Aqua line."
+    said = {"Milan has 500 European stockists.": True, "Take 30% off the Aqua line.": True,
+            "More than 500 retailers in Europe carry us.": False, "500+ European retailers.": False,
+            "Up to 30% off the Aqua line.": False, "Our 500ml carafe.": False}
+    wrong = {w: bundle.news_changed(w, given) for w in said}
+    ck("a number the owner qualified is held to its qualifier wherever the copy states it",
+       all(bool(wrong[w]) == flag for w, flag in said.items()), str({w: bool(v) for w, v in wrong.items()}))
+    ck("  and it says what changed",
+       "\u201cover 500\u201d" in (wrong["Milan has 500 European stockists."] or [""])[0])
+    ck("every writer is told who a fact is about and that a number keeps its qualifier",
+       bundle.NEWS_RULE in p and bundle.NEWS_RULE in rc._message_text(msg) and bundle.NEWS_RULE in ap
+       and bundle.NEWS_RULE in story_p, "drafter / maker / ads / the article's story")
+    blog = ar.check("<h1>Tables</h1><p>Milan has 500 European stockists.</p>", "Tables", "meta", "",
+                    {}, {"_news": given})
+    ck("the article's checks block it", any(f["code"] == "news_changed" and f["severity"] == "blocks"
+                                            for f in blog), str([f["code"] for f in blog]))
+    ad_ = ad_craft.review(body="Milan has 500 European stockists. Shop the edit.", headline="Tables", news=given)
+    ck("  and so does the ad review", any(f["rule"] == "news_changed" and f["severity"] == "block" for f in ad_),
+       str([f["rule"] for f in ad_]))
+    ck("the email's fact check is told a changed subject or a dropped qualifier is listed too",
+       "pinned on a different subject" in rc._TRUTH_PROMPT and "its qualifier dropped" in rc._TRUTH_PROMPT)
+
     print("\n— one topic, every piece that writes —")
     topics.plan(T, topic="Portofino Blu launch", channels=list(topics.CHANNELS), entity_key="portofino",
                 audience_key="hosts", segment="new_subscribers", news=NEWS, on="2026-10-01")
