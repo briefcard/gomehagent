@@ -15,6 +15,7 @@ should take you to the wholesale page not the collections page."
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 import types
@@ -396,6 +397,58 @@ def main() -> int:
        and "a drawn thing" not in rc._COMPOSE_PROMPT)
     ck("  and the judge that a generic stand-in BLOCKS, in the owner's own examples",
        "instance in disguise BLOCKS" in rc._JUDGE_PROMPT and '"Bellissimo!"' in rc._JUDGE_PROMPT)
+
+    print("\n— the column is ours and the mark is the header's (2026-10-01) —")
+    # Owner: "Off-center, not limited to the correct design? double logo at
+    # the top?" — a headline block flush left, a wave across half the page,
+    # and the mark drawn again under the header inside a link round it.
+    loose = ('<!DOCTYPE html><html><body style="margin:0;background:#f4efe9"><!-- system: faces x · scale: 48/16 -->'
+             '<table width="600"><tr><td>Flush left, at any width</td></tr></table></body></html>')
+    framed = rc.frame(loose, 600)
+    ck("whatever the maker writes is set inside one centred column of the email's width",
+       'data-frame="1"' in framed and '<td align="center" style="padding:0">' in framed
+       and 'width="600"' in framed and "max-width:600px" in framed
+       and framed.index("Flush left") > framed.index('data-frame="1"'))
+    ck("  its system comment stays first, and framing twice changes nothing",
+       re.search(r"<body[^>]*><!-- system:", framed) is not None and rc.frame(framed, 600) == framed)
+    linked = f'<a href="https://bacimilanousa.com"><img src="{LOGO}" alt="Baci" width="160"></a>'
+    maker = email(f'<tr><td align="center">{linked}</td></tr>'
+                  f'<tr><td><img src="{SCENE}" alt="the table" width="600"></td></tr>'
+                  '<tr><td><a href="https://bacimilanousa.com/collections/all">Shop</a></td></tr>'
+                  f'<tr><td align="center"><img src="{LOGO}" alt="Baci" width="100"></td></tr>')
+    cleaned, said_ = rc.drop_top_marks(maker, kit)
+    ck("the maker's own mark at the top is taken out — the link round it with it — and said",
+       linked not in cleaned and "the header carries it" in said_)
+    ck("  the sign-off mark in the footer, after the pictures and the links, stays",
+       f'<img src="{LOGO}" alt="Baci" width="100">' in cleaned)
+    with_head = eh.place(email('<tr><td style="padding:0"><!--brand-header: #f0ede6 #1b1c2e--></td></tr>'
+                               f'<tr><td align="center">{linked}</td></tr>'
+                               f'<tr><td><img src="{SCENE}" alt="the table" width="600"></td></tr>'), T, kit, 600)[0]
+    ck("a mark in a link under the header is a second masthead — the gap the double logo came through",
+       any(f["code"] == "second_masthead" for f in rc.check(with_head, pics_kit, brief_)))
+    baked_name = ('<!--bake--><table><tr><td style="font-family:Gelasio;font-size:72px;color:#1b1c2e">BACI<br>MILANO'
+                  '</td></tr></table><!--/bake-->')
+    baked_idea = ('<!--bake--><table><tr><td style="font-family:Gelasio;font-size:72px">Joke Set</td></tr></table>'
+                  '<!--/bake-->')
+    ck("the brand's name as a baked headline blocks — read off the maker's HTML, where the render cannot see it",
+       [f["code"] for f in rc.baked_masthead(baked_name, kit)] == ["second_masthead"]
+       and rc.baked_masthead(baked_idea, kit) == [])
+    off = {"texts": [{"text": "Over 500 retailers", "size": 32, "weight": 400, "color": "rgb(27,28,46)",
+                      "rects": [[0, 400, 480, 40]], "covered": 0}],
+           "images": [{"src": SCENE, "at": [0, 553]}]}
+    in_col = {"texts": [{"text": "Over 500 retailers", "size": 32, "weight": 400, "color": "rgb(27,28,46)",
+                         "rects": [[44, 400, 480, 40]], "covered": 0}],
+              "images": [{"src": SCENE, "at": [20, 620]}]}
+    got_off = [f for f in rc.render_check(off, kit) if f["code"] == "off_column"]
+    ck("a line or a picture outside the centred column blocks, read off the render",
+       len(got_off) == 1 and got_off[0]["severity"] == "blocks" and "2 line(s) or picture(s)" in got_off[0]["what"],
+       str(got_off)[:200])
+    ck("  and one inside it does not", not any(f["code"] == "off_column" for f in rc.render_check(in_col, kit)))
+    css_fig = ('<style>.hd{width:30px;height:30px;border-radius:50%;background:#2330f0}'
+               'div.bd{width:40px;height:60px;background:#2330f0;margin-top:-6px}</style>'
+               '<!--bake--><div class="hd"></div><div class="bd"></div><a class="btn">Apply</a><!--/bake-->')
+    ck("a figure drawn from a <style> block's classes blocks as one drawn inline does",
+       [f["code"] for f in rc.drawn_shapes(css_fig)] == ["drawn_figure"])
 
     print()
     print("ALL GREEN" if not _fail else f"FAILED: {len(_fail)}")

@@ -1405,15 +1405,13 @@ def check(html: str, kit_: dict, brief_: dict, copy_: dict | None = None, *,
     # reference's masthead; the mark drawn again below it is a second header
     # (owner, 2026-09-30: "there are two headers in the email because of the
     # programmed one and the one that is read from an email").
-    # A mark BEFORE the email's first picture or first link is a masthead; a
-    # sign-off mark in the footer, after them, is not.
-    logo_base = _base(theme.get("logo_url") or "") if theme.get("logo_url") else ""
+    # A mark BEFORE the email's first picture or first link is a masthead —
+    # the link round a logo is the logo's, not the email's first link (the
+    # gap a double logo came through, 2026-10-01); a sign-off mark in the
+    # footer, after them, is not.
+    logo_base = _pic_base(theme.get("logo_url") or "") if theme.get("logo_url") else ""
     below = re.sub(r"<table\b[^>]*data-brand-header=[\"']?1.*?</table>", "", html, count=1, flags=re.S | re.I)
-    marks = [m_.start() for m_ in re.finditer(r"<img\b[^>]*\bsrc=[\"']([^\"']+)", below, re.I)
-             if logo_base and _base(m_.group(1)) == logo_base]
-    others = [m_.start() for m_ in re.finditer(r"<img\b[^>]*\bsrc=[\"']([^\"']+)", below, re.I)
-              if _base(m_.group(1)) != logo_base] + [m_.start() for m_ in re.finditer(r"<a\b", below, re.I)]
-    if marks and marks[0] < min(others, default=len(below)):
+    if _top_marks(below, logo_base):
         add("second_masthead", "blocks", "the top",
             "the brand's mark drawn again below the header — the header IS the masthead; open on the "
             "reference's first section after its masthead")
@@ -1580,6 +1578,19 @@ def render_check(shot: dict, kit_: dict, cast_: dict | None = None) -> list[dict
                 f"the brand's name set as a {round(float(t['size']))}px headline under the header — the "
                 f"header IS the masthead; open on the email's own idea")
             break
+    # ONE CENTRED COLUMN, on the render: every line and picture inside the
+    # middle COLUMN px of the shot's width (owner, 2026-10-01: "Off-center").
+    from . import shots as _shots
+    lo, hi = (_shots.WIDTH - COLUMN) / 2 - 2, (_shots.WIDTH + COLUMN) / 2 + 2
+    spill = [f'"{str(t.get("text") or "")[:30]}" at x {round(q[0])}–{round(q[0] + q[2])}'
+             for t in texts for q in (t.get("rects") or [])[:1] if q[0] < lo or q[0] + q[2] > hi]
+    spill += [f"a picture at x {round(i_['at'][0])}–{round(i_['at'][1])}" for i_ in shot.get("images") or []
+              if len(i_.get("at") or []) == 2 and i_["at"][1] - i_["at"][0] >= 8
+              and (i_["at"][0] < lo or i_["at"][1] > hi)]
+    if spill:
+        add("off_column", "blocks", spill[0],
+            f"{len(spill)} line(s) or picture(s) outside the centred {COLUMN}px column — every row sits inside "
+            f"it, nothing wider than it, no negative margin pulling a block out")
     ground = Image.open(io.BytesIO(shot["ground"])).convert("RGB") if shot.get("ground") else None
     said: set = set()
     for t in texts if ground else []:
@@ -1795,6 +1806,91 @@ def system_check(html: str, seen: dict | None = None, *, pairing: dict | None = 
     return out
 
 
+def _pic_base(u: str) -> str:
+    """A picture's URL without its query and the cut `fit` adds — the name
+    two references to one picture share."""
+    u = str(u or "").split("?", 1)[0]
+    return re.sub(r"_\d+x\d*(?:_crop_\w+)?(\.\w+)$", r"\1", u)
+
+
+def frame(html: str, width: int = COLUMN) -> str:
+    """THE COLUMN IS OURS, as the header is. Owner, 2026-10-01: "Off-center,
+    not limited to the correct design" — a headline block flush left, a wave
+    across half the page and a photograph centred, at the width the email is
+    read at. The judge sees a 640px window, where a 600px column looks
+    centred however it is set. So whatever the maker writes is set inside one
+    centred column of `width` — the page around it its own ground — and
+    nothing it does can sit off it. Its `<!-- system -->` comment stays first."""
+    m = re.search(r"(<body\b[^>]*>)(.*)(</body>)", html or "", re.S | re.I)
+    if not m or 'data-frame="1"' in html:
+        return html
+    inner, lead = m.group(2), ""
+    sm = re.match(r"\s*<!--\s*system:.*?-->", inner, re.S | re.I)
+    if sm:
+        lead, inner = inner[:sm.end()], inner[sm.end():]
+    wrapped = (f'{lead}<table role="presentation" data-frame="1" width="100%" cellpadding="0" cellspacing="0" '
+               f'border="0" style="width:100%;border-collapse:collapse"><tr><td align="center" style="padding:0">'
+               f'<table role="presentation" width="{width}" cellpadding="0" cellspacing="0" border="0" '
+               f'style="width:100%;max-width:{width}px;border-collapse:collapse"><tr><td style="padding:0">'
+               f'{inner}</td></tr></table></td></tr></table>')
+    return html[:m.start(2)] + wrapped + html[m.end(2):]
+
+
+def _top_marks(html: str, logo_base: str) -> list[tuple[int, int]]:
+    """The brand's mark where a masthead would be: each <img> of the logo —
+    the link around it with it, when it has one, as a logo usually does —
+    before the email's first other picture or link. A sign-off mark in the
+    footer comes after them (a campaign always has its button), and stays."""
+    if not logo_base:
+        return []
+    body = re.search(r"<body\b[^>]*>", html or "", re.I)
+    start, end = (body.end() if body else 0), len(html or "")
+    marks: list[tuple[int, int]] = []
+    first = end
+    for m in re.finditer(r"(?:<a\b[^>]*>\s*)?<img\b[^>]*\bsrc=[\"']([^\"']+)[\"'][^>]*>(?:\s*</a>)?",
+                         html or "", re.I):
+        if m.start() < start:
+            continue
+        if _pic_base(m.group(1)) == logo_base:
+            marks.append((m.start(), m.end()))
+        else:
+            first = min(first, m.start())
+    for m in re.finditer(r"<a\b", html or "", re.I):
+        if m.start() >= start and not any(a <= m.start() < b for a, b in marks):
+            first = min(first, m.start())
+            break
+    return [(a, b) for a, b in marks if a < first]
+
+
+def drop_top_marks(html: str, kit_: dict) -> tuple[str, str]:
+    """The maker's own mark at the top, taken out: the header carries it
+    (owner, 2026-10-01: "double logo at the top?"). A check asked the maker
+    to remove it, and it did not, in a link round the logo the check missed."""
+    theme = kit_.get("theme") or {}
+    spans = _top_marks(html, _pic_base(theme.get("logo_url") or "") if theme.get("logo_url") else "")
+    for a, b in reversed(spans):
+        html = html[:a] + html[b:]
+    return html, ("the maker's own mark above the email's first picture was taken out — the header carries it"
+                  if spans else "")
+
+
+def baked_masthead(raw: str, kit_: dict) -> list[dict]:
+    """The brand's NAME set as display type inside a baked block — a picture
+    by the time the render is read, where `render_check` cannot see it — read
+    off the maker's own HTML."""
+    name_words = set(re.findall(r"[a-z0-9]+", str(kit_.get("name") or "").lower()))
+    if not name_words:
+        return []
+    for frag in re.findall(r"<!--\s*bake\s*-->(.*?)<!--\s*/bake\s*-->", raw or "", re.S | re.I):
+        for m in re.finditer(r"<(\w+)\b[^>]*font-size:\s*(\d+(?:\.\d+)?)px[^>]*>([^<]{1,80})<", frag, re.I):
+            words = set(re.findall(r"[a-z0-9]+", m.group(3).lower()))
+            if words and words <= name_words and float(m.group(2)) >= MASTHEAD_PX:
+                return [{"code": "second_masthead", "severity": "blocks", "where": "a baked block",
+                         "what": f"the brand's name set as a {round(float(m.group(2)))}px headline inside a baked "
+                                 f"block — the header IS the masthead; open on the email's own idea"}]
+    return []
+
+
 class _Shapes(HTMLParser):
     """EMPTY PAINTED BOXES — an element with a ground and a size of its own
     and nothing in it, no word and no picture, rounded or placed over its
@@ -1804,10 +1900,11 @@ class _Shapes(HTMLParser):
 
     _VOID = {"br", "img", "hr", "input", "meta", "link", "col", "source", "wbr", "area", "base"}
 
-    def __init__(self):
+    def __init__(self, classes: dict | None = None):
         super().__init__(convert_charrefs=True)
         self.stack: list = []
         self.found: list = []
+        self.classes = classes or {}
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -1816,7 +1913,10 @@ class _Shapes(HTMLParser):
                 for e in self.stack:
                     e["full"] = True
             return
-        style = str(a.get("style") or "")
+        # a class's own rules first, the inline style after — a shape is as
+        # often drawn from a <style> block as from a style attribute
+        style = ";".join(self.classes.get(c, "") for c in str(a.get("class") or "").split()) \
+            + ";" + str(a.get("style") or "")
         for k in ("width", "height"):
             if str(a.get(k) or "").isdigit() and not re.search(rf"(?<![-\w]){k}\s*:", style):
                 style += f";{k}:{a[k]}px"
@@ -1864,7 +1964,14 @@ def drawn_shapes(raw: str) -> list[dict]:
     Two such shapes make a figure and block; HTML cannot draw one, and it
     reads as a placeholder. A figure is one of the brand's own pictures, or
     the device is left out."""
-    p = _Shapes()
+    classes: dict = {}
+    for css in re.findall(r"<style\b[^>]*>(.*?)</style>", raw or "", re.S | re.I):
+        for sel, decl in re.findall(r"([^{}]+)\{([^}]*)\}", css):
+            for one in sel.split(","):
+                c = re.fullmatch(r"\s*(?:[a-z0-9]+)?\.([\w-]+)\s*", one, re.I)
+                if c:
+                    classes[c.group(1)] = classes.get(c.group(1), "") + ";" + decl
+    p = _Shapes(classes)
     try:
         p.feed(raw or "")
     except Exception:                                            # noqa: BLE001
@@ -2450,7 +2557,13 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
             story.append(f"Round {n}: the concept was turned to what this brand has — {_turn}")
             last_turn = _turn
         _t = _time.monotonic()
-        html, drawn = dividers.place(raw, tenant, COLUMN)
+        # THE COLUMN IS OURS AND THE MARK IS THE HEADER'S (owner, 2026-10-01:
+        # "Off-center, not limited to the correct design? double logo at the top?")
+        html, mark_note = drop_top_marks(frame(raw, COLUMN), kit_)
+        if mark_note and mark_note not in said_once:
+            said_once.add(mark_note)
+            story.append(f"Round {n}: {mark_note}.")
+        html, drawn = dividers.place(html, tenant, COLUMN)
         # THE BRAND'S HEADER — its mark over its pages, the same every email.
         html, head_note = email_header.place(html, tenant, kit_, COLUMN)
         if head_note and head_note not in said_once:
@@ -2487,7 +2600,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         took["rendering"] = round(_time.monotonic() - _t)
         checks = (checks + told["findings"] + bake_findings
                   + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_)
-                  + drawn_shapes(raw))
+                  + drawn_shapes(raw) + baked_masthead(raw, kit_))
         if "texts" in shot:
             # MEASURED ON THE RENDER where it could be read, in place of what
             # the inline styles could say about contrast — they miss classes,

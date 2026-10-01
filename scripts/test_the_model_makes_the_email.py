@@ -860,6 +860,16 @@ def main() -> int:
     got_k = rc.run(sid, "baci", "portofino", seed="news-kept", message={"subject": "Set the scene", "news": news_})
     ck("  stated as given, it does not",
        not any(c.get("code") == "news_changed" for r_ in got_k.get("rounds") or [] for c in r_.get("check") or []))
+    # THE COLUMN IS OURS AND THE MARK IS THE HEADER'S (2026-10-01): a maker
+    # that opens on its own linked logo ships one mark, in one centred column.
+    answers["email_compose"] = reply_email(email_html(
+        extra=f'<a href="https://bacimilanousa.com"><img src="{LOGO}" alt="Baci" width="160"></a>'))
+    got_m = rc.run(sid, "baci", "portofino", seed="mark", message={"subject": "Set the scene"})
+    html_m = got_m.get("html") or ""
+    ck("the maker's own linked mark at the top is gone from the email that ships, and the run says so",
+       'alt="Baci" width="160"' not in html_m and "the header carries it" in (got_m.get("note") or ""),
+       str(got_m.get("note"))[:200])
+    ck("  and the email is set in our centred column", 'data-frame="1"' in html_m)
     # A GUARD THAT CAUGHT NOTHING (found 2026-09-29, missed on bebf031 too):
     # the "cannot be made" outcome was never asserted through `run`.
     answers["email_cast"] = {"picks": [], "none": [{"section": 3, "needs": "a photograph of food on the plate"}]}

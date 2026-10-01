@@ -199,7 +199,7 @@ _READ_JS = r"""() => {
     }
     return {src: i.currentSrc || i.src || "", natural: [i.naturalWidth, i.naturalHeight],
             box: [b.width, b.height], shown: [Math.max(0, v[2] - v[0]), Math.max(0, v[3] - v[1])],
-            fit: cs.objectFit || "fill"};
+            fit: cs.objectFit || "fill", at: [b.left, b.right]};
   });
   // A ROW WITH AN EMPTY COLUMN beside its content — a two-up row holding one
   // card (owner, 2026-09-29: "poorly aligned blocks in the same section").
