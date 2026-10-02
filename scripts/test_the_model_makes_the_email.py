@@ -732,6 +732,42 @@ def main() -> int:
     held = approvals.ship_unattended("baci", out1.id, why="test")
     ck("an unattended ship is held while a blocking finding stands — and says which",
        held.get("ok") is False and "icon row" in held.get("why", ""), str(held))
+
+    # MADE AGAIN ONCE, THEN FLAGGED (owner, 2026-10-01: "revision" — "Auto
+    # once, then flag"): an email its rounds leave blocked is made again on
+    # its own, told what was open; still blocked, it lands saying so, with one
+    # press sending it back — and a note sent back reaches the one who draws.
+    def _texts(purpose):
+        return [p_ if isinstance(p_, str) else " ".join(b.get("text", "") for b in p_ if isinstance(b, dict))
+                for p_ in seen.get(purpose) or []]
+    _keep_compose = answers.get("email_compose")
+    answers["email_compose"] = reply_email(email_html(extra='<div style="position:absolute;top:-20px">x</div>'))
+    seen["email_compose"] = []
+    skill.run("campaign_email", "baci", segment="reorder_due", structure=new["id"], intent="education",
+              entity_key="portofino", generate_visual="no")
+    with db.SessionLocal() as s:
+        out2 = s.query(db.Output).filter(db.Output.tenant == "baci").order_by(db.Output.created_at.desc()).first()
+        rec2 = dict((s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id == out2.id).first().meta or {})
+                    .get("recreation") or {})
+    ck("an email its rounds left blocked is made again on its own, told what the first left open",
+       rec2.get("revised") is True and any("THIS EMAIL WAS SENT BACK" in t and "position:absolute" in t
+                                           for t in _texts("email_compose")), str(rec2)[:160])
+    art2, kw2, ap2 = web._article_bundle(out2.id)
+    page2 = admin_ui.render_workroom("k", out2.id, art2, kw2, ap2)
+    _flag = page2.split("Needs revision", 1)[-1][:3000] if "Needs revision" in page2 else ""
+    ck("  still blocked, its page says it needs revision, above the preview, with what is open",
+       bool(_flag) and page2.index("Needs revision") < page2.index("Preview — as the ESP")
+       and "position:absolute" in _flag and "Made a second time on its own" in _flag)
+    ck("  and one press sends it back with exactly that as the note",
+       'action="/admin/work_redraft"' in _flag and "Revise — send it back with these" in _flag
+       and '<textarea name="note" hidden>Fix what the checks found:' in _flag)
+    answers["email_compose"] = _keep_compose
+    seen["email_compose"] = []
+    skill.run("campaign_email", "baci", segment="reorder_due", structure=new["id"], intent="education",
+              entity_key="portofino", generate_visual="no", revision_notes="The logo is there twice at the top.")
+    ck("a note the owner sends back reaches the one who draws the email, not only the copywriter",
+       any("THIS EMAIL WAS SENT BACK" in t and "The logo is there twice at the top." in t
+           for t in _texts("email_compose")))
     answers["email_compose"] = "no html for you"
     r2 = skill.run("campaign_email", "baci", segment="reorder_due", structure=new["id"], intent="education",
                    entity_key="portofino", generate_visual="no")

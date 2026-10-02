@@ -3757,23 +3757,49 @@ def _run_campaign_email(ctx: Context) -> dict:
         _key = (str(_structure.get("id") or ""), _hash_message(c))
         _rec = state.setdefault("recreations", {}).get(_key)
         if _rec is None:
-            _rec = _rc.run(
-                str(_structure.get("id") or ""), ctx.tenant, _subject, via="campaign",
-                recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
-                seed=str(ctx.run_id or ctx.tenant),
-                progress=lambda text: ctx.step(f"making the email — {text}"),
-                # a picture DRAWN for this send (every system draws) is offered
-                # to the cast beside the brand's own; approved with the email
-                extra_pictures=([{"id": hero_got.get("asset_id"), "url": (hero or {}).get("url", ""),
-                                  "title": "drawn for this send", "kind": "lifestyle"}]
-                                if hero_got.get("basis") == "generated" and hero_got.get("asset_id") and (hero or {}).get("url") else []),
-                message={"subject": c.get("subject", ""), "preheader": c.get("preheader", ""),
-                         "link": _link, "news": str(ctx.bundle.get("news") or ""),
-                         "angle": chosen_angle or goal, "offer": str(ctx.bundle.get("offer") or ""),
-                         "text": _blocks_text(blocks),
-                         "products": [{"name": e.get("name"), "price": e.get("price", ""), "url": e.get("url", "")}
-                                      for e in ents[:8] if e.get("name")],
-                         "claims": [offered[cid]["claim"] for cid in (c.get("claim_ids") or []) if cid in offered]})
+            _msg = {"subject": c.get("subject", ""), "preheader": c.get("preheader", ""),
+                    "link": _link, "news": str(ctx.bundle.get("news") or ""),
+                    "angle": chosen_angle or goal, "offer": str(ctx.bundle.get("offer") or ""),
+                    "text": _blocks_text(blocks),
+                    "products": [{"name": e.get("name"), "price": e.get("price", ""), "url": e.get("url", "")}
+                                 for e in ents[:8] if e.get("name")],
+                    "claims": [offered[cid]["claim"] for cid in (c.get("claim_ids") or []) if cid in offered],
+                    # the owner's note on the version they sent back reaches the
+                    # one who draws it, not only the copywriter (2026-10-01)
+                    "revise": [ln_.strip(" -•") for ln_ in str(craft.get("revision_notes") or "").splitlines()
+                               if ln_.strip(" -•")]}
+
+            def _make(seed_: str, msg_: dict) -> dict:
+                return _rc.run(
+                    str(_structure.get("id") or ""), ctx.tenant, _subject, via="campaign",
+                    recent_media=[m for h in (craft.get("avoid") or []) for m in (h.get("media") or [])],
+                    seed=seed_,
+                    progress=lambda text: ctx.step(f"making the email — {text}"),
+                    # a picture DRAWN for this send (every system draws) is offered
+                    # to the cast beside the brand's own; approved with the email
+                    extra_pictures=([{"id": hero_got.get("asset_id"), "url": (hero or {}).get("url", ""),
+                                      "title": "drawn for this send", "kind": "lifestyle"}]
+                                    if hero_got.get("basis") == "generated" and hero_got.get("asset_id")
+                                    and (hero or {}).get("url") else []),
+                    message=msg_)
+            _rec = _make(str(ctx.run_id or ctx.tenant), _msg)
+            # MADE AGAIN ONCE, ON ITS OWN (owner, 2026-10-01: "Auto once, then
+            # flag"): an email its rounds left blocked is made fresh, told what
+            # the first left open; the one with fewer blocking problems is
+            # kept, and one still blocked lands on the card as needing revision.
+            if _rec.get("ok") and _rec.get("status") == _rc.NOT_SHIPPABLE and int(_rec.get("blocking") or 0):
+                _first_n = int(_rec.get("blocking") or 0)
+                _open = [f"{f.get('where', '')}: {f.get('what', '')}" for f in (_rec.get("findings") or [])
+                         if f.get("severity") == "blocks"][:10]
+                ctx.step("making the email again — the first was still blocked")
+                _again = _make(str(ctx.run_id or ctx.tenant) + ":again",
+                               {**_msg, "revise": list(_msg["revise"]) + _open})
+                if _again.get("ok") and _again.get("html") and int(_again.get("blocking") or 0) <= _first_n:
+                    _rec = _again
+                ctx.note(f"made again on its own: the first had {_first_n} blocking, the second "
+                         f"{int(_again.get('blocking') or 0) if _again.get('ok') else 'failed'} — kept the "
+                         f"{'second' if _rec is _again else 'first'}")
+                _rec = {**_rec, "revised": True}
             state["recreations"][_key] = _rec
         if not (_rec.get("ok") and _rec.get("html")):
             raise RuntimeError("the email could not be made — "
@@ -3786,7 +3812,7 @@ def _run_campaign_email(ctx: Context) -> dict:
                 ctx.note(f"finding (blocks): {_f.get('where', '')} — {_f.get('what', '')}")
         state["media"] = list(_rec.get("media_ids") or [])
         state["recreation"] = {"id": _rec.get("id"), "status": _rec.get("status"),
-                               "blocking": int(_rec.get("blocking") or 0),
+                               "blocking": int(_rec.get("blocking") or 0), "revised": bool(_rec.get("revised")),
                                "findings": list(_rec.get("findings") or [])[:12]}
         state.update(structure_id=str(_structure.get("id") or ""))
         if _rec.get("preheader") and not c.get("preheader"):

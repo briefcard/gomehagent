@@ -2448,6 +2448,17 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         story.append(f"Held to what you said about this design: {_ref_note[:120]}")
     if _ex.notes(tenant, _ex.EMAIL):
         story.append(f"Held to what you have said about this brand's emails ({len(_ex.notes(tenant, _ex.EMAIL))} note(s)).")
+    # SENT BACK: what the last version of THIS email left open — the owner's
+    # revision note, or the checks that still blocked it when it was made
+    # again on its own (owner, 2026-10-01: "Auto once, then flag"). It rode
+    # to the copywriter only, so "the logo is there twice" never reached the
+    # one who draws it; with the notes it reaches the maker AND the judge.
+    _back = [str(x).strip() for x in ((message or {}).get("revise") or []) if str(x).strip()]
+    if _back:
+        kit_["_notes"] = (kit_["_notes"] + "\n" if kit_["_notes"] else "") + (
+            "THIS EMAIL WAS SENT BACK — the last version left these open; this one fixes every one, and "
+            "they outrank the brief and the reference:\n- " + "\n- ".join(_back[:12]) + "\n")
+        story.append(f"Made again, told what the last version left open ({len(_back)}).")
     if entity_key and not any(e.get("key") == entity_key for e in kit_.get("entities") or []):
         hit = place_subject(kit_, tenant, entity_key)
         if hit is not None and getattr(hit, "availability", "available") != "available":

@@ -15447,6 +15447,28 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
         'real channel the moment you save it — nothing goes into a box '
         'nobody reads.</p>')
     learned = systems.guidance_block(tenant, syskey) if syskey else ""
+    # NEEDS REVISION (owner, 2026-10-01: "Auto once, then flag"): an email
+    # still blocked after it was made again on its own says so ABOVE its
+    # preview — what is open, and one press that sends it back with exactly
+    # that as the note, to the one who draws it as well as the copywriter.
+    needs_rev = ""
+    _made = fields.get("recreation") or {}
+    _open = [f for f in (_made.get("findings") or []) if f.get("severity") == "blocks"][:8]
+    if is_email and int(_made.get("blocking") or 0) and _open:
+        _note = "Fix what the checks found:\n" + "\n".join(
+            f"- {f.get('where', '')}: {f.get('what', '')}" for f in _open)
+        needs_rev = (
+            f'<div class="card danger"><h3>Needs revision — {int(_made.get("blocking") or 0)} problem(s) open</h3>'
+            f'<p class="mut">{"Made a second time on its own, and still" if _made.get("revised") else "Still"} '
+            f'not right; shown so you can see it, not because it is ready.</p><ul class="bl">'
+            + "".join(f'<li><b>{_esc(str(f.get("where") or ""))}</b> — {_esc(str(f.get("what") or ""))}</li>'
+                      for f in _open)
+            + f'</ul><form method="post" action="/admin/work_redraft">'
+              f'<input type="hidden" name="key" value="{_esc(key)}">'
+              f'<input type="hidden" name="output_id" value="{_esc(output_id)}">'
+              f'<input type="hidden" name="part" value="overall">'
+              f'<textarea name="note" hidden>{_esc(_note)}</textarea>'
+              f'<button type="submit">Revise — send it back with these</button></form></div>')
 
     body_html = f"""
 {f'<div class="flash"><div class="ok">{_esc(ok)}</div></div>' if ok else ""}
@@ -15460,6 +15482,7 @@ def render_workroom(key: str, output_id: str, art, kw, ap,
   {decide}
 </div>
 {f'<div class="card"><h3>Structural flags</h3><ul class="bl">{flag_html}</ul></div>' if flag_html else ""}
+{needs_rev}
 {preview_card}
 {_grounding_card(tenant, art, key)}
 {edit_card}

@@ -666,6 +666,47 @@ SABOTAGES = [
         "suites": ['test_the_email_is_the_brands.py'],
         "why": "a figure drawn from a <style> block's classes passes the shape check",
     },
+    # Made again once, then flagged (owner, 2026-10-01: "revision" — "Auto once, then flag").
+    {
+        "name": 'a_blocked_email_is_not_made_again',
+        "file": 'app/skill_pack.py',
+        "find": '            if _rec.get("ok") and _rec.get("status") == _rc.NOT_SHIPPABLE and int(_rec.get("blocking") or 0):',
+        "replace": '            if False:  # SABOTAGE',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": 'an email its rounds left blocked lands as it is, never made again',
+    },
+    {
+        "name": 'the_maker_never_hears_it_was_sent_back',
+        "file": 'app/recreate.py',
+        "find": '    _back = [str(x).strip() for x in ((message or {}).get("revise") or []) if str(x).strip()]',
+        "replace": '    _back = []  # SABOTAGE',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": 'an email made again is made blind to what the last one left open',
+    },
+    {
+        "name": 'the_owners_note_stays_with_the_copywriter',
+        "file": 'app/skill_pack.py',
+        "find": '                    "revise": [ln_.strip(" -•") for ln_ in str(craft.get("revision_notes") or "").splitlines()',
+        "replace": '                    "revise": [ln_.strip(" -•") for ln_ in str("").splitlines()  # SABOTAGE',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": "'the logo is there twice' reaches the copywriter and never the one who draws it",
+    },
+    {
+        "name": 'no_needs_revision_panel',
+        "file": 'app/admin_ui.py',
+        "find": '    if is_email and int(_made.get("blocking") or 0) and _open:',
+        "replace": '    if False:  # SABOTAGE',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": 'a still-blocked email shows on its page like a finished one',
+    },
+    {
+        "name": 'the_revise_press_carries_nothing',
+        "file": 'app/admin_ui.py',
+        "find": '              f\'<textarea name="note" hidden>{_esc(_note)}</textarea>\'',
+        "replace": '              f\'<textarea name="note" hidden></textarea>\'  # SABOTAGE',
+        "suites": ['test_the_model_makes_the_email.py'],
+        "why": 'Revise sends it back with no note, and the same problems come back',
+    },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the
     # reason cut at "Validati"; and "audiences OR segments".
