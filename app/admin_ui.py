@@ -1081,7 +1081,7 @@ def render_jobs(key: str, tenant: str = "", msg: str = "", err: str = "") -> str
    'something slow — recreating a reference, a set of frames, filling a board, '
    'a catalogue sync — appears here within a few seconds.</p>'}
   {f'<p class="mut">Each worker runs one job at a time and, when it is free, '
-   f'starts the oldest one waiting — it looks every twenty seconds. Running now, '
+   f'starts the oldest one waiting — it looks every few seconds. Running now, '
    f'across every account: {got["busy_everywhere"]}.</p>'
    if got["queued"] else ""}
 </div>

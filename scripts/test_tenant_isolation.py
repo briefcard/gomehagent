@@ -176,8 +176,10 @@ def main() -> int:
     ck("command_agent.handle takes a tenant", "tenant: str = \"\"" in ca)
     ck("and forwards it to the kernel", "tenant=tenant" in ca)
     web = pathlib.Path("app/web.py").read_text()
+    # answered in the WORKER since 2026-10-01 (`app.commands`), queued by web
+    cmd = pathlib.Path("app/commands.py").read_text()
     ck("the telegram path resolves the sender's account",
-       "_active_tenant(" in web and "tenant=_active_tenant" in web)
+       "_active_tenant(" in web and "tenant=_active_tenant" in cmd)
 
     # ---- 4. what the agent is actually told ------------------------------
     print("\n— what the account block says —")

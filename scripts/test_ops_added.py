@@ -41,7 +41,7 @@ def main() -> int:
     ck("learning_sweep is an on-demand job", callable(ops_jobs.JOBS.get("learning_sweep")))
     ck("report_plans is an on-demand job", callable(ops_jobs.JOBS.get("report_plans")))
     r = c.get("/admin/run/learning_sweep?key=s3cret")
-    ck("the route accepts it", r.status_code == 200 and "started" in r.text, r.text[:100])
+    ck("the route accepts it — queued for the worker", r.status_code == 200 and "queued" in r.text, r.text[:100])
 
     said = ops_jobs.report_plans()
     ck("report plans on a bare platform says nothing is switched on",

@@ -105,6 +105,19 @@ from — as JSON:
 Describe the layout only — never the article's subject, words or brand. Return the JSON only."""
 
 
+def layout_job(tenant: str, *, url: str, progress=None) -> dict:
+    """THE QUEUE'S DOOR INTO READING A LAYOUT (2026-10-01: every heavy press
+    runs in the worker): read once, kept as this brand's standing pattern."""
+    got = read_pattern(url, tenant=tenant)
+    if not got.get("ok"):
+        return {"ok": False, "status": "failed", "why": f"that layout could not be read — {got.get('why')}"}
+    why = file_pattern(tenant, got["pattern"], source_url=url)
+    if why:
+        return {"ok": False, "status": "failed", "why": why}
+    return {"ok": True, "why": f"every article for this brand is laid out like that now — "
+                               f"{got['pattern'].get('name', '')}"}
+
+
 def read_pattern(url: str, *, tenant: str = "") -> dict:
     """A reference article's layout, read once into a pattern. `{ok, pattern, why, calls}`."""
     page = _fetch_page(url)

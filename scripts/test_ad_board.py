@@ -35,7 +35,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import db, kb, skill, skill_pack, systems, tenants, web  # noqa: E402
+from app import db, jobs as _jobs, kb, skill, skill_pack, systems, tenants, web  # noqa: E402
+from _queued import run_now  # noqa: E402
 
 KEY = "s3cret"
 _fail: list[str] = []
@@ -276,13 +277,17 @@ def main():
        b4["variants"][2]["dropped"] is True and len(b4["variants"]) == 3)
 
     n_bundles = len(fake.bundles)
-    r4 = c.post("/admin/work_redraft",
-                data={"key": KEY, "output_id": anchor,
-                      "note": "punchier, and no exclamation marks"},
-                follow_redirects=False)
+    # Revise is a job (2026-10-01: every heavy press runs in the worker);
+    # `run_now` runs it here, both sides of the seam
+    with run_now(_jobs) as ran:
+        r4 = c.post("/admin/work_redraft",
+                    data={"key": KEY, "output_id": anchor,
+                          "note": "punchier, and no exclamation marks"},
+                    follow_redirects=False)
     loc = r4.headers.get("location", "")
+    said4 = str(((ran[-1] if ran else {}).get("result") or {}).get("why") or "")
     ck("regenerate lands back on the SAME board (in place, no supersede)",
-       f"/admin/work/{anchor}" in loc and "regenerated" in loc, loc)
+       f"/admin/work/{anchor}" in loc and "regenerated" in said4, f"{loc} | {said4}")
     briefed = " ".join(str(b.get("revision_notes") or "")
                        for b in fake.bundles[n_bundles:])
     ck("  the owner's note rode the brief", "punchier" in briefed,

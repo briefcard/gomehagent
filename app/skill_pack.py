@@ -4508,6 +4508,72 @@ def supersede(tenant: str, output_id: str, new_oid: str, *,
         _appr.withdraw(run_id, f"superseded by {why} -> {new_oid}")
 
 
+def redraft_refusal(output_id: str, note: str = "") -> str:
+    """Why this draft cannot be redrafted, or "" — said AT THE PRESS, since
+    the redraft itself runs in the worker and a refusal minutes later on the
+    Queue is a refusal nobody was looking at. `note` is the direction typed
+    with it; with none and no open feedback, it is a reroll."""
+    from . import db
+    with db.SessionLocal() as s:
+        art = (s.query(db.ArtifactBody)
+               .filter(db.ArtifactBody.output_id == output_id).first())
+        out = s.get(db.Output, output_id)
+        kw = (s.query(db.KeywordTarget)
+              .filter(db.KeywordTarget.output_id == output_id).first())
+        if art is None:
+            return "no artifact with that id"
+        if ":campaign/" in (getattr(out, "destination", "") or ""):
+            return ("already pushed to the ESP — redraft the NEXT send "
+                    "instead; a draft in the platform is edited there")
+        if (getattr(out, "status", "") or "") == "published" or (
+                kw is not None and (kw.status or "") in ("published", "won")):
+            return ("already published — a live page gets a revision "
+                    "through the revision path, not a redraft of the "
+                    "draft it came from")
+        if not (note or "").strip() and not (
+                s.query(db.FeedbackItem)
+                .filter(db.FeedbackItem.output_id == output_id,
+                        db.FeedbackItem.level == "draft",
+                        db.FeedbackItem.status == "open").count()):
+            return ("nothing to redraft from — file feedback or type a "
+                    "note; a redraft with no direction is a reroll")
+    return ""
+
+
+def file_redraft_note(tenant: str, output_id: str, note: str, part: str = "overall") -> None:
+    """The note typed at Revise, filed the moment it is pressed: the redraft
+    that consumes it runs in the worker, and a note must outlive a queue."""
+    if not (note or "").strip():
+        return
+    from . import db
+    with db.SessionLocal() as s:
+        s.add(db.FeedbackItem(
+            tenant=tenant, output_id=output_id, part=str(part or "overall"),
+            category="", note=str(note).strip(), level="draft", status="open"))
+        s.commit()
+
+
+def redraft_job(tenant: str, *, output_id: str, overrides: dict | None = None,
+                part: str = "overall", progress=None) -> dict:
+    """THE QUEUE'S DOOR INTO A REDRAFT. Owner, 2026-10-01: "When I press
+    'Revise' does it queue it back with the worker as it should?" It ran the
+    whole skill inside the request — a campaign email is minutes of model
+    calls and renders, on the web service. The note was filed at the press;
+    this consumes it with every open item, in the worker."""
+    got = redraft_artifact(tenant, output_id, overrides=overrides or {}, part=part)
+    if not got.get("ok"):
+        return {"ok": False, "status": "failed",
+                "why": "redraft refused: " + str(got.get("error") or "")[:220]}
+    if str(got.get("output_id")) == output_id:
+        # the ad board regenerates IN PLACE — same page, kept variants untouched
+        why = (f"regenerated — {got.get('consumed', 0)} feedback item(s) consumed; kept variants "
+               f"survive, replaced ones closed with a pointer to their replacement")
+    else:
+        why = (f"redrafted — {got.get('consumed', 0)} feedback item(s) consumed; this supersedes "
+               f"the previous draft, which stays readable and names this one")
+    return {**got, "why": why}
+
+
 def redraft_artifact(tenant: str, output_id: str, note: str = "",
                      overrides: dict | None = None, part: str = "") -> dict:
     """Request changes: redraft one held artifact, consuming its feedback.
@@ -4537,18 +4603,9 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
         kw = (s.query(db.KeywordTarget)
               .filter(db.KeywordTarget.output_id == output_id).first())
         s.expunge_all()
-    if art is None:
-        return {"ok": False, "error": "no artifact with that id"}
-    if ":campaign/" in (getattr(out, "destination", "") or ""):
-        return {"ok": False,
-                "error": "already pushed to the ESP — redraft the NEXT send "
-                         "instead; a draft in the platform is edited there"}
-    if (getattr(out, "status", "") or "") == "published" or (
-            kw is not None and (kw.status or "") in ("published", "won")):
-        return {"ok": False,
-                "error": "already published — a live page gets a revision "
-                         "through the revision path, not a redraft of the "
-                         "draft it came from"}
+    why = redraft_refusal(output_id, note=note)
+    if why:
+        return {"ok": False, "error": why}
 
     # THE TYPED NOTE IS FILED, NOT WHISPERED.
     #

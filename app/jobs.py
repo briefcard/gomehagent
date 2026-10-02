@@ -178,11 +178,47 @@ KINDS: dict[str, dict] = {
                          "target": "app.keywords:harvest", "retryable": False},
     "offers_harvest": {"what": "offers mined from sent mail",
                        "target": "app.offers:harvest", "retryable": False},
+    # ── AND THE LAST OF THEM (2026-10-01) ───────────────────────────────────
+    # Owner: "When I press 'Revise' does it queue it back with the worker as
+    # it should? This needs to be the approach with every single heavy
+    # operation." It did not: five presses still did their work inside the
+    # request, and two threads inside the web service. Held shut since by
+    # `test_heavy_work_goes_to_the_worker`, which reads every route's reach.
+    "redraft": {"what": "a draft made again from what was sent back",
+                "target": "app.skill_pack:redraft_job",
+                # a whole skill run with its approvals; never twice unasked
+                "retryable": False},
+    "article_picture": {"what": "a picture drawn for an article, judged and filed",
+                        "target": "app.creative:article_picture_job", "retryable": False},
+    "pictures_read": {"what": "the brand's unread pictures, read",
+                      "target": "app.pictures:read_pictures",
+                      # it reads only what is unread; a second pass finds less
+                      "retryable": True},
+    "article_layout": {"what": "an article's layout read and kept as the brand's pattern",
+                       "target": "app.articles:layout_job", "retryable": False},
+    "winning_look": {"what": "this account's best ads read for what they have in common",
+                     # a Meta read and a vision call: the owner's spend to start
+                     "target": "app.creative:winning_look_job", "retryable": False},
+    "ops_job": {"what": "an operations sweep, started from the console",
+                "target": "app.ops_jobs:run_job", "retryable": False,
+                # the owner's own work, whatever state the account row is in
+                "any_account": True},
+    "probe": {"what": "a diagnostic read the owner asked for, answered in full",
+              "target": "app.probes:run", "retryable": False, "any_account": True,
+              # the answer IS the point: kept whole on the row, read back at
+              # /admin/probe/<id>, where a summary line would lose it
+              "keep_result": True},
+    "command": {"what": "a message to the assistant, answered",
+                "target": "app.commands:job", "retryable": False,
+                # ONE AT A TIME, IN ORDER, across instances: two at once were
+                # the concurrent Google calls that crashed the process (exit
+                # 139), and a chat answered out of order is wrong twice
+                "serial": True, "any_account": True},
 }
 
 
 #: QUEUED AND RUNNING ARE BOTH "IT IS HAPPENING" to whoever pressed the
-#: button — the difference between them is up to twenty seconds of a worker's
+#: button — the difference between them is up to a few seconds of a worker's
 #: tick, and a room that treated a queued job as finished would say a run
 #: "ran" before it started. The sentence in `says` keeps the two apart for
 #: anyone who wants the detail.
@@ -278,8 +314,8 @@ def claim(tenant: str, holder: str) -> str:
     """
     now = db.utcnow()
     with db.SessionLocal() as s:
-        q = (s.query(db.JobQueue).filter(db.JobQueue.state == "queued",
-                                         db.JobQueue.tenant == tenant)
+        q = (_not_while_running(s, s.query(db.JobQueue).filter(db.JobQueue.state == "queued",
+                                                               db.JobQueue.tenant == tenant))
              .order_by(db.JobQueue.created_at.asc()) if tenant else _line(s))
         row = q.first()
         if row is None:
@@ -296,12 +332,27 @@ def claim(tenant: str, holder: str) -> str:
 
 
 def _line(s):
-    """THE LINE the workers take from: queued jobs of active accounts, oldest
-    first. `claim` takes its head; the queue page numbers positions in it."""
+    """THE LINE the workers take from: queued jobs of active accounts — and of
+    any account for the owner's own kinds (`any_account`) — oldest first, a
+    `serial` kind waiting while one of its own runs. `claim` takes its head;
+    the queue page numbers positions in it."""
+    from sqlalchemy import or_
     active = s.query(db.Tenant.key).filter(db.Tenant.status == "active")
-    return (s.query(db.JobQueue)
-            .filter(db.JobQueue.state == "queued", db.JobQueue.tenant.in_(active))
-            .order_by(db.JobQueue.created_at.asc()))
+    anyone = [k for k, v in KINDS.items() if v.get("any_account")]
+    q = (s.query(db.JobQueue)
+         .filter(db.JobQueue.state == "queued",
+                 or_(db.JobQueue.tenant.in_(active), db.JobQueue.kind.in_(anyone))))
+    return _not_while_running(s, q).order_by(db.JobQueue.created_at.asc())
+
+
+def _not_while_running(s, q):
+    """A `serial` kind waits while one of its own is running, on any instance."""
+    serial = [k for k, v in KINDS.items() if v.get("serial")]
+    if not serial:
+        return q
+    busy = [k for (k,) in s.query(db.JobQueue.kind)
+            .filter(db.JobQueue.state == "running", db.JobQueue.kind.in_(serial)).distinct()]
+    return q.filter(db.JobQueue.kind.notin_(busy)) if busy else q
 
 
 def _memory() -> str:
@@ -347,7 +398,8 @@ def heartbeat(job_id: str, detail: str | None = None) -> None:
         s.commit()
 
 
-def finish(job_id: str, state: str, detail: str = "", run_id: str = "") -> None:
+def finish(job_id: str, state: str, detail: str = "", run_id: str = "",
+           result=None) -> None:
     with db.SessionLocal() as s:
         row = s.get(db.JobQueue, job_id)
         if row is None:
@@ -358,7 +410,28 @@ def finish(job_id: str, state: str, detail: str = "", run_id: str = "") -> None:
         row.leased_until = None
         if run_id:
             row.run_id = run_id
+        if result is not None:
+            # a kind that `keep_result`s: the whole answer, JSON-safe, capped
+            import json as _json
+            kept = _json.loads(_json.dumps(result, default=str))
+            if len(_json.dumps(kept)) > RESULT_MAX:
+                kept = {"truncated": True, "text": _json.dumps(kept)[:RESULT_MAX]}
+            row.payload = {**dict(row.payload or {}), "_result": kept}
         s.commit()
+
+
+#: The most of an answer a row keeps — a diagnostic's JSON, not a report.
+RESULT_MAX = 200_000
+
+
+def result(job_id: str) -> dict:
+    """A job's state and, for a kind that keeps it, its whole answer."""
+    with db.SessionLocal() as s:
+        row = s.get(db.JobQueue, job_id)
+        if row is None:
+            return {}
+        return {"id": row.id, "kind": row.kind, "state": row.state, "detail": row.detail or "",
+                "result": (row.payload or {}).get("_result")}
 
 
 def reclaim() -> dict:
@@ -603,7 +676,9 @@ def _summary(result) -> str:
     # ("not drafted (no product with the key … on file)"); the first NOTE was
     # shown instead, and on a blog run that made nothing it was a warning about
     # the reader — the owner asked why, and the reason was two notes down.
-    said = str(result.get("summary") or "").strip()
+    # `why` and `said` are how the console's own jobs say what they did — a
+    # press that used to answer in its redirect answers on its row now
+    said = str(result.get("summary") or result.get("why") or result.get("said") or "").strip()
     notes = result.get("notes")
     if said:
         bits.append(said[:400])
@@ -679,7 +754,8 @@ def run_one(job_id: str) -> dict:
     # "ran" with the failure buried in the detail.
     status = str((result or {}).get("status") or "") if isinstance(result, dict) else ""
     state = "failed" if status in ("failed", "refused", "blocked") else "done"
-    finish(job_id, state, _summary(result), run_id=run_id)
+    finish(job_id, state, _summary(result), run_id=run_id,
+           result=result if spec.get("keep_result") else None)
     log.info("job %s: %s for %s — %s after %ds · %s: %s", job_id[:8], kind_, tenant,
              state, _time.monotonic() - t0, _memory(), _summary(result)[:200])
     return {"ok": state == "done", "state": state, "detail": _summary(result)}

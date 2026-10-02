@@ -1191,8 +1191,13 @@ def _each_tenant(context: str, one, *, include_paused: bool = False) -> dict:
     return out
 
 
+#: How often each instance looks at the queue — the delay before a press,
+#: or a message to the assistant, starts. A tick is two small queries.
+QUEUE_TICK_SECONDS = 5
+
+
 def queue_tick() -> dict:
-    """Every twenty seconds, on every instance: give back what dead workers
+    """Every few seconds, on every instance: give back what dead workers
     held, then start the oldest waiting job if this instance is free. Never
     waits on the work — `jobs.start_next` runs it on its own thread."""
     from . import jobs
@@ -1357,8 +1362,10 @@ def main() -> None:
     # a button that did nothing, which is the whole defect this replaces.
     # Sharded: the per-row claim in `jobs.claim` is the lease, so every
     # instance ticks and neither can run the same job twice.
+    # Every five seconds since 2026-10-01: the assistant's messages are queued
+    # too now, and twenty seconds before a reply starts reads as no reply.
     sched.add_job(_safe(queue_tick, "job queue", sharded=True),
-                  "interval", seconds=20)
+                  "interval", seconds=QUEUE_TICK_SECONDS)
     sched.add_job(_safe(poll_all, "inbox polling"), "interval",
                   minutes=config.POLL_INTERVAL_MIN)
     sched.add_job(_safe(approvals.notify_pending, "approval batching"),

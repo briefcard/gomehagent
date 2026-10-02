@@ -1175,9 +1175,9 @@ async def pictures_read(request: Request, key: str = Depends(admin_key)):
         return _signin_first(request)
     form = await request.form()
     tenant = str(form.get("tenant", ""))
-    got = pictures.read_pictures(tenant)
-    back = _console_url(tenant, "brand", ok=got.get("said", "read"))
-    return RedirectResponse(back, 303)
+    # READ IN THE WORKER (2026-10-01): a look per picture is a model call each
+    arg = _queued(_jobs.enqueue(tenant, "pictures_read"), "reading the unread pictures")
+    return RedirectResponse(_console_url(tenant, "brand", **{arg[0]: arg[1]}), 303)
 
 
 @app.post("/admin/picture_kind")
@@ -1243,12 +1243,9 @@ async def article_layout(request: Request, key: str = Depends(admin_key)):
     if not (tenant and url.startswith("http")):
         arg = ("err", "a brand and an article's address are needed")
     else:
-        got = articles.read_pattern(url, tenant=tenant)
-        if not got.get("ok"):
-            arg = ("err", f"that layout could not be read — {got.get('why')}")
-        else:
-            why = articles.file_pattern(tenant, got["pattern"], source_url=url)
-            arg = ("err", why) if why else ("ok", f"every article for this brand is laid out like that now — {got['pattern'].get('name', '')}")
+        # READ IN THE WORKER (2026-10-01): a model reads the page
+        arg = _queued(_jobs.enqueue(tenant, "article_layout", dedupe_on=("url",), payload={"url": url}),
+                      "reading that article's layout — it becomes this brand's pattern")
     back = _console_url(tenant, "brand", **{arg[0]: arg[1]})
     return RedirectResponse(back, 303)
 
@@ -1351,6 +1348,26 @@ async def reference_delete(request: Request, key: str = Depends(admin_key)):
     arg = ("ok" if said.startswith("deleted") else "err", said)
     return RedirectResponse(_designs_back(str(form.get("tenant", "")),
                                           str(form.get("key") or ""), arg), 303)
+
+
+def _probe(tenant: str, name: str, params: dict) -> dict:
+    """A diagnostic QUEUED FOR THE WORKER (owner, 2026-10-01: "every single
+    heavy operation"): where its whole answer will be, and nothing else."""
+    got = _jobs.enqueue(tenant or OPS_ACCOUNT, "probe", dedupe_on=("name", "params"),
+                        payload={"name": name, "params": params})
+    if not got.get("ok"):
+        return {"error": got.get("why") or "it could not be queued"}
+    return {"queued": got["id"], "already": bool(got.get("already")),
+            "result_at": f"/admin/probe/{got['id']}?key=…",
+            "note": "answered in the worker, in seconds to minutes — result_at says running until then"}
+
+
+@app.get("/admin/probe/{job_id}")
+def probe_result(job_id: str, key: str = Depends(admin_key)) -> dict:
+    """A diagnostic's answer, whole, once the worker has it."""
+    if key != config.APPROVAL_SECRET:
+        return {"error": "unauthorized"}
+    return _jobs.result(job_id) or {"error": "no such job"}
 
 
 @app.get("/admin/jobs.json")
@@ -2103,48 +2120,43 @@ def decide(token: str) -> str:
 
 # ---- On-demand jobs ----
 
-import threading
-
-_job_status: dict = {}
+#: The account the owner's own operations sweeps are queued under — they are
+#: the agency's work, whatever the client accounts are doing.
+OPS_ACCOUNT = "agency"
 
 
 @app.get("/admin/run/{job}")
 def run_job(job: str, key: str = Depends(admin_key)) -> dict:
     """Trigger a job: /admin/run/doc_sweep?key=<APPROVAL_SECRET>.
-    Jobs: recategorize | doc_sweep | shipment_audit. Runs in background;
-    check /admin/status?key=... for results. Reports are emailed to Gomeh."""
+    Jobs: recategorize | doc_sweep | shipment_audit and the rest of
+    `ops_jobs.JOBS`. Queued for the WORKER (2026-10-01: it ran in a thread
+    inside the web service); /admin/status?key=... says how it is going."""
     from . import ops_jobs
 
     if key != config.APPROVAL_SECRET:
         return {"error": "bad key"}
     if job not in ops_jobs.JOBS:
         return {"error": f"unknown job; available: {list(ops_jobs.JOBS)}"}
-    if _job_status.get(job) == "running":
-        return {"status": "already running"}
-
-    def _run() -> None:
-        _job_status[job] = "running"
-        try:
-            _job_status[job] = ops_jobs.JOBS[job]()
-        except Exception as exc:  # noqa: BLE001
-            _job_status[job] = f"FAILED: {exc.__class__.__name__}: {str(exc)[:300]}"
-
-    threading.Thread(target=_run, daemon=True).start()
+    got = _jobs.enqueue(OPS_ACCOUNT, "ops_job", system_key=f"ops:{job}", payload={"job": job})
+    if not got.get("ok"):
+        return {"error": got.get("why") or "it could not be queued"}
     # Where the result ACTUALLY lands. Some jobs mail a report and some do
     # not; `/admin/status` holds every one of them, so naming it is true for
     # all and "will be emailed" was true for only some.
-    return {"status": f"{job} started",
+    return {"status": f"{job} {'already ' + (got.get('why') or 'queued').replace('it is already ', '') if got.get('already') else 'queued'}",
             "result_at": "/admin/status?key=…"}
 
 
 @app.get("/admin/status")
 def job_status(key: str = Depends(admin_key)) -> dict:
+    """Each operations sweep's last run, as the queue holds it."""
     from . import ops_jobs
 
     if key != config.APPROVAL_SECRET:
         return {"error": "bad key"}
-    return {"results": _job_status, "live_progress": ops_jobs.STATUS} \
-        if (_job_status or ops_jobs.STATUS) else {"status": "no jobs run yet"}
+    rows = {name: _jobs.latest(OPS_ACCOUNT, system_key=f"ops:{name}") for name in ops_jobs.JOBS}
+    rows = {k: {f: v.get(f) for f in ("state", "detail", "at", "says")} for k, v in rows.items() if v}
+    return {"results": rows} if rows else {"status": "no jobs run yet"}
 
 
 @app.get("/admin/test_whatsapp")
@@ -2340,138 +2352,33 @@ def ask(key: str = Depends(admin_key), q: str = "", role: str = "admin", thread:
         return "bad key"
     if not q:
         return "add &q=your question"
-    try:
-        from . import kernel
-        from .roles import get as get_role
-
-        thread_key = f"{role}:{thread}" if thread else role
-        return kernel.run(get_role(role), q, thread=thread_key)
-    except Exception as exc:  # noqa: BLE001
-        return f"error: {exc.__class__.__name__}: {str(exc)[:300]}"
+    # ASKED IN THE WORKER (2026-10-01: every heavy operation is a job)
+    got = _probe(OPS_ACCOUNT, "ask", {"q": q, "role": role, "thread": thread})
+    return (f"queued — the answer will be at {got['result_at']}" if "result_at" in got
+            else f"error: {got.get('error')}")
 
 
 # ---------------------------------------------------------------------------
-# Ordered command queue: ONE consumer thread processes Gomeh's messages
-# sequentially. Thread-per-message caused concurrent Google API access
+# Gomeh's messages are answered in the WORKER, one at a time and in order
+# (`jobs.KINDS["command"]`, `app.commands`). A thread here once answered
+# them; thread-per-message before that caused concurrent Google API access
 # (segfault / exit 139) and memory spikes under bursts.
 # ---------------------------------------------------------------------------
-import queue
 from collections import deque
 
-_commands: "queue.Queue[tuple[str, str]]" = queue.Queue()
-_consumer_started = False
 _seen_wamids: deque = deque(maxlen=500)
 # Meta delivery receipts (sent/delivered/read/failed + error codes). Failures
 # like the 131056 pair-rate storm are ONLY visible here — never at send time.
 _wa_statuses: deque = deque(maxlen=100)
 
 
-def _consume() -> None:
-    from . import command_agent, whatsapp
-
-    while True:
-        kind, payload = _commands.get()
-        try:
-            if kind == "feedback":
-                from . import db, voice_learn
-                fb = json.loads(payload)
-                if fb["text"].strip().lower() in ("skip", "no", "nvm", "nm"):
-                    whatsapp.send_text("Okay, nothing learned from that one.")
-                    continue
-                with db.SessionLocal() as s:
-                    ap = s.get(db.Approval, fb["approval_id"])
-                    account = (ap.payload or {}).get("account", "baci") if ap else "baci"
-                    orig = (ap.payload or {}).get("body", "") if ap else ""
-                if fb["mode"] == "deny":
-                    voice_learn.add_rule(account, fb["text"])
-                    # If the lesson is generalizable, also share it with ALL
-                    # agents (cross-agent learning), not just this inbox.
-                    from . import memory
-                    low = fb["text"].lower()
-                    generalizable = any(k in low for k in (
-                        "always", "never", "don't ", "do not", "make sure",
-                        "verify", "confirm", "every"))
-                    if generalizable:
-                        memory.add_lesson(fb["text"], scope="global", origin="admin")
-                    whatsapp.send_text(
-                        f"Learned for [{account}]: \"{fb['text']}\""
-                        + (" — and shared as a lesson for all agents."
-                           if generalizable else
-                           " — future drafts there will follow it."))
-                else:  # edit -> requeue a revised draft (always the admin agent)
-                    whatsapp.send_text(command_agent.handle(
-                        f"Revise this draft per my instruction and queue it for "
-                        f"approval (account {account}).\n\nDRAFT:\n{orig}\n\n"
-                        f"MY EDIT:\n{fb['text']}", force_role="admin"))
-            elif kind == "file":
-                meta = json.loads(payload)
-                data, real_mime = whatsapp.download_media(meta["media_id"])
-                text = (meta["caption"] or
-                        f"[I'm sending you a file: {meta['filename']}] — "
-                        "handle it appropriately given our conversation.")
-                reply = command_agent.handle(
-                    text,
-                    attachments=[{"filename": meta["filename"], "data": data,
-                                  "mime": meta["mime"] or real_mime}],
-                )
-                whatsapp.send_text(reply)
-            elif kind == "voice":
-                audio, mime = whatsapp.download_media(payload)
-                transcript = whatsapp.transcribe(audio, mime)
-                if not transcript:
-                    whatsapp.send_text("I couldn't make out that voice note — try again?")
-                    continue
-                whatsapp.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
-                whatsapp.send_text(command_agent.handle(transcript))
-            elif kind == "tg_voice":
-                # Same shape as "voice", but Telegram's two-hop getFile flow.
-                # Transcription runs here rather than in the webhook so the
-                # handler can 200 immediately and avoid Telegram's retries.
-                from . import channel, ops_commands, telegram
-                try:
-                    meta = json.loads(payload)
-                except ValueError:
-                    meta = {"file_id": payload, "chat_id": ""}
-                audio, mime = telegram.download_media(meta["file_id"])
-                transcript = telegram.transcribe(audio, mime)
-                if not transcript:
-                    channel.send_text("I couldn't make out that voice note — try again?")
-                    continue
-                channel.send_text(f"🎙 Heard: \"{transcript[:300]}\"")
-                # Spoken ops commands must take the same fast path as typed
-                # ones — otherwise "add claim: ..." dictated from the car goes
-                # to the general agent and quietly does nothing.
-                spoken = ops_commands.handle(transcript, meta.get("chat_id", ""))
-                channel.send_text(spoken if spoken is not None
-                                  else command_agent.handle(
-                                      transcript, tenant=_active_tenant(meta.get("chat_id", ""))))
-            else:  # text command — may carry a quoted message
-                from . import channel
-                text = payload
-                if payload.startswith("{") and '"_quoted"' in payload:
-                    q = json.loads(payload)
-                    text = (f"[Replying to your earlier message, which said:\n"
-                            f"\"{q['_quoted']}\"]\n\nMy reply: {q['text']}")
-                channel.send_text(command_agent.handle(
-                    text, tenant=_active_tenant(meta.get("chat_id", ""))))
-        except RuntimeError:
-            whatsapp.send_text("Voice notes need a transcription key — add "
-                               "OPENAI_API_KEY in Render and I'll handle audio.")
-        except Exception as exc:  # noqa: BLE001
-            log.exception("command handler error")  # full traceback -> Render logs
-            from . import whatsapp as wa
-            wa.send_text(f"Something broke handling that: {exc.__class__.__name__}: "
-                         f"{str(exc)[:400]}")
-        finally:
-            _commands.task_done()
-
-
-def _enqueue(kind: str, payload: str) -> None:
-    global _consumer_started
-    if not _consumer_started:
-        threading.Thread(target=_consume, daemon=True).start()
-        _consumer_started = True
-    _commands.put((kind, payload))
+def _enqueue(kind: str, payload: str, chat_id: str = "") -> None:
+    """A message for the assistant, QUEUED FOR THE WORKER (owner, 2026-10-01:
+    "This needs to be the approach with every single heavy operation"). It
+    was answered by a thread inside the web service; `commands.job` answers
+    it now, one at a time and in order. The webhook still returns at once."""
+    _jobs.enqueue(_active_tenant(chat_id) or OPS_ACCOUNT, "command", dedupe=False,
+                  payload={"kind": kind, "payload": payload, "chat_id": chat_id})
 
 
 # When Gomeh taps Deny or Edit, we await his next text as feedback/edit and
@@ -2546,9 +2453,9 @@ def _handle_command(text: str, quoted_id: str = "", chat_id: str = "") -> None:
             return
         if q:
             _enqueue("text", json.dumps(
-                {"_quoted": q.content[:2000], "text": text}))
+                {"_quoted": q.content[:2000], "text": text}), chat_id)
             return
-    _enqueue("text", text)
+    _enqueue("text", text, chat_id)
 
 
 # ---- WhatsApp Cloud API webhook (active once Meta app is configured) ----
@@ -4304,19 +4211,12 @@ async def ad_winning_look(request: Request, key: str = Depends(admin_key)):
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
-    from . import creative as _cr
     form = await request.form()
     tenant = str(form.get("tenant") or "")
-    got = _cr.learn_winning_look(tenant)
-    if not got.get("ok"):
-        return _back_to_content(tenant, msg=f"Winning look: {got.get('why', '')}"[:250],
-                                anchor="pics")
-    n = len(got.get("from") or [])
-    return _back_to_content(
-        tenant, anchor="pics",
-        msg=(f"Read {n} of this account's best ads (by "
-             f"{got.get('ranked_by', 'performance')}) — the next frames are "
-             f"briefed on what they have in common"))
+    # READ IN THE WORKER (2026-10-01): a Meta read and a vision call
+    arg = _queued(_jobs.enqueue(tenant, "winning_look"),
+                  "reading this account's best ads — the next frames are briefed on what they have in common")
+    return _back_to_content(tenant, msg=f"Winning look: {arg[1]}"[:250], anchor="pics")
 
 
 @app.post("/admin/ad_launched")
@@ -4460,34 +4360,24 @@ async def work_redraft(request: Request, key: str = Depends(admin_key)):
             f"/admin/work/{quote(output_id)}?key={quote(key)}"
             f"&err={quote('no artifact with that id')}", 303)
     from . import skill_pack as _sp
-    got = _sp.redraft_artifact(art.tenant or "", output_id, note=note,
-                               overrides=overrides,
-                               # WHICH PART the note is about, so a typed
-                               # judgement is filed with the same structure a
-                               # filed one carries — the drafter reads that
-                               # prefix, and the same sentence should not
-                               # arrive structured or naked depending on which
-                               # box it landed in.
-                               part=str(form.get("part") or "overall"))
-    if got.get("ok"):
-        if str(got.get("output_id")) == output_id:
-            # The ad board regenerates IN PLACE — same page, kept variants
-            # untouched — so the flash must not claim a supersession that
-            # did not happen.
-            msg = (f"regenerated — {got.get('consumed', 0)} feedback item(s) "
-                   f"consumed; kept variants survive, replaced ones closed "
-                   f"with a pointer to their replacement")
-        else:
-            msg = (f"redrafted — {got.get('consumed', 0)} feedback item(s) "
-                   f"consumed; this supersedes the previous draft, which "
-                   f"stays readable and names this one")
+    # THE PRESS DECIDES, THE WORKER DRAFTS (owner, 2026-10-01: "When I press
+    # 'Revise' does it queue it back with the worker as it should?" — it ran
+    # the whole skill inside this request). A refusal is said now; the note
+    # is filed now, so it outlives the queue; the redraft is a job.
+    why = _sp.redraft_refusal(output_id, note=note)
+    if why:
         return RedirectResponse(
-            f"/admin/work/{quote(str(got.get('output_id')))}?key={quote(key)}"
-            f"&ok={quote(msg)}", 303)
+            f"/admin/work/{quote(output_id)}?key={quote(key)}"
+            f"&err={quote('redraft refused: ' + why[:220])}", 303)
+    part = str(form.get("part") or "overall")
+    _sp.file_redraft_note(art.tenant or "", output_id, note, part)
+    got = _jobs.enqueue(art.tenant or "", "redraft", system_key=art.system_key or "",
+                        dedupe_on=("output_id",),
+                        payload={"output_id": output_id, "overrides": overrides, "part": part})
+    arg = _queued(got, "making it again with what you sent back — the new draft lands in Review, "
+                       "and this page names it")
     return RedirectResponse(
-        f"/admin/work/{quote(output_id)}?key={quote(key)}"
-        f"&err={quote('redraft refused: ' + str(got.get('error', ''))[:220])}",
-        303)
+        f"/admin/work/{quote(output_id)}?key={quote(key)}&{arg[0]}={quote(arg[1])}", 303)
 
 
 @app.post("/admin/context_add")
@@ -5481,7 +5371,8 @@ def admin_sweep(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     days = max(1, min(days, 90))
     if run:
-        return correlate.nightly(days)
+        # DELIVERED BY THE WORKER (2026-10-01): the narration is a model call
+        return _probe(OPS_ACCOUNT, "sweep", {"days": days})
     if tenant:
         return {"tenant": tenant, "days": days,
                 "findings": correlate.sweep(tenant, days)}
@@ -6178,13 +6069,8 @@ def propose_voice(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     if not tenant:
         return {"error": "name a tenant — this one crawls, so it is per account"}
-    from . import voice as vc
-    texts, how = vc.gather(tenant, limit=limit)
-    if not texts:
-        return {"tenant": tenant, "error": how, "applied": False}
-    out = vc.propose(tenant, texts)
-    out["source"] = how
-    return out
+    # READ IN THE WORKER (2026-10-01): a crawl and a model call
+    return _probe(tenant, "propose_voice", {"limit": limit})
 
 
 @app.get("/admin/repair_fingerprints")
@@ -6412,56 +6298,8 @@ def draft_test(key: str = Depends(admin_key), tenant: str = "",
         return {"error": "unauthorized"}
     if not tenant:
         return {"error": "need tenant="}
-    from . import replies, responder, systems
-
-    with db.SessionLocal() as s:
-        q = (s.query(db.EmailLog)
-             .filter(db.tenant_filter(db.EmailLog, tenant),
-                     db.EmailLog.body_excerpt.isnot(None)))
-        if message_id:
-            q = q.filter(db.EmailLog.gmail_message_id == message_id)
-        if pick:
-            q = q.filter(db.EmailLog.category == pick)
-        rows = q.order_by(db.EmailLog.seen_at.desc()).limit(limit).all()
-        s.expunge_all()
-
-    if not rows:
-        return {"error": "no thread with a stored body matches — run "
-                         "/admin/archive_fetch first, or widen `pick`"}
-
-    out = []
-    for r in rows:
-        body = (r.body_excerpt or "").strip()
-        # DRAFT UNDER THE SYSTEM THAT OWNS THIS MAIL. `replies.route` sends a
-        # sales lead to lead_responder and order mail to service_desk; the
-        # run was re-homed afterwards, but the DRAFT was made with the service
-        # desk's guidance and rung every time. Now the lead is drafted as a
-        # lead, and inbox_triage's own mail stays with the service desk.
-        _owner = replies.route(r.category or "")
-        res = responder.answer(tenant, body[:2000],
-                               system_key=(_owner if _owner in systems.CATALOG
-                                           else "service_desk"),
-                               draft_with_model=True)
-        out.append({
-            "thread": {"subject": r.subject, "from": r.sender,
-                       "bucket": r.category, "when": r.seen_at,
-                       "they_wrote": body[:400]},
-            "mode": res.get("mode") or res.get("stage") or "answered",
-            "grounding": (res.get("grounding") or {}).get("level"),
-            "draft": res.get("draft") or "",
-            "blocked": res.get("draft_blocked_by") or res.get("blocked_on") or "",
-            "validated": res.get("validated"),
-            "checks_run": res.get("checks_run", []),
-            "prior_threads_used": [
-                h.get("subject") for h in
-                ((res.get("bundle") or {}).get("correspondence")
-                 or (res.get("context") or {}).get("correspondence") or [])],
-            "gaps": [g.get("missing") for g in (res.get("gaps") or [])],
-        })
-    return {"tenant": tenant, "tested": len(out), "results": out,
-            "note": ("nothing was sent and nothing was filed on the thread. "
-                     "Read `blocked` — a draft the validator threw away is "
-                     "the system working, not failing.")}
+    # REHEARSED IN THE WORKER (2026-10-01): a model drafts each reply
+    return _probe(tenant, "draft_test", {"message_id": message_id, "pick": pick, "limit": limit})
 
 
 @app.get("/admin/archive_fetch")
@@ -8780,23 +8618,13 @@ async def article_picture(request: Request, key: str = Depends(admin_key)):
     art, kw, _ap = _article_bundle(output_id)
     if art is None:
         return _back("no artifact with that id")
-    from . import creative, kb as kbm, skill_pack as _sp, systems as _sysm
+    from . import kb as kbm
     tenant = art.tenant or ""
     meta = getattr(art, "meta", None) or {}
     keyword = str((kw.phrase if kw is not None else "") or meta.get("keyword") or "")
     if not keyword:
         return _back("no keyword joins this article, so there is nothing to "
                      "brief a picture against")
-    entity_key = str(getattr(art, "entity_key", "") or meta.get("entity_key") or "")
-    also = _sysm.entity_list(meta.get("entity_keys") or "")
-    about = _sp.article_commitment(keyword, entity_key, also,
-                                   str(meta.get("title") or keyword))
-    claim = ""
-    try:
-        rows = kbm.claims(tenant, entity_keys=[entity_key] if entity_key else None)
-        claim = (rows[0].claim if rows else "")
-    except Exception:                                            # noqa: BLE001
-        claim = ""
     boards = [str(b) for b in form.getlist("boards") if str(b).strip()]
     unknown = [b for b in boards if b not in kbm.boards(tenant)]
     if unknown:
@@ -8812,26 +8640,14 @@ async def article_picture(request: Request, key: str = Depends(admin_key)):
     if len(models) > 1:
         return _back("one picture, one model — choose 'both' on the "
                      "make-frames form, where a set is drawn per model")
-    got = creative.generate(
-        tenant, commitment=about, fmt="article_hero",
-        entity_key=entity_key, prominent=str(meta.get("title") or keyword),
-        claim=claim, boards=tuple(boards), image_model=models[0])
-    if not got.get("ok"):
-        # NAME THE REFUSAL. A generator that fails silently is the state this
-        # replaced, one layer down.
-        return _back("no picture was made — "
-                     + str(got.get("error") or "generation failed")[:180])
-    v = got.get("assessment") or {}
-    failed = ", ".join(v.get("failed") or [])
-    fid = got.get("fidelity") or {}
-    return _back(
-        f"a picture was generated by {got.get('model', models[0])} and filed as "
-        "PROPOSED — approve it on Review \u00b7 Pictures before anything can use it"
-        + (f". Judged {fid.get('match')}/100 against the product's photographs"
-           if fid.get("match") is not None else "")
-        + (f". The reviewer flagged: {failed}" if failed else "")
-        + (f". {why}" if why else ""),
-        ok=True)
+    # DRAWN IN THE WORKER (2026-10-01: every heavy press is a job): what can
+    # be refused is refused above, at the press; the drawing is queued.
+    got = _jobs.enqueue(tenant, "article_picture", dedupe_on=("output_id",),
+                        payload={"output_id": output_id, "boards": list(boards),
+                                 "image_model": models[0], "model_note": why})
+    arg = _queued(got, "drawing the picture — it is filed as PROPOSED on Review \u00b7 Pictures, "
+                       "to approve before anything can use it")
+    return _back(arg[1], ok=arg[0] == "ok")
 
 
 @app.post("/admin/kb_audience_entities")
@@ -9066,13 +8882,15 @@ def vocabulary_review(key: str = Depends(admin_key), tenant: str = "",
     """
     if key != config.APPROVAL_SECRET:
         return {"error": "unauthorized"}
-    from . import extract, kb as kbm
+    from . import kb as kbm
     out = {"tenant": tenant,
            "overlaps": kbm.situation_overlaps(tenant),
            "neighbours": {r.tag: kbm.situation_neighbours(tenant, r.tag)
                           for r in kbm.situation_rows(tenant)}}
     if model in ("1", "true"):
-        out["model_review"] = extract.review_vocabulary(tenant)
+        # THE MODEL'S PASS RUNS IN THE WORKER (2026-10-01); the lexical
+        # checks above are instant and stay here
+        out["model_review"] = _probe(tenant, "vocabulary", {})
     return out
 
 

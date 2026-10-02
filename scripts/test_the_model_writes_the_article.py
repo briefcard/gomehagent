@@ -34,6 +34,8 @@ os.environ["APPROVAL_SECRET"] = "s3cret"
 os.environ.pop("SHOTS_WS", None)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from _queued import run_now  # noqa: E402
+from app import jobs as _jobs  # noqa: E402
 from app import admin_ui, articles as ar, brand_theme, db, kb, llm, pictures as pics, shots, tenants, web  # noqa: E402
 
 CDN = "https://cdn.shopify.com/s/files/1/0002/"
@@ -408,7 +410,8 @@ def main() -> int:
     answers["email_brief"] = {"name": "guide", "blocks": [{"name": "answer", "what": "the answer", "required": True},
                                                            {"name": "steps", "what": "numbered steps", "required": True}],
                               "devices": ["a numbered list"], "voice_of_layout": "tight"}
-    r = c.post("/admin/article_layout?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "https://rival.test/a"}, follow_redirects=False)
+    with run_now(_jobs):     # read in the worker since 2026-10-01
+        r = c.post("/admin/article_layout?key=s3cret", data={"key": "s3cret", "tenant": "baci", "url": "https://rival.test/a"}, follow_redirects=False)
     ck("pasting an article's address reads its layout once and files it for the brand",
        r.status_code == 303 and "/brand" in r.headers.get("location", "")
        and not ar.pattern("baci").get("default") and ar.pattern("baci")["source_url"] == "https://rival.test/a")

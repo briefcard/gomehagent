@@ -22,6 +22,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from _queued import run_now  # noqa: E402
+from app import jobs as _jobs  # noqa: E402
 from app import (approvals, assurance, correlate, db, kb,  # noqa: E402
                  systems, tenants, toolcalls, web)
 
@@ -252,7 +254,8 @@ def main() -> int:
     ck("it computes without delivering",
        r["findings"] and _sweeps() == before,
        "reading it a dozen times must not fill the queue")
-    c.get("/admin/sweep?key=s3cret&run=1")
+    with run_now(_jobs):     # delivered by the worker since 2026-10-01
+        c.get("/admin/sweep?key=s3cret&run=1")
     ck("  and delivers when told to", _sweeps() == before + 1)
     anon = TestClient(web.app)
     rr = anon.get("/admin/sweep")

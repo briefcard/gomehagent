@@ -134,8 +134,9 @@ def main() -> int:
        all("CATALOG" not in (u.get("fix") or "") for u in rep.get("not_yet_measured") or []))
 
     # ---- inbound mail is drafted under its routed system --------------------
+    # the rehearsal runs in the worker since 2026-10-01 (`probes._draft_test`)
     src = open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "app", "web.py")).read()
+        os.path.abspath(__file__))), "app", "probes.py")).read()
     ck("the inbound draft route chooses the system by the mail's bucket",
        bool(re.search(r"_owner = replies\.route\(r\.category", src))
        and "system_key=(_owner if _owner in systems.CATALOG" in src,

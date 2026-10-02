@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import sys
+from urllib.parse import unquote
 import tempfile
 
 os.environ["DATABASE_URL"] = f"sqlite:///{os.path.join(tempfile.mkdtemp(), 'wl.db')}"
@@ -36,6 +37,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from _queued import run_now  # noqa: E402
+from app import jobs as _jobs  # noqa: E402
 from app import creative, db, llm, meta_ads, systems, tenants, web  # noqa: E402
 
 KEY = "s3cret"
@@ -188,17 +191,22 @@ def main() -> int:
     ck("an unread account is told what it is missing, and what it costs",
        "never on a schedule" in empty
        and "Read this account" in empty, "")
-    r = c.post("/admin/ad_winning_look", data={"key": KEY, "tenant": "baci"},
-               follow_redirects=False)
+    # read in the worker since 2026-10-01; `run_now` runs the job here, and
+    # what it found is said on the job, where the Queue shows it
+    with run_now(_jobs) as ran:
+        r = c.post("/admin/ad_winning_look", data={"key": KEY, "tenant": "baci"},
+                   follow_redirects=False)
+    said = str(((ran[-1] if ran else {}).get("result") or {}).get("why") or "")
     ck("the button reads them and says what it found",
-       r.status_code == 303 and "Read%202" in r.headers.get("location", ""),
-       r.headers.get("location", ""))
+       r.status_code == 303 and "queued" in unquote(r.headers.get("location", "")) and "Read 2" in said,
+       said)
     meta_ads._cfg = lambda tenant: ({}, "no Meta connection on this account")
-    r = c.post("/admin/ad_winning_look", data={"key": KEY, "tenant": "baci"},
-               follow_redirects=False)
-    ck("  and a refusal is read where the button was, by name",
-       "no%20Meta%20connection" in r.headers.get("location", ""),
-       r.headers.get("location", ""))
+    with run_now(_jobs) as ran:
+        r = c.post("/admin/ad_winning_look", data={"key": KEY, "tenant": "baci"},
+                   follow_redirects=False)
+    said = str(((ran[-1] if ran else {}).get("result") or {}).get("why") or "")
+    ck("  and a refusal is read on the job, by name",
+       "no Meta connection" in said, said)
 
     print("\n— nothing calls it unattended —")
     import pathlib

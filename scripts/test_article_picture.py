@@ -41,6 +41,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from _queued import run_now  # noqa: E402
+from app import jobs  # noqa: E402
 from app import (admin_ui, creative, db, kb, keywords, skill_pack,  # noqa: E402
                  tenants, web)
 
@@ -162,8 +164,10 @@ def main() -> int:
     creative.generate = _spy
     try:
         c = TestClient(web.app)
-        r = c.post(f"/admin/article_picture?key={KEY}",
-                   data={"output_id": oid}, follow_redirects=False)
+        # drawn in the worker (2026-10-01); `run_now` runs the job here
+        with run_now(jobs):
+            r = c.post(f"/admin/article_picture?key={KEY}",
+                       data={"output_id": oid}, follow_redirects=False)
     finally:
         creative.generate = real
     ck("it lands back on the article", r.status_code == 303
@@ -200,13 +204,14 @@ def main() -> int:
     creative.generate = lambda tenant, **kw: {"ok": False,
                                               "error": "ANTHROPIC_API_KEY is not set"}
     try:
-        r2 = TestClient(web.app).post(f"/admin/article_picture?key={KEY}",
-                                      data={"output_id": oid},
-                                      follow_redirects=False)
+        with run_now(jobs) as ran2:
+            r2 = TestClient(web.app).post(f"/admin/article_picture?key={KEY}",
+                                          data={"output_id": oid},
+                                          follow_redirects=False)
     finally:
         creative.generate = real
-    ck("it says what stopped it",
-       "ANTHROPIC_API_KEY" in r2.headers.get("location", ""),
+    ck("it says what stopped it — on the job, where the work ran",
+       "ANTHROPIC_API_KEY" in str(((ran2[-1] if ran2 else {}).get("result") or {}).get("why") or ""),
        "a generator that fails silently is the state this replaced, one "
        "layer down")
 

@@ -707,6 +707,71 @@ SABOTAGES = [
         "suites": ['test_the_model_makes_the_email.py'],
         "why": 'Revise sends it back with no note, and the same problems come back',
     },
+    # Every heavy operation goes to the worker (owner, 2026-10-01).
+    {
+        "name": 'revise_runs_in_the_request',
+        "file": 'app/web.py',
+        "find": '    got = _jobs.enqueue(art.tenant or "", "redraft", system_key=art.system_key or "",',
+        "replace": '    got = _sp.redraft_artifact(art.tenant or "", output_id) or _jobs.enqueue(art.tenant or "", "redraft", system_key=art.system_key or "",  # SABOTAGE',
+        "suites": ['test_heavy_work_goes_to_the_worker.py'],
+        "why": 'Revise runs the whole skill inside the request again',
+    },
+    {
+        "name": 'a_thread_in_the_web_service',
+        "file": 'app/web.py',
+        "find": '    _jobs.enqueue(_active_tenant(chat_id) or OPS_ACCOUNT, "command", dedupe=False,',
+        "replace": '    __import__("threading").Thread(target=lambda: None).start(); _jobs.enqueue(_active_tenant(chat_id) or OPS_ACCOUNT, "command", dedupe=False,  # SABOTAGE',
+        "suites": ['test_heavy_work_goes_to_the_worker.py'],
+        "why": 'work is started in a thread inside the web service',
+    },
+    {
+        "name": 'messages_answered_side_by_side',
+        "file": 'app/jobs.py',
+        "find": '    return q.filter(db.JobQueue.kind.notin_(busy)) if busy else q',
+        "replace": '    return q  # SABOTAGE',
+        "suites": ['test_heavy_work_goes_to_the_worker.py'],
+        "why": 'two messages to the assistant run at once on two instances, and answer out of order',
+    },
+    {
+        "name": 'the_owners_account_waits_on_its_state',
+        "file": 'app/jobs.py',
+        "find": '                 or_(db.JobQueue.tenant.in_(active), db.JobQueue.kind.in_(anyone))))',
+        "replace": '                 db.JobQueue.tenant.in_(active)))  # SABOTAGE',
+        "suites": ['test_heavy_work_goes_to_the_worker.py'],
+        "why": "a message to the assistant is never answered while the owner's account row is paused",
+    },
+    {
+        "name": 'a_typed_message_loses_its_chat',
+        "file": 'app/web.py',
+        "find": '    _enqueue("text", text, chat_id)',
+        "replace": '    _enqueue("text", text)  # SABOTAGE',
+        "suites": ['test_heavy_work_goes_to_the_worker.py'],
+        "why": 'a typed message reaches the worker without its chat, and the agent without its account',
+    },
+    {
+        "name": 'a_diagnostic_answer_is_lost',
+        "file": 'app/jobs.py',
+        "find": '           result=result if spec.get("keep_result") else None)',
+        "replace": '           result=None)  # SABOTAGE',
+        "suites": ['test_heavy_work_goes_to_the_worker.py'],
+        "why": 'a diagnostic runs in the worker and its answer is thrown away',
+    },
+    {
+        "name": 'the_note_waits_for_the_worker',
+        "file": 'app/web.py',
+        "find": '    _sp.file_redraft_note(art.tenant or "", output_id, note, part)',
+        "replace": '    pass  # SABOTAGE',
+        "suites": ['test_heavy_work_goes_to_the_worker.py'],
+        "why": "the note typed at Revise is never filed — the worker's redraft runs without it",
+    },
+    {
+        "name": 'a_reroll_is_queued',
+        "file": 'app/skill_pack.py',
+        "find": '        if not (note or "").strip() and not (',
+        "replace": '        if False and (  # SABOTAGE',
+        "suites": ['test_ad_board.py'],
+        "why": 'a redraft with no direction is queued as a reroll, refused minutes later where nobody looks',
+    },
     # -- SEGMENTS AND READERS, 2026-09-29 --------------------------------------
     # The owner's Build pressed on Omnisend: 400 for New subscribers, the
     # reason cut at "Validati"; and "audiences OR segments".
@@ -6467,9 +6532,9 @@ SABOTAGES = [
     },
     {
         "name": "the_picture_a_run_asks_for_can_be_made",
-        "file": "app/web.py",
-        "find": "    got = creative.generate(",
-        "replace": "    got = (lambda **k: {\"ok\": False, \"error\": \"x\"})(  # SABOTAGE",
+        "file": "app/creative.py",
+        "find": '    got = generate(tenant, commitment=about, fmt="article_hero", entity_key=entity_key,',
+        "replace": '    got = (lambda *a, **k: {"ok": False, "error": "x"})(tenant, commitment=about, fmt="article_hero", entity_key=entity_key,  # SABOTAGE',
         "suites": ["test_article_picture.py"],
         "why": "the workroom control stops reaching the generator, so the "
                "run's note points at a button that does nothing — which is "
@@ -6479,9 +6544,9 @@ SABOTAGES = [
     },
     {
         "name": "a_generated_picture_is_briefed_from_the_article",
-        "file": "app/web.py",
-        "find": "    about = _sp.article_commitment(keyword, entity_key, also,",
-        "replace": "    about = _sp.article_commitment(\"something else\", \"\", [],  # SABOTAGE",
+        "file": "app/creative.py",
+        "find": '    about = _sp.article_commitment(keyword, entity_key, _sysm.entity_list(meta.get("entity_keys") or ""),',
+        "replace": '    about = _sp.article_commitment("something else", "", [],  # SABOTAGE',
         "suites": ["test_article_picture.py"],
         "why": "the picture is briefed against a different subject than the "
                "article was written against, so it is a picture of the wrong "
@@ -7533,7 +7598,7 @@ SABOTAGES = [
     },
     {
         "name": "inbound_mail_is_drafted_under_its_routed_system",
-        "file": "app/web.py",
+        "file": "app/probes.py",
         "find": "        _owner = replies.route(r.category or \"\")",
         "replace": "        _owner = \"service_desk\"  # SABOTAGE",
         "suites": ["test_rehearsal_fixes.py"],

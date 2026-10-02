@@ -1055,3 +1055,25 @@ JOBS = {"recategorize": recategorize, "doc_sweep": doc_sweep,
         "duplicate_cleanup": _skill_job("duplicate_cleanup"),
         "spend_flags": _skill_job("spend_flags"),
         "meeting_scan": _skill_job("meeting_scan")}
+
+
+def run_job(tenant: str = "", *, job: str, progress=None) -> dict:
+    """THE QUEUE'S DOOR INTO AN OPERATIONS SWEEP (2026-10-01). `/admin/run/<job>`
+    ran these in a thread inside the web service; they run in the worker now,
+    and say how far they have got where `STATUS` keeps it."""
+    import threading
+    fn = JOBS.get(job)
+    if fn is None:
+        return {"ok": False, "status": "failed", "why": f"no such job: {job}"}
+    stop = threading.Event()
+
+    def _say() -> None:
+        while not stop.wait(15):
+            if progress and STATUS.get(job):
+                progress(str(STATUS.get(job))[:500])
+    threading.Thread(target=_say, daemon=True).start()
+    try:
+        got = fn()
+    finally:
+        stop.set()
+    return got if isinstance(got, dict) else {"ok": True, "why": str(got)[:500]}
