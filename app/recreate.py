@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 from . import bundle as _bundle
 from . import config, db, dividers, email_header, type_system
+from . import reader as _reader
 
 #: Rounds: the first, then up to this many edits. The hand-made proof took two.
 ROUNDS = 2
@@ -735,7 +736,7 @@ a collection named to that collection — never the catalogue by default:
 %(pages)s
 
 THE MESSAGE this email carries%(message)s
-%(story)s
+%(reader)s%(story)s
 %(notes)sTHE STANDARD — %(standard_is)s. Copy its CRAFT (a headline that fills the column; the
 page in the photograph's own tone; a device drawn faithfully; real product names and links;
 tight copy that turns), NOT its design, not one of its words, and none of its pictures or
@@ -923,10 +924,15 @@ def _apply_edits(html: str, text: str) -> tuple[str, int, list[str]]:
 
 
 _STORY_PROMPT = """You are the writer. Before a line of the email is set, decide THE STORY — the argument
-this email makes for %(name)s — the way a good copywriter does: the reader's real objection,
-the brand's real answer, the real reason to act, each resting on something the brand has.
+this email makes for %(name)s to ONE reader — the way a good copywriter does: something this
+reader actually has (a difficulty, a situation, a hesitation, a moment that makes them act),
+the brand's real answer to it, the real reason to act, each resting on something on file.
 
-THE REFERENCE'S ARGUMENT — another brand's email, read as beats:
+THE READER — who this email is written to, from what the account knows about them:
+%(reader)s
+
+THE REFERENCE'S ARGUMENT — another brand's email, read as beats. It gives the SHAPE, never
+the subject:
 %(argument)s
 
 THE BRAND
@@ -939,22 +945,34 @@ THE MATERIAL — the only facts available (a product's own text, the approved cl
 
 THE MESSAGE this email carries%(message)s
 
-Write %(name)s's argument in the SHAPE of the reference's — its energy, its moves, its
-contrast — not one-to-one: keep the beats that work for this brand, merge or drop the ones
-that do not, re-order if that tells it better. Every beat RESTS on something named in the
-material or the message; a beat with nothing to rest on (a guarantee the brand does not make,
-a test nobody ran, a launch that is not happening) is turned to the nearest true thing or
-dropped, and you say which. A contrast beat — the category's failing, what the reader has
-settled for — NAMES WHOSE failing it is in its own words, so it can never read as the
+THE READER DECIDES WHAT THE EMAIL IS ABOUT; the reference only decides how it moves. Choose the
+ONE thing under THE READER this email answers and quote it in "for". Every beat about the
+reader rests on THE READER, quoted in rests_on. Never tell the reader a difficulty, a worry or
+a habit that is not under THE READER, and never a premise they would not nod at on reading it:
+"White at the table is never the easy choice" tells somebody who eats off white plates every
+day about a problem they do not have. A line that would read the same to anybody (a motto, a
+mood: "Not a trend. A decision.") is not an argument. The hook names something this reader
+would recognise as their own, in their words, and the product's facts answer it.
+Write %(name)s's argument to this reader in the SHAPE of the reference's — its energy, its
+moves, its contrast — not one-to-one: keep the beats that work for this brand, merge or drop
+the ones that do not, re-order if that tells it better. Every beat RESTS on something named in
+THE READER, the material or the message; a beat with nothing to rest on (a guarantee the brand
+does not make, a test nobody ran, a launch that is not happening) is turned to the nearest true
+thing or dropped, and you say which. A contrast beat — the category's failing, what the reader
+has settled for — NAMES WHOSE failing it is in its own words, so it can never read as the
 brand's own product ("You know how most melamine goes." → the failings). No line implies what
 is not true (a melamine plate is plastic; "the plastic is gone" is a lie by implication).
 The hook means something on its own. The close is earned by what came before. Answer JSON:
-{"hook": the headline stack's idea in a line,
+{"for": the one line from THE READER this email answers, quoted as it is written there,
+ "hook": the headline stack's idea in a line,
  "beats": [{"beat": "...", "says": the beat in this brand's words — a line or two, the copy
-            itself, "rests_on": the fact or claim it rests on, quoted from the material,
+            itself, "rests_on": the fact, claim or reader's line it rests on, quoted,
             "about": "the category" | "the reader" | "us" — whose failing or whose promise}],
  "turned": [what you turned or dropped and why],
  "close": the last line and the ask}"""
+
+#: No reference to take a shape from: the argument is the writer's own.
+_NO_ARGUMENT = ("(no reference this time — decide the argument yourself: a hook, three to five beats, a close)")
 
 
 def decide_story(brief_: dict, kit_: dict, message: dict | None, *, tenant: str = "", entity_key: str = "") -> dict:
@@ -963,13 +981,23 @@ def decide_story(brief_: dict, kit_: dict, message: dict | None, *, tenant: str 
     — a list of the category's failings landed beside Baci's own product with
     no frame, "NOT ALL MELAMINE" stood alone, "the plastic is gone" lied by
     implication. The story is one argument, held to the material, before a
-    line is set."""
+    line is set.
+
+    WRITTEN TO ITS READER (owner, 2026-10-02: "it doesn't land anything that
+    the reader would connect with"). A campaign's message carries `reader`.
+    The story names the one thing of theirs it answers (`for`), and
+    `reader.story_problems` holds that, and every problem beat about the
+    reader, to the account's own rows. On a miss the writer is asked once
+    more and told what missed. With a reader there is a story even with no
+    reference to take a shape from, because the argument is what was
+    missing, not the shape."""
+    reader_ = (message or {}).get("reader") if message else None
     arg = brief_.get("argument") or []
     if not arg:
         # an older brief with no argument read: the copy jobs stand in for it
         arg = [{"beat": f"section {sec.get('n')}", "says": "; ".join(str(c.get("job") or "") for c in sec.get("copy") or []),
                 "does": sec.get("does") or "", "rests_on": "(not read)"} for sec in brief_.get("sections") or [] if sec.get("copy")]
-    if not arg:
+    if not arg and reader_ is None:
         return {"ok": True, "story": {}, "why": "the reference carries no copy to argue with", "calls": 0}
     theme = kit_.get("theme") or {}
     voice = kit_.get("voice") or {}
@@ -981,14 +1009,28 @@ def decide_story(brief_: dict, kit_: dict, message: dict | None, *, tenant: str 
         "name": kit_.get("name") or theme.get("name") or "the brand",
         "positioning": kit_.get("positioning") or "", "voice": ", ".join(map(str, voice.get("tone") or [])) or "as the material reads",
         "rules_brand": rules_brand, "material": (_material(kit_, entity_key, message) or "(nothing beyond the product's name)")[:3000],
-        "notes": kit_.get("_notes") or "",
-        "argument": json.dumps(arg, ensure_ascii=False, indent=1)[:5000], "message": _message_text(message)}
-    reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=2500)
-    got = _json(reply.text) if getattr(reply, "ok", False) else None
-    if not isinstance(got, dict) or not got.get("beats"):
-        return {"ok": False, "story": {}, "calls": 1,
+        "notes": kit_.get("_notes") or "", "reader": _reader.text(reader_),
+        "argument": json.dumps(arg, ensure_ascii=False, indent=1)[:5000] if arg else _NO_ARGUMENT,
+        "message": _message_text(message)}
+    got, kept, calls, missed, reply = None, [], 0, [], None
+    for _try in range(2):
+        asked = prompt if not missed else (
+            prompt + "\n\nYOUR LAST STORY MISSED THE READER. Fix each of these and answer the whole JSON again:\n- "
+            + "\n- ".join(missed))
+        reply = _ask("email_compose", asked, tenant=tenant, max_tokens=2500)
+        calls += 1
+        again = _json(reply.text) if getattr(reply, "ok", False) else None
+        if not isinstance(again, dict) or not again.get("beats"):
+            break
+        missed = _reader.story_problems(again, reader_)
+        if got is None or len(missed) < len(kept):
+            got, kept = again, missed
+        if not missed:
+            break
+    if not isinstance(got, dict):
+        return {"ok": False, "story": {}, "calls": calls,
                 "why": "the writer did not answer with a story — " + str(getattr(reply, "error", "") or "no JSON")}
-    return {"ok": True, "story": got, "why": "", "calls": 1}
+    return {"ok": True, "story": got, "why": "", "calls": calls, "reader_problems": kept}
 
 
 def kb_ban(tenant: str) -> list:
@@ -1002,7 +1044,7 @@ def kb_ban(tenant: str) -> list:
 def _story_text(st: dict | None) -> str:
     if not st:
         return ""
-    lines = [f"hook: {st.get('hook', '')}"]
+    lines = ([f"for the reader's: {st['for']}"] if st.get("for") else []) + [f"hook: {st.get('hook', '')}"]
     for b in st.get("beats") or []:
         lines.append(f"- [{b.get('beat', '')}] ({b.get('about', '')}) {b.get('says', '')}"
                      + (f"  — rests on: {b['rests_on']}" if b.get("rests_on") else ""))
@@ -1011,6 +1053,17 @@ def _story_text(st: dict | None) -> str:
     if st.get("turned"):
         lines.append("turned: " + "; ".join(map(str, st["turned"])))
     return "\n".join(lines)
+
+
+def _reader_section(message: dict | None) -> str:
+    """THE READER as the maker reads it, or "" when the email carries no
+    campaign message (a design recreated for the shelf has no reader)."""
+    if not message or "reader" not in message:
+        return ""
+    return ("\nTHE READER — who this email is written to. Every line is written to them, about what they\n"
+            "have, in their words: never a premise they would not nod at on reading it, never a line that\n"
+            "would read the same to anybody. The story below names which of theirs this email answers.\n"
+            + _reader.text(message.get("reader")) + "\n")
 
 
 def _message_text(message: dict | None) -> str:
@@ -1065,8 +1118,9 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
             "findings": "\n".join(f'- [{f.get("severity", "")}] {f.get("where", "")}: {f.get("what", "")}'
                                   + (f' → {f["do"]}' if f.get("do") else "") for f in findings),
             "html": html, "output": _EDITS_OUTPUT,
-            "story": ("THE STORY this email tells — an edit never changes a beat's meaning or drops its frame:\n"
-                      + _story_text(story_) + "\n") if story_ else ""}
+            "story": _reader_section(message) + (
+                ("THE STORY this email tells — an edit never changes a beat's meaning or drops its frame:\n"
+                 + _story_text(story_) + "\n") if story_ else "")}
         if kit_.get("_notes"):
             prompt = kit_["_notes"] + "\n" + prompt
         if png:
@@ -1129,7 +1183,7 @@ def compose(brief_: dict, kit_: dict, cast_: dict, message: dict | None = None, 
                       "below, with one idea, one big picture, type at scale, the page in the picture's own tone, "
                       "a real device or two, one ask)"),
             "pictures": "\n".join(pics) or "(none)", "cut": cut,
-            "message": _message_text(message),
+            "message": _message_text(message), "reader": _reader_section(message),
             "exemplar": (kit_.get("_standard") or exemplar())[:14000],
             "standard_is": kit_.get("_standard_is") or "an email made by hand from another reference for another brand",
             "notes": kit_.get("_notes") or "",
@@ -2142,7 +2196,7 @@ say — a fault, fixed by setting the failing as type alone and moving the pictu
 answer; does the close earn its ask from what
 came before; is there a line that says nothing ("set the table like you mean it" is a mood,
 not a claim — allowed once, as a closer, never as the argument).
-%(notes)sDRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
+%(reader)s%(notes)sDRESSING (a mascot, a handwritten aside, a badge, a sticker) is judged on whether it BELONGS
 to this brand and EARNS its place: re-authored from this brand's world — its products, its
 place, its voice — it is correct however much it differs from the reference's; a generic
 stand-in (a random exclamation — the owner's own examples: "Bella!", "Bellissimo!" — an emoji,
@@ -2277,7 +2331,7 @@ def _confused(got: dict, brief_: dict) -> str:
 
 
 def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = "", material: str = "",
-          notes: str = "", turned_: str = "") -> dict:
+          notes: str = "", turned_: str = "", reader: dict | None = None) -> dict:
     """`{ok, findings, verdict, why, calls}` — ours beside the reference, or
     ours alone when there is no reference. The pictures are stamped and
     labelled, the judge must say what it read in ours, and a judgement that
@@ -2297,13 +2351,18 @@ def judge(reference_png: bytes, ours_png: bytes, brief_: dict, *, tenant: str = 
             blocks.append(ed._image_block(_stamp(ed.strips(png, edge, limit=1)[0]["png"], f"{label} — top")))
     except Exception as e:                                        # noqa: BLE001
         return {"ok": False, "findings": [], "verdict": {}, "why": f"a picture could not be cut: {e}", "calls": 0}
+    # THE READER, so a copy finding's edit is written to them (owner,
+    # 2026-10-02); whether the words land is the reader pass's question
+    said_reader = ("THE READER this email is written to — a copy finding's \"do\" is written to them, in their\n"
+                   "words:\n" + _reader.text(reader) + "\n") if reader is not None else ""
     blocks.append({"type": "text", "text": (_JUDGE_PROMPT % {
         "concept": brief_.get("concept"), "devices": _devices_text(brief_)[:1500], "notes": notes or "",
+        "reader": said_reader,
         "turned": (f"THE MAKER TURNED THE CONCEPT, and said so: {turned_}\nThat turn is the "
                    "design working, not a fault — this brand's material does not carry the "
                    "reference's subject. Judge OURS against the TURNED concept: the same FORM, "
                    "resting on what this brand actually has.\n") if turned_ else ""})
-        if reference_png else _JUDGE_ALONE})
+        if reference_png else _JUDGE_ALONE + ("\n" + said_reader if said_reader else "")})
     calls = 0
     got, mixed = None, ""
     for _try in range(2):
@@ -2506,10 +2565,16 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
     calls += told_story.get("calls", 0)
     story_ = told_story.get("story") or None
     if story_:
-        story_note = f"The story: {str(story_.get('hook') or '')[:90]} — {len(story_.get('beats') or [])} beats"
+        story_note = (f"The story: {str(story_.get('hook') or '')[:90]} — {len(story_.get('beats') or [])} beats"
+                      + (f", for the reader's “{str(story_['for'])[:90]}”" if story_.get("for") else ""))
         if story_.get("turned"):
             story_note += "; turned: " + "; ".join(map(str, story_["turned"]))[:240]
         story.append(story_note + ".")
+        if told_story.get("reader_problems"):
+            # SAID, and left to the reader pass to hold: the words are what
+            # ships, and the maker is told the reader whatever the story missed
+            story.append("The story still misses its reader after a second ask: "
+                         + "; ".join(told_story["reader_problems"])[:300] + ".")
     elif told_story.get("why"):
         story.append("No story decided: " + str(told_story.get("why")) + ".")
     copy_ = {"claims": list((message or {}).get("claims") or [])}
@@ -2601,6 +2666,14 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         _t = _time.monotonic()
         checks = check(html, kit_, brief_, copy_, links=True, reference_host=ref_host)
         told = truth(_Walk_words(html), material_, tenant=tenant)
+        # THE READER PASS — the words as the reader reads them (owner,
+        # 2026-10-02: "it doesn't land anything that the reader would connect
+        # with"). A campaign's message carries its reader; a design recreated
+        # for the shelf has none and is not read this way.
+        heard = (_reader.check(_Walk_words(html), message.get("reader"), brand=str(kit_.get("name") or ""),
+                               tenant=tenant) if message and "reader" in message
+                 else {"findings": [], "calls": 0, "speaks_to": ""})
+        calls += heard.get("calls", 0)
         # THE OWNER'S NEWS AS GIVEN: a number keeps its qualifier (2026-10-01)
         checks += [{"code": "news_changed", "severity": "blocks", "where": "the copy", "what": p_}
                    for p_ in _bundle.news_changed(_Walk_words(html), str((message or {}).get("news") or ""))]
@@ -2609,7 +2682,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
         _t = _time.monotonic()
         shot = shots.shoot(_inline_media(html), read=True)
         took["rendering"] = round(_time.monotonic() - _t)
-        checks = (checks + told["findings"] + bake_findings
+        checks = (checks + told["findings"] + heard["findings"] + bake_findings
                   + system_check(html, seen=shot, pairing=pairing, raw=raw) + story_check(html, story_, kit_)
                   + drawn_shapes(raw) + baked_masthead(raw, kit_))
         if "texts" in shot:
@@ -2627,7 +2700,9 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
             png_id = put.get("id", "") if put.get("ok") else ""
         _t = _time.monotonic()
         judged = (judge(ref_png, shot["png"], brief_, tenant=tenant, material=material_,
-                        notes=judge_notes, turned_=turned(raw)) if shot.get("ok")
+                        notes=judge_notes, turned_=turned(raw),
+                        reader=message.get("reader") if message and "reader" in message else None)
+                  if shot.get("ok")
                   else {"ok": False, "findings": [], "verdict": {}, "why": shot.get("why") or "no picture", "calls": 0})
         took["judging"] = round(_time.monotonic() - _t)
         # THE JUDGE IS NOT A LEAK: a finding that carries the reference's own
@@ -2652,6 +2727,7 @@ def run(structure_id: str, tenant: str, entity_key: str = "", *, recent_media=()
                        "verdict": judged.get("verdict", {}), "judged": judged.get("ok", False),
                        "why_not_judged": judged.get("why", "") if not judged.get("ok") else "",
                        "blocking": len(open_), "edited": made.get("edited", 0), "html": html,
+                       "speaks_to": heard.get("speaks_to", ""),
                        "took": took, "how": made.get("how", ""),
                        "shot": {"door": shot.get("door", ""), "ms": shot.get("ms", 0), "why": shot.get("why", "")}})
         story.append(f"Round {n}: {len(blocking(checks))} check(s) block, "

@@ -275,7 +275,10 @@ def inputs_for(tenant: str, stage: str, *, claims: list | None = None,
     return {"stage": stage, "label": st["label"], "reader": st["reader"],
             "brief": st["brief"], "angles": st["angles"], "asks": st["asks"],
             "have": have, "leads": leads, "missing": missing, "thin": thin,
-            "note": note}
+            "note": note,
+            # WHO, by name — the brief said where the reader is and what they
+            # find hard, and never who they are
+            "who": str(_txt(audience, "name") or "") if audience else ""}
 
 
 def brief(plan: dict) -> str:
@@ -288,7 +291,10 @@ def brief(plan: dict) -> str:
     """
     if not plan or plan.get("error"):
         return ""
-    out = [f"\n## WHERE THE READER IS: {plan['label']}",
+    out = ([f"\n## WHO THIS IS WRITTEN TO: {plan['who']}\nEvery line is written to them, about "
+            f"what they have, in their words — never a premise they would not nod at, never a line "
+            f"that would read the same to anybody."] if plan.get("who") else []) + [
+           f"\n## WHERE THE READER IS: {plan['label']}",
            f"They {plan['reader']}.", plan["brief"]]
     if plan["asks"]:
         out.append("This one MAKES THE ASK.")

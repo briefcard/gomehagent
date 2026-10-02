@@ -27,6 +27,7 @@ import re
 
 from . import bundle as _bundle
 from . import config, db
+from . import reader as _reader
 from .recreate import (_Walk_words, _ask, _devices_text, _json, _material, _norm,  # noqa: F401
                        blocking, truth)
 
@@ -298,6 +299,22 @@ marked "the reader" or "the category" is never a claim about us. Eight beats at 
 plan for about %(length)s words. Answer with the JSON only, nothing before it."""
 
 
+def _reader_block(kit_: dict) -> str:
+    """WHO IS SEARCHING, when the plan says which of the brand's buyers this
+    piece is written for (owner, 2026-10-02: "…so that you could always gear
+    the content regardless of topic / context / goal towards the correct
+    audience"). The persona reached the old drafter's funnel brief and never
+    the writer that replaced it. "" when the plan names none: the searcher is
+    the reader, and the keyword says who that is."""
+    r = kit_.get("_reader")
+    if not _reader.known(r):
+        return ""
+    return ("\nWHO IS SEARCHING — the brand's buyer this piece is written for. Answer the search for anyone "
+            "who types it, and choose the examples, the situations and the 'how to choose' for THIS reader, "
+            "in their words. Never tell them a difficulty, a worry or a habit that is not listed here, and "
+            "never a premise they would not nod at:\n" + _reader.text(r) + "\n")
+
+
 def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = "", questions: list | None = None,
                  approach_: dict | None = None, tenant: str = "", material: str = "", angle: str = "",
                  notes: str = "") -> dict:
@@ -321,7 +338,8 @@ def decide_story(brief_: dict, kit_: dict, keyword: str, *, entity_key: str = ""
            f"unlike the angle they are said, not implied: the story carries them, the beats that state them rest "
            f"on them, names, dates and numbers as given — {_bundle.NEWS_RULE}:\n{kit_['_news'][:1500]}\n"
            if kit_.get("_news") else "")
-        + ("\n" + (kit_.get("_notes") or "") if kit_.get("_notes") else ""),
+        + ("\n" + (kit_.get("_notes") or "") if kit_.get("_notes") else "")
+        + _reader_block(kit_),
         "length": brief_.get("length_words") or 1400}
     reply = _ask("email_compose", prompt, tenant=tenant, max_tokens=8000)
     got = _json(reply.text) if getattr(reply, "ok", False) else None
@@ -412,7 +430,7 @@ THE BRIEF — what ranks, and how ours is better:
 
 THE STORY — decided first; every H2 is a beat, every line belongs to one:
 %(story)s
-%(news)s
+%(news)s%(reader)s
 THE BRAND
 name: %(name)s — %(positioning)s
 faces on file: heading %(heading_face)s · body %(body_face)s · accent colour %(accent)s
@@ -544,7 +562,7 @@ def compose(kit_: dict, pattern_: dict, brief_: dict, story_: dict, keyword: str
             "collections": ", ".join(collections or []) or "(none)",
             "exemplar": (kit_.get("_standard") or exemplar())[:12000],
             "standard_is": kit_.get("_standard_is") or "an article written by hand for this brand on another subject",
-            "notes": kit_.get("_notes") or "",
+            "notes": kit_.get("_notes") or "", "reader": _reader_block(kit_),
             "internal": ("THE BRAND'S OWN ARTICLES you may link, once each, where it genuinely helps "
                          "(anchor · url):\n" + "\n".join(f"- {L.get('anchor', '')} · {L.get('url', '')}" for L in (links or [])[:6]))
                         if links else "",
@@ -803,7 +821,7 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
         rival_urls: list | None = None, approach_url: str = "", products: list | None = None,
         collections: list | None = None, links: list | None = None, angle: str = "",
         angle_brief: str = "", notes: str = "", news: str = "", claims: list | None = None,
-        progress=None) -> dict:
+        progress=None, reader: dict | None = None) -> dict:
     """Brief → story → write → check → shoot → judge → edit, best kept.
     Returns everything the card and the runner need; stores nothing but the
     pattern (a Phase 3 seam wires this into `blog_article` and the ledger)."""
@@ -822,6 +840,8 @@ def run(tenant: str, keyword: str, *, role: str = "support", entity_key: str = "
     # WHAT'S NEW rides the kit to the story and the writer, as the notes do;
     # the material below carries it to every check that asks "is it on file".
     kit_["_news"] = str(news or "").strip()
+    # WHO IS SEARCHING, when the plan names the brand's buyer (`_reader_block`)
+    kit_["_reader"] = reader
     if _ex.notes(tenant, _ex.ARTICLE):
         story.append(f"Held to what you have said about this brand's articles ({len(_ex.notes(tenant, _ex.ARTICLE))} note(s)).")
     say("reading what ranks")

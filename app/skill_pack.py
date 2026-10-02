@@ -2351,6 +2351,134 @@ def _recent_sends(tenant: str, segment_key: str) -> list[dict]:
     return out
 
 
+#: How far back the product and reader rotations look: enough campaign emails
+#: that a catalogue of a few dozen lines turns over before one comes round.
+ROTATION_HISTORY = 60
+
+
+def _sent_lately(tenant: str) -> list[dict]:
+    """Every campaign email this account has made, newest first: the entity it
+    was about and the reader it was written for. Every one counts, whether
+    sent, waiting or sent back, because the owner has seen each of them, and
+    the same product in every draft is the repetition they reported.
+
+    The hero is `Output.entity_key` (what somebody chose), else the hero the
+    run offered (`meta.hero`), because a drafter that names no product still
+    gets an email made about the one it was handed. The reader is
+    `meta.audience_key`; `Output.audience_key` carries the SEGMENT here."""
+    from . import db
+    try:
+        with db.SessionLocal() as s:
+            rows = (s.query(db.Output.id, db.Output.entity_key)
+                    .filter(db.Output.tenant == tenant,
+                            db.Output.format == "campaign_email")
+                    .order_by(db.Output.created_at.desc())
+                    .limit(ROTATION_HISTORY).all())
+            ids = [r[0] for r in rows] or [""]
+            try:
+                # two keys out of the meta, not the whole email inside it
+                metas = {oid: {"hero": h or "", "audience_key": a or ""} for oid, h, a in
+                         s.query(db.ArtifactBody.output_id,
+                                 db.ArtifactBody.meta["hero"].as_string(),
+                                 db.ArtifactBody.meta["audience_key"].as_string())
+                         .filter(db.ArtifactBody.output_id.in_(ids)).all()}
+            except Exception:                                    # noqa: BLE001
+                s.rollback()
+                metas = {a.output_id: dict(a.meta or {}) for a in
+                         s.query(db.ArtifactBody).filter(db.ArtifactBody.output_id.in_(ids)).all()}
+    except Exception:                                            # noqa: BLE001
+        # History is an improvement, never a precondition (as `_recent_sends`).
+        return []
+    return [{"hero": str(ek or (metas.get(oid) or {}).get("hero") or ""),
+             "reader": str((metas.get(oid) or {}).get("audience_key") or "")}
+            for oid, ek in rows]
+
+
+#: Words that never name a product's line.
+_LINE_SKIP = frozenset("a an and the of set sets piece pieces pc pcs pack new mini large small x "
+                       "with in for by our your".split())
+
+
+def _line(name: str) -> str:
+    """The line a product belongs to, as its name says it: the first word that
+    is not a count or a generic word. "18-Piece Joke Melamine in White" and
+    "Joke Melamine in Black" are both "joke". A heuristic, and labelled as one:
+    a catalogue names its line first far more often than not, and two colours
+    of one set offered one after the other is the repetition the owner saw."""
+    for t in re.findall(r"[a-z]+", str(name or "").lower()):
+        if len(t) > 1 and t not in _LINE_SKIP:
+            return t
+    return str(name or "").strip().lower()
+
+
+def _fits_words(r, words: list) -> int:
+    """How many of the reader's own words the item's name and text carry."""
+    if not words:
+        return 0
+    text = f"{getattr(r, 'name', '') or ''} {getattr(r, 'description', '') or ''}".lower()
+    return sum(1 for w in words if re.search(r"\b" + re.escape(w), text))
+
+
+def _rotation(rows: list, lately: list, names: dict, *, first=None) -> list:
+    """`rows` in the order they would otherwise be offered, re-ordered so the
+    LINE featured least recently leads, then the item in it featured least
+    recently. `lately` is the heroes, newest first. Never featured comes before
+    featured long ago, which comes before featured last time. Ties keep the
+    given order, so a recommendation's order still decides between equals;
+    `first`, when given, outranks the rotation (a photograph, for the
+    catalogue)."""
+    never = len(lately) + 1
+    own: dict = {}
+    line: dict = {}
+    for i, k in enumerate(lately):
+        if k:
+            own.setdefault(k, i)
+            line.setdefault(_line(names.get(k, k)), i)
+
+    def _k(pair):
+        i, r = pair
+        key = getattr(r, "key", None) or (r.get("key") if isinstance(r, dict) else "") or ""
+        nm = getattr(r, "name", None) or (r.get("name") if isinstance(r, dict) else "") or key
+        return ((first(r) if first else 0), -line.get(_line(nm), never), -own.get(key, never), i)
+    return [r for _, r in sorted(enumerate(rows), key=_k)]
+
+
+def _choose_reader(ctx, lately: list) -> str:
+    """WHO THIS EMAIL IS WRITTEN TO, decided before anything else is. Returns
+    how: "plan" | "the product" | "rotation" | "" (nobody on file).
+
+    NO READER IS A JOB, NOT A GAP (owner, 2026-10-02: "…so that you could
+    always gear the content regardless of topic / context / goal towards the
+    correct audience"). A plan may name only a segment, the list it goes to,
+    and then the email was written "for everybody and therefore for nobody in
+    particular", as `_reader_gap` used to say. Now one approved persona is
+    chosen and SAID, as the drafter's angle is when the plan sets none:
+    the one the plan's product is recommended for, else the one written for
+    least recently. Set on the plan, the owner's choice stands."""
+    if ctx.bundle.get("audience"):
+        return "plan"
+    roster = [a for a in (ctx.bundle.get("audiences") or []) if a.get("key")]
+    if not roster:
+        return ""
+    from . import kb as _kb
+    hero = str(ctx.params.get("entity_key") or "").strip()
+    fans = []
+    if hero:
+        recs = {a.key: list(a.entity_keys or []) for a in _kb.audiences(ctx.tenant)}
+        fans = [a for a in roster if hero in recs.get(a["key"], [])]
+    seen = [h.get("reader") for h in lately]
+    never = len(seen) + 1
+    pick = min(enumerate(fans or roster),
+               key=lambda p: (-(seen.index(p[1]["key"]) if p[1]["key"] in seen else never), p[0]))[1]
+    ctx.bundle["audience"] = dict(pick)
+    ctx.params["audience_key"] = pick["key"]
+    ctx.note(f"written for: {pick.get('name') or pick['key']} — no reader was named on the plan, so "
+             + (f"the one {hero!r} is recommended for" if fans
+                else "the one written for least recently")
+             + "; set Written for on the plan to choose")
+    return "the product" if fans else "rotation"
+
+
 def _craft_review(ctx, copy: dict, blocks: list, craft: dict) -> list[dict]:
     """The craft checks, with this send's own facts filled in.
 
@@ -3173,10 +3301,17 @@ def _run_campaign_email(ctx: Context) -> dict:
     seg = _segment_brief(ctx.tenant, ctx.params.get("segment"))
     goal = str(ctx.params.get("goal") or "")
 
+    # THE READER FIRST, then the products: who this email is written to
+    # decides what it is about (owner, 2026-10-02: "…so that you could always
+    # gear the content regardless of topic / context / goal towards the
+    # correct audience"). The plan's reader, else one chosen and said.
+    _lately = _sent_lately(ctx.tenant)
+    _reader_by = _choose_reader(ctx, _lately)
+
     # Products FIRST, so the drafter writes copy that knows what it is
     # selling: the plan's entity when one was set (resolve matched it into
-    # the bundle), otherwise the catalogue's top available items. Every
-    # field is read from the store sync — name, price, URL, photograph.
+    # the bundle), otherwise the catalogue's available items IN ROTATION.
+    # Every field is read from the store sync — name, price, URL, photograph.
     from . import kb as _kb, tenants as _tn
     _dom = (getattr(_tn.get(ctx.tenant), "domain", "") or "").strip()
 
@@ -3191,15 +3326,62 @@ def _run_campaign_email(ctx: Context) -> dict:
                 "url": e.get("url") or (f"https://{_dom}/products/{pkey}"
                                         if _dom and pkey else "")}
 
+    def _row(r) -> dict:
+        return _prod({"key": r.key, "name": r.name, "price": r.price,
+                      "description": r.description or "",
+                      "availability": r.availability or "",
+                      "attributes": r.attributes or {}})
+
+    # WHAT WAS FEATURED LATELY decides what is offered next, whenever nobody
+    # named it (owner, 2026-10-02: "can you please check to make sure that we
+    # are cycling through the entities correctly? This is yet another example
+    # of us choosing the 18-piece joke when the entity was not set"). Every
+    # unnamed choice below was "the first in a fixed order": the audience's
+    # list as entered, or the catalogue by photograph then name, where a name
+    # starting with a digit sorts first. Nothing read what had been sent.
+    _heroes = [h["hero"] for h in _lately]
+    _names = {r.key: (r.name or r.key) for r in _kb.entities(ctx.tenant, available_only=False)}
+    _words = [str(w).lower() for w in ((ctx.bundle.get("audience") or {}).get("vocabulary") or []) if str(w).strip()]
+
+    def _catalogue(skip=()) -> list:
+        """The catalogue's available items in rotation: a photograph first,
+        then the line featured least recently, then the item; among equals,
+        the ones that speak this reader's words, then by name."""
+        rows = [r for r in _kb.entities(ctx.tenant, available_only=True) if r.key not in skip]
+        rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
+                                 -_fits_words(r, _words), r.name or ""))
+        return _rotation(rows, _heroes, _names,
+                         first=lambda r: not (r.attributes or {}).get("image"))
+
     # What this business requires of a thing before it may be named at all.
     # An entity that reaches the drafter WILL be written about — the Eien
     # letter proved that a product needs no card and no parameter to be
     # recommended, only a mention — so the screen happens before the offer.
     _model = str(getattr(_tn.get(ctx.tenant), "business_model", "") or "")
     plan_scoped = bool(ctx.bundle.get("entities"))
+    _aud_key = str((ctx.bundle.get("audience") or {}).get("key")
+                   or ctx.params.get("audience_key") or "").strip()
+    # NAMED, and only named: resolve's `companion` rows are the catalogue's
+    # first few by name, and they rode every named email as its companions.
     ents = [_prod(e) for e in (ctx.bundle.get("entities") or [])
-            if e.get("name")]
-    if not ents:
+            if e.get("name") and e.get("role") != "companion"]
+    if ents:
+        # COMPANIONS — a complement, a pairing, a second option. The hero's
+        # own line first (one line, one positioning), then what this reader
+        # is recommended, then the catalogue in rotation.
+        _have = {e["key"] for e in ents}
+        _hero_line = _line(ents[0].get("name", ""))
+        _pool = _catalogue(skip=_have)
+        _rec = [r for r in _kb.audience_entities(ctx.tenant, _aud_key) if r.key not in _have]
+        _ordered = ([r for r in _pool if _line(r.name or "") == _hero_line] + _rec + _pool)
+        _seen: set = set()
+        for r in _ordered:
+            if len(ents) >= 6:
+                break
+            if r.key not in _seen and r.key not in _have:
+                _seen.add(r.key)
+                ents.append(_row(r))
+    else:
         # WHAT THIS BUYER IS FOR, before what the catalogue happens to list
         # first. Owner, 2026-09-01: *"some audiences are more associated with
         # different entities."* With no entity on the plan this offered the
@@ -3208,28 +3390,18 @@ def _run_campaign_email(ctx: Context) -> dict:
         # judgement about who is reading; a recommendation somebody entered
         # is.
         #
-        # ORDER IS THE RECOMMENDATION, so these are not re-sorted: the first
-        # entity named for an audience is the one they are most for, and
-        # re-sorting by photograph would put that decision back where it was.
-        _aud_key = str((ctx.bundle.get("audience") or {}).get("key")
-                       or ctx.params.get("audience_key") or "").strip()
+        # ORDER IS THE RECOMMENDATION between equals: the first entity named
+        # for an audience is the one they are most for. But the one featured
+        # last time does not lead again; the rotation turns, and the
+        # recommendation decides among the ones whose turn it is.
         rec = _kb.audience_entities(ctx.tenant, _aud_key)
         if rec:
-            ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
-                           "description": r.description or "",
-                           "availability": r.availability or "",
-                           "attributes": r.attributes or {}}) for r in rec[:6]]
+            ents = [_row(r) for r in _rotation(rec, _heroes, _names)[:6]]
             ctx.note(f"products: offered from what {_aud_key!r} is recommended "
-                     f"for — " + ", ".join(e["name"] for e in ents))
+                     f"for, the one featured least recently first — "
+                     + ", ".join(e["name"] for e in ents))
         else:
-            rows = _kb.entities(ctx.tenant, available_only=True)
-            rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
-                                     r.name or ""))
-            ents = [_prod({"key": r.key, "name": r.name, "price": r.price,
-                           "description": r.description or "",
-                           "availability": r.availability or "",
-                           "attributes": r.attributes or {}})
-                    for r in rows[:6]]
+            ents = [_row(r) for r in _catalogue()[:6]]
             # SAID AT THE MOMENT OF CHOOSING, in both branches. The
             # explanation for this branch lived in a later note, after the
             # drafter — so a run that failed at drafting chose products by
@@ -3237,8 +3409,10 @@ def _run_campaign_email(ctx: Context) -> dict:
             # somebody most needs to know a guess was made.
             if ents:
                 ctx.note("products: nobody has said what this audience is "
-                         "for, so the catalogue's top available items are "
-                         "offered — set Featured entity on the plan, or "
+                         "for, so the catalogue is offered in rotation — the "
+                         "line featured least recently leads ("
+                         + ", ".join(e["name"] for e in ents[:3])
+                         + ") — set Featured entity on the plan, or "
                          "recommended entities on the audience, to choose "
                          "them")
     # Where a CTA goes when the drafter supplies no URL. A featured product's
@@ -3301,15 +3475,14 @@ def _run_campaign_email(ctx: Context) -> dict:
                          f"catalogue was refreshed first — "
                          f"{got.get('images_filed', 0)} photo(s) filed from "
                          f"{got.get('products_seen', 0)} product(s)")
-                rows = _kb.entities(ctx.tenant, available_only=True)
-                rows.sort(key=lambda r: (not (r.attributes or {}).get("image"),
-                                         r.name or ""))
-                refreshed = [_prod({"key": r.key, "name": r.name,
-                                    "price": r.price,
-                                    "description": r.description or "",
-                                    "availability": r.availability or "",
-                                    "attributes": r.attributes or {}})
-                             for r in rows[:6]]
+                # THE SAME ITEMS, re-read with their photographs: a refresh
+                # never swaps the plan's entity, or the reader's
+                # recommendation, for the catalogue's first few. Only an
+                # offer that WAS the catalogue's is taken again, in rotation.
+                _fresh = {r.key: r for r in _kb.entities(ctx.tenant, available_only=False)}
+                refreshed = ([_row(r) for r in _catalogue()[:6]]
+                             if not plan_scoped and not _kb.audience_entities(ctx.tenant, _aud_key)
+                             else [_row(_fresh[e["key"]]) if e.get("key") in _fresh else e for e in ents])
                 # The store was read just now, so availability and price in
                 # this email are a READING with a half-life, not a stored fact.
                 live_reads.append("shopify_inventory")
@@ -3752,7 +3925,7 @@ def _run_campaign_email(ctx: Context) -> dict:
         # brand's pictures cast and cut to fit, checked, photographed, judged.
         # The words that ship are the words checked below. A maker that
         # fails FAILS THE SEND with its reason; nothing else is built.
-        from . import recreate as _rc
+        from . import reader as _rdr, recreate as _rc
         _structure = craft.get("structure") or {}
         _key = (str(_structure.get("id") or ""), _hash_message(c))
         _rec = state.setdefault("recreations", {}).get(_key)
@@ -3767,7 +3940,14 @@ def _run_campaign_email(ctx: Context) -> dict:
                     # the owner's note on the version they sent back reaches the
                     # one who draws it, not only the copywriter (2026-10-01)
                     "revise": [ln_.strip(" -•") for ln_ in str(craft.get("revision_notes") or "").splitlines()
-                               if ln_.strip(" -•")]}
+                               if ln_.strip(" -•")],
+                    # WHO IT IS WRITTEN TO, for the minds that write and judge
+                    # the words that ship (owner, 2026-10-02: "it doesn't land
+                    # anything that the reader would connect with"). The
+                    # drafter had the persona; the story, the maker and the
+                    # judge never did.
+                    "reader": _rdr.from_plan(ctx.bundle.get("audience"), craft.get("funnel"), seg,
+                                             chosen_by=_reader_by)}
 
             def _make(seed_: str, msg_: dict) -> dict:
                 return _rc.run(
@@ -4010,6 +4190,11 @@ def _run_campaign_email(ctx: Context) -> dict:
                       # the reader back from, because `Output.audience_key`
                       # carries the SEGMENT for a campaign.
                       "audience_key": str(ctx.params.get("audience_key") or ""),
+                      # HOW the reader was chosen — the plan, the product, or
+                      # the rotation — and WHICH product this email was made
+                      # about when nobody named one: the rotation's memory
+                      # (`_sent_lately`).
+                      "reader_chosen_by": _reader_by, "hero": _hero,
                       "basis": basis, "intent": craft.get("intent", ""),
                       "format": craft.get("format", ""),
                       "shape": [b.get("type", "?") for b in state["blocks"]],
@@ -4650,9 +4835,14 @@ def redraft_artifact(tenant: str, output_id: str, note: str = "",
             "segment": (overrides.get("segment")
                         or getattr(out, "audience_key", "") or
                         brief.get("segment", "")),
+            # THE SAME PRODUCT, made again: an email whose drafter named
+            # none was still made about the hero the rotation handed it
+            # (`meta.hero`). Without it a Revise would draw the NEXT one in
+            # the rotation and come back about a different product.
             "entity_key": (overrides.get("entity_key")
                            or brief.get("entity_key", "")
-                           or getattr(out, "entity_key", "") or ""),
+                           or getattr(out, "entity_key", "")
+                           or (getattr(art, "meta", None) or {}).get("hero") or ""),
             "intent": (overrides.get("intent")
                        or getattr(out, "situation", "") or ""),
             "deadline": (overrides.get("deadline")
@@ -5601,7 +5791,7 @@ def _run_blog_article(ctx: Context) -> dict:
     # wrote BLIND — told to beat "anything already ranking for it" and never
     # shown what ranks. No second path: a maker that fails fails the run with
     # its reason, as the campaign's does.
-    from . import articles as _ar
+    from . import articles as _ar, reader as _rdr
     _made = _ar.run(
         ctx.tenant, keyword, role=role, entity_key=entity_key, questions=questions,
         approach_url=str(ctx.params.get("approach") or "").strip(),
@@ -5621,7 +5811,11 @@ def _run_blog_article(ctx: Context) -> dict:
         # the brand's own collection pages come from the KB inside the maker;
         # these are the keyword map's published siblings that happen to be
         # collection pages, added to them
-        collections=[str(L.get("url") or "") for L in links if "/collections/" in str(L.get("url") or "")][:4])
+        collections=[str(L.get("url") or "") for L in links if "/collections/" in str(L.get("url") or "")][:4],
+        # WHO IS SEARCHING, when the plan names the buyer: the funnel plan
+        # above was built with the persona and reached only the drafter this
+        # maker replaced (owner, 2026-10-02)
+        reader=(_rdr.from_plan(ctx.bundle.get("audience"), _plan) if ctx.bundle.get("audience") else None))
     body = _made.get("html") or ""
     if not body:
         why_not = _made.get("note") or "the article could not be written"

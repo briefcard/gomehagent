@@ -906,6 +906,41 @@ def main() -> int:
        'alt="Baci" width="160"' not in html_m and "the header carries it" in (got_m.get("note") or ""),
        str(got_m.get("note"))[:200])
     ck("  and the email is set in our centred column", 'data-frame="1"' in html_m)
+    # WRITTEN TO ITS READER (owner, 2026-10-02: "it doesn't land anything that
+    # the reader would connect with"), asserted through `run`: the story, the
+    # maker and the judge are told the reader, and the words are read as the
+    # reader reads them, in every round.
+    reader_ = {"who": "Women 35–44 — the core buyer",
+               "pains": ["hosting for people whose opinion she cares about"],
+               "acts_when": ["a birthday, a housewarming"], "words": ["hosting", "table"]}
+    answers["email_reader"] = {"speaks_to": "", "empty": [],
+                               "premises": [{"words": "White at the table is never the easy choice",
+                                             "why": "I serve on white plates every day"}]}
+    answers["email_compose"] = reply_email(email_html(extra=_line % "White at the table is never the easy choice."))
+    n_read, n_compose = len(seen.get("email_reader") or []), len(seen.get("email_compose") or [])
+    got_rd = rc.run(sid, "baci", "portofino", seed="reader",
+                    message={"subject": "Set the scene", "reader": reader_})
+    rd0 = (got_rd.get("rounds") or [{}])[0]
+    ck("a premise the reader would not nod at blocks the round",
+       any(c.get("code") == "false_premise" and c.get("severity") == "blocks" for c in rd0.get("check") or []),
+       str([c.get("code") for c in rd0.get("check") or []]))
+    ck("  and an email that speaks to nothing the reader has",
+       any(c.get("code") == "no_reader" and c.get("severity") == "blocks" for c in rd0.get("check") or []))
+    ck("  read in every round", len(seen.get("email_reader") or []) - n_read == len(got_rd.get("rounds") or []),
+       f'{len(seen.get("email_reader") or []) - n_read} reads, {len(got_rd.get("rounds") or [])} rounds')
+    new_compose = (seen.get("email_compose") or [])[n_compose:]
+    _txt = lambda p: p if isinstance(p, str) else " ".join(b.get("text", "") for b in p if isinstance(b, dict))  # noqa: E731
+    ck("the story is told the reader", any(_txt(p).startswith("You are the writer. Before a line of the email")
+                                           and "hosting for people whose opinion" in _txt(p) for p in new_compose))
+    ck("  and the maker, in the prompt it writes the email from",
+       any("THE READER — who this email is written to" in _txt(p) and "Subject:" in _txt(p) for p in new_compose))
+    ck("  and the judge", any("THE READER this email is written to" in p[-1]["text"]
+                              for p in (seen.get("email_judge") or [])[-3:] if isinstance(p, list)))
+    n_read = len(seen.get("email_reader") or [])
+    rc.run(sid, "baci", "portofino", seed="no-reader", message={"subject": "Set the scene"})
+    ck("a recreation whose message carries no reader is not read this way",
+       len(seen.get("email_reader") or []) == n_read)
+    answers.pop("email_reader", None)
     # A GUARD THAT CAUGHT NOTHING (found 2026-09-29, missed on bebf031 too):
     # the "cannot be made" outcome was never asserted through `run`.
     answers["email_cast"] = {"picks": [], "none": [{"section": 3, "needs": "a photograph of food on the plate"}]}

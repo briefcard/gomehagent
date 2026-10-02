@@ -73,6 +73,9 @@ PURPOSE_MODEL: dict[str, str] = {
     "email_judge": "CREATIVE_REVIEW_MODEL",
     "email_copy": "CLAUDE_MODEL",
     "email_compose": "CLAUDE_MODEL",
+    # THE READER PASS (`app/reader.py`): the words read as the persona reads
+    # them. A text job, so it runs on the strongest text model, as the writers do.
+    "email_reader": "CLAUDE_MODEL",
 }
 
 
