@@ -37,7 +37,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 KNOWN = {
     "empty": [
         "approval kind 'privacy_request' \u2014 created in shopify_webhooks.py, no executor arm",
-        "approval kind 'skill_output' \u2014 created in skill.py, web.py, no executor arm",
+        # mcp_server.py (2026-10-26) files the SAME kind through the same door
+        # and deliberately arms nothing: approving in the console is the owner's
+        # act, and the suite asserts no executor key rides its payload.
+        "approval kind 'skill_output' \u2014 created in mcp_server.py, skill.py, web.py, no executor arm",
         "approval kind 'sweep' \u2014 created in correlate.py, no executor arm",
         "disposition 'cleared' \u2014 no production module branches on it",
         "function baci_backoffice.py::list_company_documents \u2014 nothing references this name anywhere",

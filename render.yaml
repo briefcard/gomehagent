@@ -58,6 +58,12 @@ envVarGroups:
         sync: false
       - key: APPROVAL_SECRET
         generateValue: true
+      # THE MCP KEY — the bearer a Claude connector presents at /mcp
+      # (`app/mcp_server.py`). Generated here so nobody types it; read it off
+      # the dashboard to configure the connector. Separate from APPROVAL_SECRET
+      # on purpose: a leaked connector key must not forge an approval.
+      - key: MCP_KEY
+        generateValue: true
       - key: TZ
         value: America/New_York
       # --- SEO agent (declared here so values persist across deploys; secret

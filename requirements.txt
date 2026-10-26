@@ -1,6 +1,11 @@
 anthropic>=0.40
 fastapi>=0.115
 uvicorn>=0.30
+# THE SUBSTRATE AS AN MCP SERVER (`app/mcp_server.py`, 2026-10-26): the
+# official SDK's FastMCP, mounted on the web app at /mcp. Pinned below 2 by
+# the deploy-trap rule — an unpinned major (SQLAlchemy 2.1) once took every
+# process down on import.
+mcp>=1.12,<2
 # Starlette imports this lazily, inside request.form(). Nothing in app/ says
 # `import multipart`, so it is invisible to an import audit and to every test
 # that runs in an environment where something else already pulled it in — and

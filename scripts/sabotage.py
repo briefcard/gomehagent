@@ -1009,8 +1009,8 @@ SABOTAGES = [
     {
         "name": "the_claude_file_buries_whats_new",
         "file": "app/handoff.py",
-        "find": "            if _empty(value) and key in bundle.OWNER_INPUT:",
-        "replace": "            if False:  # SABOTAGE",
+        "find": "        if _empty(value) and key in bundle.OWNER_INPUT:",
+        "replace": "        if False:  # SABOTAGE",
         "suites": ["test_whats_new_reaches_every_writer.py"],
         "why": "a job finished by hand in Claude gets the owner's facts as one "
                "line of JSON instead of a part that says they are facts",
@@ -1106,8 +1106,8 @@ SABOTAGES = [
     {
         "name": 'a_claude_file_leaves_out_the_brand',
         "file": 'app/handoff.py',
-        "find": '    if kind in WRITES:\n        got = resolve.resolve(',
-        "replace": '    if False:  # SABOTAGE\n        got = resolve.resolve(',
+        "find": '    if kind in WRITES:\n        lines, _got = package_sections(',
+        "replace": '    if False:  # SABOTAGE\n        lines, _got = package_sections(',
         "suites": ['test_a_job_is_a_file_for_claude.py'],
         "why": "a failed job's Claude file carries the task but not the brand's rules, proof or catalogue, so the chat writes the client's email from nothing — and states what the platform would never let it",
     },
@@ -4885,8 +4885,8 @@ SABOTAGES = [
     {
         "name": 'the_capability_report_needs_the_key',
         "file": 'app/web.py',
-        "find": '            "jobs_running": _jobs_running()}',
-        "replace": '            "jobs_running": _jobs_running(),\n            "capabilities": _capability_report()}  # SABOTAGE',
+        "find": '            "mcp": "keyed" if config.MCP_KEY else "unkeyed"}',
+        "replace": '            "mcp": "keyed" if config.MCP_KEY else "unkeyed",\n            "capabilities": _capability_report()}  # SABOTAGE',
         "suites": ['test_console_auth.py'],
         "why": 'the infrastructure report moves to the unauthenticated half, so a landing page that promises each client sees only their own workspace starts naming what the service is wired to',
     },
@@ -10442,6 +10442,26 @@ SABOTAGES = [
         "replace": '                      r"worry|struggle|hesitat|fear|frustrat", re.I)  # SABOTAGE',
         "suites": ['test_the_email_is_for_its_reader.py'],
         "why": "a contrast beat tells the reader what they have settled for — 'you settled for white because it was safe' — with nothing on file saying so",
+    },
+    {
+        "name": "the_mcp_door_takes_any_token",
+        "file": "app/mcp_server.py",
+        "find": "        if not (token and expected and secrets.compare_digest(token, expected)):\n",
+        "replace": "        if not token:  # SABOTAGE\n",
+        "suites": ["test_the_substrate_is_an_mcp_server.py"],
+        "why": "any string is a key to every client's brand package and to the "
+               "approval queue — a connector with a typo in its key reads the "
+               "rules of all five accounts, and an unset MCP_KEY protects nothing",
+    },
+    {
+        "name": "a_blocked_draft_still_queues",
+        "file": "app/mcp_server.py",
+        "find": '    approval_id = ""\n    if ok:\n        payload = {"tenant": tenant, "skill": system, "output_id": row.id,\n',
+        "replace": '    approval_id = ""\n    if True:  # SABOTAGE\n        payload = {"tenant": tenant, "skill": system, "output_id": row.id,\n',
+        "suites": ["test_the_substrate_is_an_mcp_server.py"],
+        "why": "a draft that states a banned claim reaches the owner's queue as "
+               "if it were clean — the check the routine ran becomes advice, "
+               "and the owner is back to catching hand-decorated by eye",
     },
 ]
 

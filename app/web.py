@@ -467,7 +467,11 @@ def health(key: str = Depends(admin_key)) -> dict:
             # WHETHER A DEPLOY NOW WOULD STOP SOMEBODY'S RUN. A push restarts
             # the worker and the job in hand is lost; this is read before a
             # push. A count names no account, so it needs no key.
-            "jobs_running": _jobs_running()}
+            "jobs_running": _jobs_running(),
+            # THE MCP DOOR, keyless: whether /mcp is mounted and keyed, so a
+            # connector that gets 401 can be told apart from a deploy that has
+            # no MCP_KEY at all. Names no account; needs no key.
+            "mcp": "keyed" if config.MCP_KEY else "unkeyed"}
     if key != config.APPROVAL_SECRET:
         return base                     # liveness + build identity, no roster
     from . import channel
@@ -9535,3 +9539,13 @@ def console_item(request: Request, tenant: str, tab: str, system: str, room: str
             "", tenant, item, msg=request.query_params.get("ok", ""),
             err=request.query_params.get("err", "")))
     return _console_at(request, key, tenant, tab, system, room)
+
+
+# ---------------------------------------------------------------------------
+# THE SUBSTRATE AS AN MCP SERVER (2026-10-26) — one route, /mcp, behind MCP_KEY.
+# `app/mcp_server.py` carries the three tools and the reason. Imported LAST so
+# nothing it reads (resolve, ledger, approvals, handoff) can import web back.
+# ---------------------------------------------------------------------------
+from . import mcp_server as _mcp_server  # noqa: E402
+
+_mcp_server.mount(app)

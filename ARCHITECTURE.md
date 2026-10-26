@@ -54,7 +54,11 @@ adapter → provider`.
   rejected as the shallow version: the value is the per-domain
   normalization, which cannot be generic. `tenants.CAPABILITIES` +
   `tool_scope` remain the index.
-- **The substrate as an MCP server (queued):** a facade over `/resolve`, KB
+- **The substrate as an MCP server — v1 BUILT 2026-10-26** (`app/mcp_server.py`:
+  `get_package`, `check`, `record`; `run_skill` deliberately NOT exposed — the
+  owner's 2026-10-22 decision makes Claude the generator, so the server hands
+  over the package and takes back the draft; `INITIATIVE-mcp-substrate.md`).
+  As queued it read:** a facade over `/resolve`, KB
   reads, brand-theme status and `run_skill` — per-tenant scoping in the
   token, writes limited to already-governed paths (run_skill still lands in
   approvals; memory proposals still land in review), never raw table writes.
@@ -78,5 +82,5 @@ adapter → provider`.
    tools, MCP included.
 3. Canva via MCP inside the adapter (brand-kit read for the theme deriver;
    bespoke campaign visuals through the pictures approval queue).
-4. Substrate-as-MCP v1 (read + run_skill).
+4. Substrate-as-MCP v1 — BUILT 2026-10-26 as read + record (see above; not run_skill).
 5. Capability resolvers as providers accrue (Klaviyo next).

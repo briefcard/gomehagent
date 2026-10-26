@@ -22,6 +22,17 @@ creative-centre section below landed at `061d4f5`. The line further down about
 older still. **This pass rewrote only the two blocks that follow; everything
 below "Where the build is now" was not touched.**
 
+### THE SUBSTRATE IS AN MCP SERVER; CLAUDE IS THE GENERATOR (2026-10-26)
+
+**Direction change (owner, 2026-10-22):** no new generators in the app. The
+data layer is exposed as an MCP server at `/mcp` (`app/mcp_server.py`: three
+tools — `get_package`, `check`, `record`; bearer `MCP_KEY`; drafts land in the
+approval queue; nothing acts outward). The plan, the contract, what is
+deliberately absent and how to connect: `INITIATIVE-mcp-substrate.md`. Suite:
+`scripts/test_the_substrate_is_an_mcp_server.py`; live client proof:
+`scripts/mcp_smoke.py`. Verify a deploy with keyless `/health` → `mcp: keyed`.
+**This pass added only this block; nothing else in this file was touched.**
+
 ### SIX SHIPS ON THE WRITER'S INPUTS AND THE CONSOLE (2026-09-22, `2cac211`..`b5370cd`)
 
 The three correctness items WALKTHROUGH §6 had been carrying, plus three

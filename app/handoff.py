@@ -73,6 +73,44 @@ def _empty(value) -> bool:
     return value is None or value == "" or value == []
 
 
+def package_sections(tenant: str, *, system: str = "", tier: int = 3,
+                     entity_key: str = "", audience_key: str = "",
+                     inputs: dict | None = None) -> tuple[list[str], dict]:
+    """The brand package as markdown sections, and the bundle it was read from.
+
+    ONE BUILDER for the two readers of the package outside a skill run — the
+    job file (`for_job`) and the MCP server (`mcp_server.get_package`). They
+    would drift otherwise, and the owner's note that reaches a chat has to be
+    the same one that reaches a scheduled routine. Every part `bundle.PARTS`
+    declares, in its order; a part that arrived empty is skipped here and
+    named by the caller, so the reader writes around it rather than inventing.
+    """
+    from . import bundle, resolve
+    inputs = dict(inputs or {})
+    got = resolve.resolve(tenant, system=system, tier=tier,
+                          entity_key=entity_key, audience_key=audience_key)
+    out = ["## The context — the brand package the job reads", ""]
+    for key, part in bundle.PARTS.items():
+        value = (got or {}).get(key)
+        if _empty(value) and key in bundle.OWNER_INPUT:
+            # THE OWNER'S INPUT RIDES THE PACKAGE, as `skill.run` puts it
+            # there — What's new described as facts, not buried in the JSON.
+            value = inputs.get(key)
+        if key in _META or _empty(value):
+            continue
+        out += [f"### {key} — {part.get('what', '')}", "```json", _json(value), "```", ""]
+    # THE SITE'S OWN PAGES — the only places a link may go. A chat given
+    # the package without them wrote an article with no links at all and
+    # asked for the booking page (2026-09-28).
+    from . import links as _links
+    pages = [{"page": d.get("label", ""), "url": d.get("url", "")}
+             for d in _links.destinations(tenant) if d.get("url")][:150]
+    if pages:
+        out += ["### links — the site's own pages; link only to these", "```json",
+                _json(pages), "```", ""]
+    return out, (got or {})
+
+
 def for_job(job_id: str) -> dict:
     """`{ok, name, markdown}` for one job — or `{ok: False, why}`."""
     from . import bundle, db, jobs, resolve, skill as skill_mod
@@ -117,27 +155,11 @@ def for_job(job_id: str) -> dict:
                 "ready to use."), "", "### The rules", RULES, ""]
     out += ["## The inputs this job was given", "```json", _json(inputs), "```", ""]
     if kind in WRITES:
-        got = resolve.resolve(tenant, system=(sk.system_key if sk else ""),
-                              tier=(sk.tier if sk else 3),
-                              entity_key=str(inputs.get("entity_key") or ""),
-                              audience_key=str(inputs.get("audience_key") or ""))
-        out += ["## The context — the brand package the job reads", ""]
-        for key, part in bundle.PARTS.items():
-            value = (got or {}).get(key)
-            if _empty(value) and key in bundle.OWNER_INPUT:
-                # THE OWNER'S INPUT RIDES THE PACKAGE, as `skill.run` puts it
-                # there — What's new described as facts, not buried in the JSON.
-                value = inputs.get(key)
-            if key in _META or _empty(value):
-                continue
-            out += [f"### {key} — {part.get('what', '')}", "```json", _json(value), "```", ""]
-        # THE SITE'S OWN PAGES — the only places a link may go. A chat given
-        # the package without them wrote an article with no links at all and
-        # asked for the booking page (2026-09-28).
-        from . import links as _links
-        pages = [{"page": d.get("label", ""), "url": d.get("url", "")}
-                 for d in _links.destinations(tenant) if d.get("url")][:150]
-        if pages:
-            out += ["### links — the site's own pages; link only to these", "```json",
-                    _json(pages), "```", ""]
+        lines, _got = package_sections(
+            tenant, system=(sk.system_key if sk else ""),
+            tier=(sk.tier if sk else 3),
+            entity_key=str(inputs.get("entity_key") or ""),
+            audience_key=str(inputs.get("audience_key") or ""),
+            inputs=inputs)
+        out += lines
     return {"ok": True, "name": name, "markdown": "\n".join(out)}

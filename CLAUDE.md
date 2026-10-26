@@ -3,6 +3,14 @@
 This file orients any new Claude Code / Cowork session on this repo so it can
 continue the build without re-deriving context. Read it first.
 
+## Direction (2026-10-26) — read before any build
+
+**Owner, 2026-10-22: no new generators, judges or prompt rules inside the
+app.** The data layer is an MCP server (`app/mcp_server.py`, `/mcp`); Claude
+is the generator; drafts land in the approval queue. `INITIATIVE-mcp-substrate.md`
+is the plan and the record. The sections below describe the app as it was
+built up to that decision and are still accurate about what exists.
+
 ## Current state (2026-08-30, `ea420b7`, live)
 
 **Read `BUILD-STATE.md` §"Where the build is now" first** — it is the state of

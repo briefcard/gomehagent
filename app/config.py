@@ -70,6 +70,14 @@ APPROVAL_SECRET = os.environ.get("APPROVAL_SECRET", "dev-secret-change-me")
 # value, so this fails closed rather than open.
 READ_KEY = os.environ.get("READ_KEY", "")
 
+# THE SUBSTRATE AS AN MCP SERVER (`app/mcp_server.py`, 2026-10-26): the one
+# bearer a Claude connector presents at /mcp. A SEPARATE credential on purpose —
+# it will sit in a connector's settings, and a leaked connector key must not be
+# able to forge an approval (APPROVAL_SECRET) or open the console. No default,
+# like READ_KEY: unset means every MCP request is refused, never "protected" by
+# a guessable string. Declared in render.yaml with `generateValue: true`.
+MCP_KEY = os.environ.get("MCP_KEY", "")
+
 # Embeddings. The same key `whatsapp.transcribe` already needs for voice notes,
 # so one variable covers both. Unset means the semantic path is unavailable and
 # the classifier falls back to word overlap — which it will SAY, because a
