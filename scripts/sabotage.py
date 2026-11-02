@@ -38,6 +38,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "an_html_only_email_reads_empty",
+        "file": "app/gmail_client.py",
+        "find": '    return _first_part(payload, "text/plain") or _html_to_text(\n        _first_part(payload, "text/html"))\n',
+        "replace": '    return _first_part(payload, "text/plain")  # SABOTAGE\n',
+        "suites": ["test_an_html_only_email_is_read.py"],
+        "why": "a customer who writes from an iPhone or a web form sends HTML "
+               "only, and triage, search and inbox_thread all read \"\" — "
+               "the empty #2007 and #2102 messages of 2026-11-02",
+    },
+    {
         "name": "the_plan_dropdown_forgets_the_rotation",
         "file": "app/admin_ui.py",
         "find": '            ok, why = _es.may_use(tenant, st) if tenant else (True, "")\n',

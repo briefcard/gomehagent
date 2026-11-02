@@ -5,7 +5,9 @@ lives in GMAIL_ACCOUNTS_JSON. No sign-outs, no re-auth — tokens refresh
 automatically forever (unless revoked).
 """
 import base64
+import re
 from email.message import EmailMessage
+from html.parser import HTMLParser
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -104,14 +106,70 @@ def fetch_unread(alias: str, max_results: int = 20) -> list[dict]:
     return out
 
 
-def _extract_text(payload: dict) -> str:
-    if payload.get("mimeType") == "text/plain" and payload.get("body", {}).get("data"):
+def _first_part(payload: dict, mime: str) -> str:
+    """The first non-attachment part of `mime`, decoded; "" when there is none."""
+    if (payload.get("mimeType") == mime and not payload.get("filename")
+            and payload.get("body", {}).get("data")):
         return base64.urlsafe_b64decode(payload["body"]["data"]).decode(errors="replace")
     for part in payload.get("parts", []) or []:
-        text = _extract_text(part)
+        text = _first_part(part, mime)
         if text:
             return text
     return ""
+
+
+class _HtmlText(HTMLParser):
+    """Readable text from an HTML body: block tags become line breaks, and
+    <style>/<script>/<head> are dropped. Not a renderer; just enough to read."""
+
+    BLOCK = {"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6",
+             "blockquote", "table", "ul", "ol", "hr", "section", "article"}
+    SKIP = {"style", "script", "head", "title"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.SKIP:
+            self._skip += 1
+        elif tag in self.BLOCK:
+            self.out.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in self.SKIP:
+            self._skip = max(0, self._skip - 1)
+        elif tag in self.BLOCK:
+            self.out.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.out.append(data)
+
+
+def _html_to_text(html: str) -> str:
+    p = _HtmlText()
+    try:
+        p.feed(html)
+        p.close()
+    except Exception:                                             # noqa: BLE001
+        return re.sub(r"<[^>]+>", " ", html)
+    text = "".join(p.out).replace("\xa0", " ")
+    text = re.sub(r"[ \t\r\f\v]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _extract_text(payload: dict) -> str:
+    """A message's text: its text/plain part, else its text/html part as text.
+
+    The HTML fallback exists because a customer writing from an iPhone, Outlook
+    mobile or a web form often sends HTML only. Before it, those bodies came
+    back "" and every reader (triage, search, inbox_thread) saw an empty email.
+    """
+    return _first_part(payload, "text/plain") or _html_to_text(
+        _first_part(payload, "text/html"))
 
 
 def fetch_unanswered(alias: str, days: int = 14, max_threads: int = 50) -> list[dict]:
