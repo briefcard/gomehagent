@@ -1,0 +1,386 @@
+<title>Baci at Scale</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; the $1M goal first, evidence after; tables scroll in their own boxes. Palette: porcelain and maiolica cobalt. */
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --ink:#18202e; --muted:#5b6475; --rule:#dde1e8;
+  --accent:#1f4fa3; --accent-soft:#e6edf9;
+  --good:#1f7a4d; --good-soft:#e5f3eb; --bad:#b3261e; --bad-soft:#fbe9e7; --warn:#8a5a00; --warn-soft:#fbf1dc;
+  --display:"Instrument Serif",Georgia,"Times New Roman",serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#11151c; --surface:#181e28; --ink:#e7eaf0; --muted:#9aa3b5; --rule:#2b3341;
+  --accent:#7ea6f0; --accent-soft:#1c2a45; --good:#5cc48f; --good-soft:#15291f; --bad:#f08a80; --bad-soft:#341a18; --warn:#e2b45a; --warn-soft:#2f2614; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11151c; --surface:#181e28; --ink:#e7eaf0; --muted:#9aa3b5; --rule:#2b3341;
+  --accent:#7ea6f0; --accent-soft:#1c2a45; --good:#5cc48f; --good-soft:#15291f; --bad:#f08a80; --bad-soft:#341a18; --warn:#e2b45a; --warn-soft:#2f2614; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.6 var(--body);margin:0}
+.wrap{max-width:980px;margin:0 auto;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:44px}
+h1,h2{font-family:var(--display);font-weight:400;letter-spacing:.005em;text-wrap:balance;margin:0}
+h1{font-size:clamp(34px,6vw,52px);line-height:1.05}
+h2{font-size:clamp(26px,4vw,34px);line-height:1.1}
+h3{font-size:16px;margin:0;font-weight:600}
+p{margin:0;max-width:68ch}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+section{display:grid;gap:16px}
+.lede{font-size:17px;color:var(--muted)}
+.note{background:var(--warn-soft);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:grid;gap:6px;font-size:14px}
+.note ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.verdict{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.v{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px;display:grid;gap:6px;align-content:start}
+.v .num{font:500 26px/1.1 var(--mono);font-variant-numeric:tabular-nums}
+.v.bad{border-left:4px solid var(--bad)} .v.bad .num{color:var(--bad)}
+.v.good{border-left:4px solid var(--good)} .v.good .num{color:var(--good)}
+.v.warn{border-left:4px solid var(--warn)} .v.warn .num{color:var(--warn)}
+.v p{color:var(--muted);font-size:14px}
+.key{background:var(--surface);border:2px solid var(--accent);border-radius:10px;padding:18px;display:grid;gap:8px}
+.key .big{font:500 22px/1.3 var(--mono);color:var(--accent)}
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:14px}
+th,td{padding:10px 12px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+th{font:500 12px/1.3 var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.hl{background:var(--accent-soft)}
+tr.sub td{color:var(--muted);font-size:13px}
+.neg{color:var(--bad)} .pos{color:var(--good)}
+tr.total td{font-weight:600}
+.src{font-size:12.5px;color:var(--muted)}
+.chip{display:inline-block;font:500 11px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;padding:4px 7px;border-radius:999px;white-space:nowrap}
+.chip.hi{background:var(--good-soft);color:var(--good)} .chip.md{background:var(--warn-soft);color:var(--warn)} .chip.lo{background:var(--bad-soft);color:var(--bad)}
+.dollar{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.dcol{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px;display:grid;gap:10px;align-content:start}
+.stack{display:flex;height:28px;border-radius:4px;overflow:hidden;border:1px solid var(--rule)}
+.stack span{display:block;height:100%}
+.s-land{background:#8fa3c4} .s-var{background:#c3ccd9} .s-ads{background:var(--bad)} .s-left{background:var(--good)}
+.legend{display:grid;gap:4px;font-size:13.5px}
+.legend div{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:8px;align-items:center}
+.legend i{width:12px;height:12px;border-radius:2px;display:block}
+.legend b{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
+.wf{display:grid;gap:8px;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px}
+.wf-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) 96px;gap:12px;align-items:center;font-size:14px}
+.wf-bar{height:14px;background:var(--rule);border-radius:3px;position:relative;overflow:hidden}
+.wf-bar span{position:absolute;top:0;bottom:0;left:0;border-radius:3px;background:var(--accent)}
+.wf-row .n{font-family:var(--mono);text-align:right;font-variant-numeric:tabular-nums}
+.wf-row.edge{font-weight:600}
+.wf-row.edge .n.neg{color:var(--bad)} .wf-row.edge .n.pos{color:var(--good)}
+@media (max-width:560px){.wf-row{grid-template-columns:1fr 84px}.wf-bar{grid-column:1 / -1;order:3}}
+.req{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.rq{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;display:grid;gap:4px;align-content:start}
+.rq .num{font:500 20px/1.2 var(--mono);font-variant-numeric:tabular-nums}
+.rq p{font-size:13.5px;color:var(--muted)}
+.levers{display:grid;gap:12px}
+.lever{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px;display:grid;gap:10px}
+.lever-head{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline;justify-content:space-between}
+.lever-head .amt{font:500 18px/1 var(--mono);color:var(--good)}
+.lever dl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 14px;margin:0;font-size:14px}
+.lever dt{color:var(--muted);font:500 12px/1.6 var(--mono);text-transform:uppercase;letter-spacing:.04em}
+.lever dd{margin:0;min-width:0}
+@media (max-width:560px){.lever dl{grid-template-columns:1fr}.lever dt{margin-top:4px}}
+.out{background:var(--bad-soft);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;font-size:14px}
+ul.ev{margin:0;padding-left:18px;display:grid;gap:6px;max-width:75ch}
+.gates{display:grid;gap:10px}
+.gate{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 16px;background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}
+.gate .now{font:500 13px/1.4 var(--mono);text-align:right;white-space:nowrap}
+.gate p{color:var(--muted);font-size:14px;grid-column:1 / -1}
+.stop{border:2px solid var(--bad);border-radius:10px;padding:16px;display:grid;gap:6px;background:var(--surface)}
+footer{font-size:13px;color:var(--muted);display:grid;gap:8px;border-top:1px solid var(--rule);padding-top:20px}
+</style>
+
+<div class="wrap">
+
+<header style="display:grid;gap:14px">
+  <div class="eyebrow">Baci Milano USA · version 8 · 2 November 2026 · for the two partners</div>
+  <h1>Profitable at $1M a year</h1>
+  <p class="lede">The first goal is a profitable $1M year. It's reachable, and it depends mainly on one number: online ad spend as a share of online sales. Today it's 59%. Below about 44% the business makes money at $1M; at 30% it makes about $123K a year with B2B at 40% of sales. Run as it is today, a $1M year loses about $193K.</p>
+</header>
+
+<div class="note" role="note">
+  <strong>What changed in this version</strong>
+  <ul>
+    <li>B2B is the Baci Backoffice channel ($14,235, at keystone), draft orders ($9,746, at about 19% off retail) and Faire ($2,054): $26,035, or 20% of sales. Direct sales are the online store, Instagram, Shop and phone orders: $101,988. The earlier "hold wholesale at keystone" lever is withdrawn: wholesale is already at or above keystone.</li>
+    <li>Chargebacks and returns are included at your rate: 3% of online orders, each losing the sale plus $15, the goods and the shipping.</li>
+    <li>Free product is counted: draft orders at 100% off (giveaways, event product, gifts, reshipments) totalled at least $11,645 at retail in the last 12 months, about $3,600 at cost.</li>
+    <li>Kept from earlier versions: duty and freight measured from the customs entries and invoices; $8 labels, paid by the customer below $110; the $4,000 employee and the $2,500 warehouse including its staff; the ≈$50K Shoppe Object show.</li>
+  </ul>
+</div>
+
+<section aria-labelledby="ans">
+  <h2 id="ans">Where Baci stands</h2>
+  <div class="verdict">
+    <div class="v bad"><span class="eyebrow">Last 12 months</span><span class="num">−$115.8K</span><p>on $128,023 of sales, after everything including the employee, the warehouse and the show. About −$9,650 a month.</p></div>
+    <div class="v bad"><span class="eyebrow">$1M run as today</span><span class="num">−$193K / yr</span><p>Ads at 59% of online sales, small-lot shipping, two $50K shows.</p></div>
+    <div class="v good"><span class="eyebrow">$1M with the plan</span><span class="num">+$123K / yr</span><p>About $3,600 a month to each partner after ~30% tax. Ads at 30%, B2B 40% of sales, full containers, two $30K shows.</p></div>
+  </div>
+  <div class="key">
+    <span class="eyebrow">The one condition</span>
+    <span class="big">Online ads below ≈44% of online sales → $1M is profitable</span>
+    <p>At $1M with today's mix (20% B2B), full containers and $260K of overhead, profit turns negative once ads pass 44% of online sales. With B2B at 40% of sales the ceiling rises to 51%; with small-lot shipping it drops to 40% (45% at 40% B2B). Today ads run at 59%. Everything else on this page moves profit by tens of thousands; this number moves it by hundreds of thousands.</p>
+  </div>
+</section>
+
+<section aria-labelledby="pl">
+  <h2 id="pl">A $1M year, line by line</h2>
+  <p>The plan column is $600K of direct sales (online store, Instagram, private clients) and $400K of B2B.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Line</th><th class="n">Run as today</th><th class="n">The plan</th><th>What it rests on</th></tr></thead>
+    <tbody>
+      <tr><td>Sales</td><td class="n">$1,000,000</td><td class="n">$1,000,000</td><td class="src">Today 80% direct / 20% B2B · plan 60% / 40%</td></tr>
+      <tr><td>Product, freight, duty</td><td class="n neg">−$364K</td><td class="n neg">−$379K</td><td class="src">Shopify unit costs + measured duty 22.4% + freight 26% today / 14% in full containers. The plan's figure is higher because B2B sells at half of retail</td></tr>
+      <tr><td>Shipping net of what customers pay</td><td class="n neg">−$10K</td><td class="n neg">−$8K</td><td class="src">$8 label less $6.71 average paid by the customer</td></tr>
+      <tr><td>Chargebacks and returns (3% of online orders)</td><td class="n neg">−$13K</td><td class="n neg">−$10K</td><td class="src">Each loses the sale plus $15, the goods and the shipping; ≈184 a year under the plan</td></tr>
+      <tr><td>Card fees, B2B breakage and freight out</td><td class="n neg">−$35K</td><td class="n neg">−$40K</td><td class="src">3% online, 1.5% B2B cards; 2% B2B breakage; 2% B2B freight</td></tr>
+      <tr><td>Online ads</td><td class="n neg">−$471K</td><td class="n neg">−$180K</td><td class="src">59% vs 30% of online sales (free product and giveaways come out of this budget)</td></tr>
+      <tr class="total"><td>Left before overhead</td><td class="n">$107K</td><td class="n">$383K</td><td></td></tr>
+      <tr class="sub"><td>Existing employee</td><td class="n">−$48K</td><td class="n">−$48K</td><td class="src">$4,000 a month</td></tr>
+      <tr class="sub"><td>Warehouse including staff</td><td class="n">−$72K</td><td class="n">−$72K</td><td class="src">From $2,500 to $6,000 a month for ≈24 online orders a day plus B2B (estimate)</td></tr>
+      <tr class="sub"><td>One hire: B2B accounts and customer service</td><td class="n">−$50K</td><td class="n">−$50K</td><td class="src">Estimate</td></tr>
+      <tr class="sub"><td>Trade shows</td><td class="n">−$100K</td><td class="n">−$60K</td><td class="src">Two a year: $50K each as at Shoppe Object, vs $30K target</td></tr>
+      <tr class="sub"><td>Software, accounting, insurance, legal</td><td class="n">−$30K</td><td class="n">−$30K</td><td class="src">Estimate: $12K software, $18K the rest</td></tr>
+      <tr class="total"><td>Profit</td><td class="n neg">−$193K</td><td class="n pos">$123K (12.3%)</td><td class="src">Plan: ≈$3,600 a month to each partner after ~30% tax</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="wf">
+  <h2 id="wf">From today's way of running to a profitable $1M</h2>
+  <p>Applied one at a time at $1M, in order. Bars on one scale ($232K = full width).</p>
+  <div class="wf" role="list">
+    <div class="wf-row edge" role="listitem"><span>$1M run as today</span><span></span><span class="n neg">−$193K</span></div>
+    <div class="wf-row" role="listitem"><span>Ads 59% → 30% of online sales</span><div class="wf-bar"><span style="width:100%"></span></div><span class="n">+$232K</span></div>
+    <div class="wf-row" role="listitem"><span>Two shows at $30K instead of $50K</span><div class="wf-bar"><span style="width:17.2%"></span></div><span class="n">+$40K</span></div>
+    <div class="wf-row" role="listitem"><span>Full containers (freight 26% → 14%)</span><div class="wf-bar"><span style="width:12.5%"></span></div><span class="n">+$29K</span></div>
+    <div class="wf-row" role="listitem"><span>B2B grows from 20% to 40% of sales</span><div class="wf-bar"><span style="width:5.2%"></span></div><span class="n">+$12K</span></div>
+    <div class="wf-row" role="listitem"><span>Cheaper euro payments</span><div class="wf-bar"><span style="width:1.7%"></span></div><span class="n">+$4K</span></div>
+    <div class="wf-row edge" role="listitem"><span>The plan</span><span></span><span class="n pos">$123K</span></div>
+    <div class="wf-row" role="listitem"><span>Further: ads at 25% instead of 30%</span><div class="wf-bar"><span style="width:12.9%"></span></div><span class="n">+$30K</span></div>
+  </div>
+  <p class="src">The ad cap alone takes $1M from a loss to break-even. Shows, containers and B2B growth together add about $90K.</p>
+</section>
+
+<section aria-labelledby="req">
+  <h2 id="req">What a profitable $1M year requires</h2>
+  <div class="req">
+    <div class="rq"><span class="eyebrow">Direct sales</span><span class="num">$600K</span><p>≈5,940 orders a year, 24 a day, at today's $101.08 average. Today: $101,988.</p></div>
+    <div class="rq"><span class="eyebrow">Ad budget</span><span class="num">$15K / month</span><p>$180K a year, and each $1 has to come with $3.33 of direct sales. Today it's $1.69 ($101,988 on $60,243).</p></div>
+    <div class="rq"><span class="eyebrow">B2B</span><span class="num">$400K</span><p>≈16 accounts at $25K a year, or about 4 the size of Maison Lipari. ≈365 orders at today's $1,095 backoffice average. Today: $26,035.</p></div>
+    <div class="rq"><span class="eyebrow">Imports</span><span class="num">3 containers</span><p>≈$275K of goods at factory price a year, in full 20-ft containers rather than small lots or air.</p></div>
+    <div class="rq"><span class="eyebrow">Cash before goods sell</span><span class="num">≈$218K</span><p>≈$127K of stock on hand plus ≈4 months of purchases in production and transit.</p></div>
+    <div class="rq"><span class="eyebrow">Overhead</span><span class="num">$260K / yr</span><p>Today's employee and warehouse, scaled up, plus one hire, two shows, software and accounting.</p></div>
+  </div>
+  <p><strong>The hard part is the ad efficiency.</strong> Direct sales have to grow about 6× while each ad dollar brings about twice what it does now. That comes from sales that don't need ads: email to past buyers (only 6.7% of customers came back; email produced one order all year), the restored cart and checkout recovery emails, private clients like the ones on draft orders, and B2B, which carries no ad cost.</p>
+</section>
+
+<section aria-labelledby="sens">
+  <h2 id="sens">How sure is the $123K?</h2>
+  <p>Profit at $1M under the plan, moving one input at a time. The middle column is the plan.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Input</th><th class="n">Better</th><th class="n">Plan</th><th class="n">Worse</th></tr></thead>
+    <tbody>
+      <tr><td>Ads, % of online sales <span class="src">(20 / 30 / 40%)</span></td><td class="n">$183K</td><td class="n hl">$123K</td><td class="n">$63K</td></tr>
+      <tr><td>Overhead <span class="src">($200K / $260K / $320K)</span></td><td class="n">$183K</td><td class="n hl">$123K</td><td class="n">$63K</td></tr>
+      <tr><td>Freight <span class="src">(12% / 14% full container / 26% small lots)</span></td><td class="n">$129K</td><td class="n hl">$123K</td><td class="n">$90K</td></tr>
+      <tr><td>Duty <span class="src">(16% Bangladesh / 22.4% measured / 27% China)</span></td><td class="n">$141K</td><td class="n hl">$123K</td><td class="n">$111K</td></tr>
+      <tr><td>B2B share <span class="src">(60% / 40% / 20%)</span></td><td class="n">$136K</td><td class="n hl">$123K</td><td class="n">$111K</td></tr>
+      <tr><td>Chargebacks and returns <span class="src">(1% / 3% / 5% of online orders)</span></td><td class="n">$130K</td><td class="n hl">$123K</td><td class="n">$117K</td></tr>
+    </tbody>
+  </table></div>
+  <p class="src">Ads and overhead are the two inputs that decide it. Every 10 points of ad spend is about $60K of profit at $1M, and so is every $60K of overhead.</p>
+</section>
+
+<section aria-labelledby="dollar">
+  <h2 id="dollar">Where each dollar goes today</h2>
+  <div class="dollar">
+    <div class="dcol">
+      <h3>Direct sales: $101,988</h3>
+      <div class="stack" aria-hidden="true"><span class="s-land" style="width:31%"></span><span class="s-var" style="width:6%"></span><span class="s-ads" style="width:59.1%"></span><span class="s-left" style="width:3.9%"></span></div>
+      <div class="legend">
+        <div><i class="s-land"></i><span>Product, freight, duty (small lots)</span><b>31.0¢</b></div>
+        <div><i class="s-var"></i><span>Card fees 3¢, chargebacks/returns 1.7¢, shipping net 1.3¢</span><b>6.0¢</b></div>
+        <div><i class="s-ads"></i><span>Meta ads</span><b>59.1¢</b></div>
+        <div><i class="s-left"></i><span>Left</span><b>3.9¢</b></div>
+      </div>
+      <p class="src">63.1¢ before ads (65.9¢ with full containers). Online store, Instagram, Shop and phone orders.</p>
+    </div>
+    <div class="dcol">
+      <h3>B2B: $26,035</h3>
+      <div class="stack" aria-hidden="true"><span class="s-land" style="width:49.2%"></span><span class="s-var" style="width:5.5%"></span><span class="s-left" style="width:45.3%"></span></div>
+      <div class="legend">
+        <div><i class="s-land"></i><span>Product, freight, duty (41.5% off retail on average)</span><b>49.2¢</b></div>
+        <div><i class="s-var"></i><span>Card fees, breakage, freight out</span><b>5.5¢</b></div>
+        <div><i class="s-left"></i><span>Left</span><b>45.3¢</b></div>
+      </div>
+      <p class="src">Baci Backoffice ($14,235) and Faire ($2,054) at keystone; draft orders ($9,746) at about 19% off retail. A keystone account keeps 36.9¢ (42.0¢ with full containers); draft-order trade clients keep more. B2B beats direct sales whenever ads exceed about 18–24% of direct sales.</p>
+    </div>
+  </div>
+</section>
+
+<section aria-labelledby="today">
+  <h2 id="today">Last 12 months, line by line</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Line</th><th class="n">12 months</th><th class="n">% of sales</th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td>Net sales</td><td class="n">$128,023</td><td class="n">100%</td><td class="src">Shopify. Direct $101,988 · B2B $26,035 (Baci Backoffice, draft orders, Faire)</td></tr>
+      <tr><td>Product, freight, duty</td><td class="n neg">−$44,444</td><td class="n">34.7%</td><td class="src">Shopify unit costs + measured freight 26%, duty and customs fees 22.4%, broker 1.2%, currency 2%</td></tr>
+      <tr><td>Shipping net of what customers paid</td><td class="n neg">−$1,297</td><td class="n">1.0%</td><td class="src">$8 labels less $6,768 paid by customers</td></tr>
+      <tr><td>Chargebacks and returns</td><td class="n neg">−$1,696</td><td class="n">1.3%</td><td class="src">3% of online orders (≈31): $15 + goods + shipping each</td></tr>
+      <tr><td>Card fees, B2B breakage and freight out</td><td class="n neg">−$4,491</td><td class="n">3.5%</td><td class="src">Estimates</td></tr>
+      <tr><td>Meta ads</td><td class="n neg">−$60,243</td><td class="n">47.1%</td><td class="src">Meta ad account: 59.1% of direct sales. No Google Ads.</td></tr>
+      <tr><td>Free product given away</td><td class="n neg">−$3,634</td><td class="n">2.8%</td><td class="src">Draft orders at 100% off: giveaways, event product, gifts, reshipments. ≥$11,645 at retail</td></tr>
+      <tr><td>Left before overhead</td><td class="n">$12,218</td><td class="n">9.5%</td><td></td></tr>
+      <tr><td>Employee</td><td class="n neg">−$48,000</td><td class="n">37.5%</td><td class="src">$4,000 a month</td></tr>
+      <tr><td>Warehouse including staff</td><td class="n neg">−$30,000</td><td class="n">23.4%</td><td class="src">$2,500 a month</td></tr>
+      <tr><td>Shoppe Object trade show</td><td class="n neg">−$50,000</td><td class="n">39.1%</td><td class="src">All in: flights, hotel, access, booth, shipping</td></tr>
+      <tr class="total"><td>Result before software</td><td class="n neg">−$115,782</td><td class="n">−90.4%</td><td class="src">About −$9,650 a month</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="landed">
+  <h2 id="landed">Duty and freight, measured</h2>
+  <p>From the three 2026 customs entries (CBP 7501) and the matching freight (Essence Transport) and broker (CVL Customs) invoices in the Baci inbox. Percentages are of declared goods value.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Shipment</th><th class="n">Goods value</th><th class="n">Freight</th><th class="n">Duty + customs fees</th><th class="n">Broker</th><th class="n">Added on top</th></tr></thead>
+    <tbody>
+      <tr><td>Aug · mixed lot, Turkey + China origin, small-lot sea<br><span class="src">Entry 07.036093 · Essence #562 · CVL #4777</span></td><td class="n">$9,824</td><td class="n">$3,198.75</td><td class="n">$1,805.66 (18.4%)</td><td class="n">$60</td><td class="n neg">51.6%</td></tr>
+      <tr><td>Sep · plastic/melamine plates and cups, China origin, small-lot sea<br><span class="src">Entry 07.036095 · Essence #561 · CVL #5207 · duty 6.5% + 12.5% + 7.5%</span></td><td class="n">$12,520</td><td class="n">$2,540.00</td><td class="n">$3,376.82 (27.0%)</td><td class="n">$100</td><td class="n neg">48.1%</td></tr>
+      <tr><td>Oct · porcelain cups, Bangladesh origin, air<br><span class="src">Entry 07.036420 · Essence #604 · CVL #5375 · duty 6% + 10%</span></td><td class="n">$3,149</td><td class="n">$4,700.00</td><td class="n">$538.42 (17.1%)</td><td class="n">$130</td><td class="n neg">170.5%</td></tr>
+      <tr class="total"><td>All three</td><td class="n">$25,493</td><td class="n">$10,439 (40.9%)</td><td class="n">$5,721 (22.4%)</td><td class="n">$290</td><td class="n neg">64.5%</td></tr>
+      <tr><td>Bangladesh porcelain, one 20-ft container (quoted, arriving)<br><span class="src">File 599573 · €86,858 of goods</span></td><td class="n">≈$100K</td><td class="n">$13,300–15,060 + $635</td><td class="n">≈16–17% expected</td><td class="n">≈$100</td><td class="n pos">≈31%</td></tr>
+    </tbody>
+  </table></div>
+  <p>Duty is set by country of origin and stays as Baci Milano registers it. Freight is the part you control: small lots cost 20–33% of goods value by sea and 149% by air; a full container about 14%.</p>
+</section>
+
+<section aria-labelledby="lev">
+  <h2 id="lev">Each change: the data, the change, the work</h2>
+  <p>Values are at $1M, in the order applied above.</p>
+  <div class="levers">
+
+    <article class="lever">
+      <div class="lever-head"><h3>Cap online ads at 30% of online sales</h3><span class="amt">+$232K</span></div>
+      <dl>
+        <dt>Data pulled</dt><dd>Meta spent $60,243 in 12 months, 59.1% of direct sales. Meta claims $68,299 of sales; Shopify counts $41,563 arriving from social media, or $0.69 per $1 spent. Month to month Meta's own count ran from $0.08 back per $1 (March) to $1.83 (December).</dd>
+        <dt>Change</dt><dd>Each month's budget is 30% of the prior month's online sales, giveaways included. Cut cold-audience campaigns in any month returning under about $2 per $1 on Shopify's count. Put the effort into sales that don't need ads: a second-purchase email series, the recovery emails, email to the list, private clients.</dd>
+        <dt>Work</dt><dd>A weekly spend check (low). Building email and repeat buying is ongoing marketing work.</dd>
+        <dt>Confidence</dt><dd><span class="chip md">Medium</span> The saving is arithmetic. Growing online sales 6× at this ratio is the unproven part.</dd>
+      </dl>
+    </article>
+
+    <article class="lever">
+      <div class="lever-head"><h3>Two shows a year at about $30K each</h3><span class="amt">+$40K</span></div>
+      <dl>
+        <dt>Data pulled</dt><dd>Shoppe Object: about $50,000 all in. Atlanta Market, January 2027: booth from $4,100 for 10×10 plus fees; the hard-wall booth has to be adapted to Atlanta's sizes. Returning the show pallets from New Jersey cost $2,150 (Essence #21889). B2B for the whole year: $26,035, which kept about $11,800.</dd>
+        <dt>Change</dt><dd>One booth built to standard sizes and stored between shows, samples that travel with it, a smaller travelling team. Each show is measured by its B2B orders over 6 months: at 37–42¢ kept per $1 of B2B, a $30K show pays back after ≈$71–81K of orders.</dd>
+        <dt>Work</dt><dd>Medium.</dd>
+        <dt>Confidence</dt><dd><span class="chip md">Medium</span> Atlanta will test the $30K target.</dd>
+      </dl>
+    </article>
+
+    <article class="lever">
+      <div class="lever-head"><h3>Full containers, fragile packing kept</h3><span class="amt">+$29K</span></div>
+      <dl>
+        <dt>Data pulled</dt><dd>Measured freight: Essence #562 $3,198.75 on $9,824 of goods (33%); #561 $2,540 on $12,520 (20%); air #604 $4,700 on $3,149 (149%). The Bangladesh container (€86,858 of goods) was quoted at $13,300–$15,060 plus $635, about 14%. The same 6 Italian pallets drew quotes from $2,950 to $25,600.</dd>
+        <dt>Change</dt><dd>Order quarterly so imports fill containers; the non-stackable charge only applies to part-container shipments. At least 3 quotes per shipment. Air for emergencies only.</dd>
+        <dt>Work</dt><dd>Quarterly order planning with Baci Milano; more stock bought at once.</dd>
+        <dt>Confidence</dt><dd><span class="chip hi">High</span></dd>
+      </dl>
+    </article>
+
+    <article class="lever">
+      <div class="lever-head"><h3>Grow B2B to 40% of sales</h3><span class="amt">+$12K</span></div>
+      <dl>
+        <dt>Data pulled</dt><dd>B2B today: $26,035. Backoffice: 13 orders, $14,235, at keystone (49.8% off). Draft orders: $9,746 at about 19% off retail, mostly trade and design clients such as Cindi Gindi. Accounts on record: Trove Interiors, Art Effect, Hosted by KG, Weitzman Museum, The Jewish Museum Shop, Art and Soul, Level, Dash Home. Maison Lipari's opening order: $38,715, with $150K CAD a year discussed.</dd>
+        <dt>Change</dt><dd>$400K of B2B a year: about 16 accounts at $25K, or 4 the size of Maison Lipari. The plan prices new B2B at keystone, which keeps 42¢ per $1 against 36¢ for direct sales at a 30% ad cap, so the profit gain is modest. Trade and design clients at draft-order pricing keep more: growing that group is the most profitable B2B. The real value of B2B is steady volume that doesn't depend on Meta.</dd>
+        <dt>Work</dt><dd>Heavy: account follow-up, samples, deposits on backorders, collections. Covered by the one hire.</dd>
+        <dt>Confidence</dt><dd><span class="chip md">Medium</span></dd>
+      </dl>
+    </article>
+
+    <article class="lever">
+      <div class="lever-head"><h3>Cheaper euro payments</h3><span class="amt">+$4K</span></div>
+      <dl>
+        <dt>Data pulled</dt><dd>Supplier invoices are in euros; the customs entries converted at 1.1123–1.1559. The 2% bank spread is an estimate.</dd>
+        <dt>Change</dt><dd>A business FX account for euro payments.</dd>
+        <dt>Work</dt><dd>One-time setup.</dd>
+        <dt>Confidence</dt><dd><span class="chip md">Medium</span></dd>
+      </dl>
+    </article>
+
+    <article class="lever">
+      <div class="lever-head"><h3>Hold chargebacks and returns at 3% or lower</h3><span class="amt">±$6K per 2 points</span></div>
+      <dl>
+        <dt>Data pulled</dt><dd>The last 14 days in the inbox: a broken Aquarius cup (#2021), a wrong item (#2102), a never-shipped order with an open chargeback (#1917), and a 7 October FedEx batch where 5 of 5 parcels show no delivery.</dd>
+        <dt>Change</dt><dd>Check every label gets a carrier scan within 48 hours, reply to customers at their own address (three replies went to Judge.me and Shopify's form), and pick-check fragile orders before sealing.</dd>
+        <dt>Work</dt><dd>Low once it's a routine.</dd>
+        <dt>Confidence</dt><dd><span class="chip hi">High</span></dd>
+      </dl>
+    </article>
+
+    <article class="lever">
+      <div class="lever-head"><h3>Upside, not counted in the plan</h3><span class="amt">≈+$20–30K</span></div>
+      <dl>
+        <dt>First-sale invoice</dt><dd>If Baci Milano shares the factory invoices for goods made in Bangladesh and sold through the Turkish company, duty can be paid on the factory's price. Their decision; it reveals their markup.</dd>
+        <dt>Canada direct</dt><dd>Large Canadian orders (Maison Lipari) shipped straight from origin avoid US duty. Canadian duty on that route isn't confirmed.</dd>
+      </dl>
+    </article>
+
+    <div class="out"><strong>Ruled out.</strong> Re-classifying HS codes (Baci Milano keeps the codes products were registered under). Lighter or stackable packing (fragile goods). Raising retail prices (at the market's ceiling). Deeper cuts to online promotions (7.1%). Pricing B2B above keystone (already at keystone).</div>
+  </div>
+</section>
+
+<section aria-labelledby="beyond">
+  <h2 id="beyond">After $1M</h2>
+  <p>The same plan carried to $3M and $5M: B2B at 60% of sales, ads at 30%, full containers, four $30K shows a year, and a larger team (6 people at $3M, 8 at $5M).</p>
+  <div class="tbl"><table>
+    <thead><tr><th></th><th class="n">$1M</th><th class="n">$3M</th><th class="n">$5M</th></tr></thead>
+    <tbody>
+      <tr><td>Profit, run as today</td><td class="n neg">−$193K</td><td class="n neg">−$512K</td><td class="n neg">−$704K</td></tr>
+      <tr><td>Profit with the plan</td><td class="n pos">$123K (12%)</td><td class="n pos">$471K (16%)</td><td class="n pos">$982K (20%)</td></tr>
+      <tr class="total"><td>Each partner per month after ~30% tax</td><td class="n">$3.6K</td><td class="n">$13.7K</td><td class="n">$28.6K</td></tr>
+      <tr><td>Cash tied up in stock and goods in transit</td><td class="n">$218K</td><td class="n">$738K</td><td class="n">$1.23M</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="ops">
+  <h2 id="ops">The operation today, at $128K a year</h2>
+  <p>Found in the inbox and Shopify on 2 November. At $1M each of these happens about 8 times as often unless the process changes.</p>
+  <ul class="ev">
+    <li><strong>Shipping:</strong> all 5 FedEx labels created on 7 Oct at 16:01 show no delivery (#1996, #2000, #2002, #2007, #2008). #2038 and #1983 have UPS labels and no carrier scan.</li>
+    <li><strong>Customer service:</strong> three replies went to automated addresses (Judge.me twice, the Shopify form once) and never reached the customer. Order #1917 never shipped, but the customer was told it was delivered; her chargeback is open.</li>
+    <li><strong>Supplier payments:</strong> CVL chased the $1,865.66 duty invoice; Essence sent an "Outstanding Balance" notice; Baci Milano has chased the NYC sample-freight invoice since August.</li>
+    <li><strong>Freight disputes:</strong> port overtime, 306 kg billed against 240 kg quoted, an extra-volume re-rate, a mis-delivery fee.</li>
+    <li><strong>Sales follow-up:</strong> the Atlanta High Design jury materials were promised for 28 October and haven't been seen sent.</li>
+  </ul>
+</section>
+
+<section aria-labelledby="dec">
+  <h2 id="dec">Gates for the next 90 days</h2>
+  <p>Through 31 January 2027, each measurable from Shopify, Meta and the inbox.</p>
+  <div class="gates">
+    <div class="gate"><h3>Online ads at or below 30% of online sales, every month</h3><span class="now">Today 59%</span><p>Meta spend ÷ Shopify direct sales. Profitability at $1M depends on this one.</p></div>
+    <div class="gate"><h3>Sales from email and returning customers reach 15% of online sales</h3><span class="now">Today ≈ 0%</span><p>What lets online sales grow without a matching rise in ad spend.</p></div>
+    <div class="gate"><h3>Maison Lipari signed, plus 2 more B2B accounts with opening orders of $25K or more</h3><span class="now">0 signed</span><p>On the way to ≈16 accounts.</p></div>
+    <div class="gate"><h3>Atlanta costs no more than $30K all in, with its orders tracked</h3><span class="now">Shoppe Object ≈ $50K</span><p>Payback ≈$71–81K of B2B orders.</p></div>
+    <div class="gate"><h3>Next import as a full container, with at least 3 quotes</h3><span class="now">Small lots, one by air</span><p>Spring stock with Maison Lipari's backorder.</p></div>
+    <div class="gate"><h3>Chargebacks and returns at or below 3% of online orders; every label scanned within 48 hours</h3><span class="now">Unmeasured</span><p>Tracked monthly from Shopify refunds and the carrier status of each label.</p></div>
+  </div>
+  <div class="stop">
+    <h3>If the ad gate fails by 31 January</h3>
+    <p>A profitable $1M needs ads under about 44% of online sales even with everything else fixed. If spending can't come down without online sales falling with it, the remaining paths are to run Baci as a B2B distributor for the US and Canada with little or no paid advertising (B2B keeps 37–42¢ per $1), or to wind it down. That decision is for the two of you; this page gives the size of each.</p>
+  </div>
+</section>
+
+<footer>
+  <div><strong>Measured from Baci's data:</strong> Shopify unit costs; 12-month sales by channel, discounts, shipping paid by customers, refunds, draft orders by discount code and tag, returning-customer rate, sales by referral source; Meta spend and purchases by month; three 2026 customs entries and their freight and broker invoices; Baci Milano supplier invoices; Maison Lipari's order form.</div>
+  <div><strong>From the owners:</strong> no Google Ads; no partner salaries; one employee at $4,000 a month; warehouse including staff $2,500 a month; $8 labels, paid by customers below $110 of retail value; Shoppe Object ≈$50,000 all in; chargebacks and returns at 3% of orders, each costing $15 plus goods and shipping; Baci Backoffice and draft orders are B2B.</div>
+  <div><strong>Assumed:</strong> Faire counted as B2B; new B2B priced at keystone in the plan; 30% tax; card fees 3% online and 1.5% B2B; B2B breakage 2% and freight out 2%; currency spread 2% (0.5% with an FX account); $1M overhead of $260K (warehouse at $6,000 a month, one $50K hire, $12K software, $18K accounting, insurance and legal); $30K show target; ≈4 months of purchases in transit; 3 inventory turns a year.</div>
+  <div><strong>Not visible:</strong> import entries before August 2026; software spend today; whether Shopify refunds already include every chargeback (the 3% rule is applied on top of Shopify's net sales).</div>
+</footer>
+
+</div>
