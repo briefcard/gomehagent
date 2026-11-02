@@ -8,7 +8,10 @@ what the pipeline lacked was never the model: it was the WHOLE package in
 front of a capable model, a loop with tools, and a check before anything was
 filed. This module is how a routine running outside the app gets those.
 
-THREE TOOLS, and a fourth only after a skill has needed it in a real session:
+FIVE TOOLS. A tool is added only after a session needed it — get_plan and
+get_results were needed on 2026-11-02, when a Claude Code session asked to
+plan and analyse across the systems had a package to write from and nothing
+that said what was due, what was stuck or what had worked:
 
     get_package   the brand package — every part `bundle.PARTS` declares, in
                   its order, with what is missing NAMED — as the markdown the
@@ -20,6 +23,11 @@ THREE TOOLS, and a fourth only after a skill has needed it in a real session:
                   ledger, the artifact store, ONE pending `skill_output`
                   approval in the owner's queue. A draft with blocks is
                   recorded as blocked and queues nothing.
+    get_plan      what is due, what waits on the owner, what is stuck and why,
+                  per system — the Systems and Review tabs' own functions
+    get_results   what worked — ad outcomes by the data layer's dimensions
+                  (`results.by`) and what became of every draft: shipped,
+                  blocked, approved, denied, and the gates that caught it
 
 THE TRUST BOUNDARY HOLDS (ARCHITECTURE.md). Nothing here acts outward: no
 send, push or publish. Approving in the console is the owner's act, through
@@ -32,6 +40,14 @@ constant time. A SEPARATE credential from APPROVAL_SECRET because it will sit
 in a Claude connector's settings, and a leaked connector key must not forge
 an approval or open the console. Unset means every request is refused — the
 fail-closed shape READ_KEY already has.
+
+HOST CHECK OFF, DELIBERATELY. FastMCP >= 1.2x defaults `host` to 127.0.0.1
+and then enables DNS-rebinding protection allowing only localhost Host
+headers — so behind Render's domain every request was a 421 "Invalid Host
+header" (found 2026-11-02; the suite's TestClient Host was refused the same
+way). Rebinding is an attack on an UNAUTHENTICATED local server; this one is
+public and every request needs the bearer, which a rebinding page cannot
+supply. The suite now calls with the production Host header.
 
 TRANSPORT. Streamable HTTP, stateless, JSON responses, one Route at `/mcp`.
 A Route rather than a Mount because Starlette's Mount matches `/mcp/…` and
@@ -51,6 +67,11 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+try:                                   # absent in SDKs older than the host check
+    from mcp.server.transport_security import TransportSecuritySettings
+except ImportError:                    # pragma: no cover
+    TransportSecuritySettings = None
+
 from . import config
 
 log = logging.getLogger("mcp_server")
@@ -58,7 +79,7 @@ log = logging.getLogger("mcp_server")
 NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
-TOOLS = ("get_package", "check", "record")
+TOOLS = ("get_package", "check", "record", "get_plan", "get_results")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
 #: ad copy is short and lives in the row itself.
@@ -76,7 +97,8 @@ EXEMPLAR_MAX = 12_000
 INSTRUCTIONS = (
     "The gomehagent data layer for five client brands. Call get_package "
     "first and write ONLY from what it returns; a fact it does not carry is "
-    "a fact you do not have — leave it out and say so. Run check on every "
+    "a fact you do not have — leave it out and say so. get_plan says what is "
+    "due and what is stuck; get_results what worked. Run check on every "
     "draft and fix its blocks before you record. record files the draft in "
     "the owner's approval queue; nothing is sent, pushed or published by "
     "these tools.")
@@ -201,8 +223,10 @@ def run_checks(tenant: str, body: str, *, kind: str = "email", subject: str = ""
 # `-> dict[str, Any]`, not `-> dict`: the SDK gives a tool STRUCTURED output only
 # for a return annotation it can model, and a bare `dict` is not one — the client
 # then gets text alone. Found by the suite's first run, 2026-10-26.
+_security = ({"transport_security": TransportSecuritySettings(
+    enable_dns_rebinding_protection=False)} if TransportSecuritySettings else {})
 server = FastMCP(NAME, instructions=INSTRUCTIONS,
-                 stateless_http=True, json_response=True)
+                 stateless_http=True, json_response=True, **_security)
 
 
 @server.tool()
@@ -355,6 +379,157 @@ def record(tenant: str, system: str, body: str, kind: str = "email",
             "blocks": verdict["blocks"], "advice": verdict["advice"],
             "says": ("filed; one approval waits for the owner at review_url" if ok else
                      "recorded as blocked and NOT queued — fix the blocks and record again")}
+
+
+# ---------------------------------------------------------------------------
+# Planning and results — read-only, the console's own functions
+# ---------------------------------------------------------------------------
+
+#: How many rows a list in get_plan / get_results carries before it is cut.
+#: The cut is said, never silent.
+LIST_MAX = 25
+
+
+def _plain(v):
+    """JSON-safe: datetimes become ISO strings, sets become sorted lists."""
+    import datetime as _dt
+    if isinstance(v, (_dt.datetime, _dt.date)):
+        return v.isoformat()
+    if isinstance(v, dict):
+        return {str(k): _plain(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_plain(x) for x in v]
+    if isinstance(v, set):
+        return sorted(_plain(x) for x in v)
+    return v
+
+
+def _cut(rows: list, key: str, out: dict) -> list:
+    if len(rows) > LIST_MAX:
+        out.setdefault("cut", {})[key] = f"{len(rows)} rows, first {LIST_MAX} shown"
+    return rows[:LIST_MAX]
+
+
+def _part(out: dict, name: str, fn) -> None:
+    """One section; a section that raises is NAMED, not dropped and not fatal —
+    a plan with a hole nobody can see is worse than one that says where it is."""
+    try:
+        out[name] = _plain(fn())
+    except Exception as exc:                                      # noqa: BLE001
+        out.setdefault("unavailable", {})[name] = f"{exc.__class__.__name__}: {exc}"
+
+
+@server.tool()
+def get_plan(tenant: str, days: int = 30) -> dict[str, Any]:
+    """What is planned, due, waiting on the owner and stuck — for one account.
+
+    Read before deciding what to make. `systems`: every installed system with
+    its status, autonomy and the last `days` of runs (shipped, planned,
+    blocked, needs_person). `plans`: open planned work, soonest first, with
+    the date it is planned for. `needs_action`: plans waiting on the owner
+    (fields to complete, or a go-ahead). `waiting_on`: knowledge-base answers
+    that block a system, and which systems. `attention`: why runs were
+    blocked, most frequent first, with one example run each.
+
+    Nothing here changes anything.
+    """
+    from . import systems, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}",
+                "known": sorted(t.key for t in tenants.all_tenants())}
+    days = max(1, min(int(days or 30), 365))
+    out: dict[str, Any] = {"ok": True, "tenant": tenant, "days": days}
+    _part(out, "systems", lambda: _cut(systems.per_system(tenant, days), "systems", out))
+
+    def _plans():
+        names = {r.id: r.key for r in systems.for_tenant(tenant)}
+        rows = []
+        for r in systems.plans(tenant):
+            brief = r.brief or {}
+            rows.append({"run_id": r.id, "system": names.get(r.system_id, ""),
+                         "planned_for": str(brief.get("planned_for") or ""),
+                         "ref": r.ref or "",
+                         "brief": {k: brief[k] for k in
+                                   ("entity_key", "audience_key", "angle", "positioning",
+                                    "theme", "keyword", "title", "subject")
+                                   if brief.get(k)}})
+        return _cut(rows, "plans", out)
+    _part(out, "plans", _plans)
+    _part(out, "needs_action", lambda: systems.plans_needing_action(tenant))
+    _part(out, "waiting_on", lambda: systems.waiting_on(tenant))
+
+    def _attention():
+        rows = systems.attention(tenant, days, examples=1)
+        for b in rows:
+            b.pop("tenants", None)
+        return _cut(rows, "attention", out)
+    _part(out, "attention", _attention)
+    return out
+
+
+@server.tool()
+def get_results(tenant: str, dimension: str = "", days: int = 90) -> dict[str, Any]:
+    """What worked, for one account — read before planning the next piece.
+
+    `ads`: measured ad outcomes grouped by the data layer's own dimensions
+    (positioning, audience, funnel_stage, angle, entity, claim) — one
+    dimension when `dimension` is named, all of them otherwise — with
+    `headline`, the positioning that won if one did. An unmeasured row is
+    counted, never averaged as a zero. `drafts`: in the last `days`, every
+    output per system by status (draft, blocked, approved, published).
+    `verdicts`: the owner's decisions on queued drafts, by status.
+    `caught`: which gates blocked drafts and how often — what to fix in the
+    data layer or the brief.
+    """
+    from . import results, tenants
+    from . import db
+    import datetime as _dt
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}",
+                "known": sorted(t.key for t in tenants.all_tenants())}
+    if dimension and dimension not in results.DIMENSIONS:
+        return {"ok": False, "why": f"unknown dimension {dimension!r}",
+                "known": list(results.DIMENSIONS)}
+    days = max(1, min(int(days or 90), 730))
+    since = db.utcnow() - _dt.timedelta(days=days)
+    out: dict[str, Any] = {"ok": True, "tenant": tenant, "days": days}
+    _part(out, "ads", lambda: (results.by(tenant, dimension) if dimension
+                               else results.scoreboard(tenant)))
+    _part(out, "headline", lambda: results.headline(tenant))
+
+    def _drafts():
+        tally: dict = {}
+        with db.SessionLocal() as s:
+            for key, status in (s.query(db.Output.system_key, db.Output.status)
+                                .filter(db.tenant_filter(db.Output, tenant),
+                                        db.Output.created_at >= since)):
+                row = tally.setdefault(key or "(none)", {})
+                row[status or "(none)"] = row.get(status or "(none)", 0) + 1
+        return tally
+    _part(out, "drafts", _drafts)
+
+    def _verdicts():
+        tally: dict = {}
+        with db.SessionLocal() as s:
+            for kind, status in (s.query(db.Approval.kind, db.Approval.status)
+                                 .filter(db.tenant_filter(db.Approval, tenant),
+                                         db.Approval.created_at >= since)):
+                row = tally.setdefault(kind or "(none)", {})
+                row[status or "(none)"] = row.get(status or "(none)", 0) + 1
+        return tally
+    _part(out, "verdicts", _verdicts)
+
+    def _caught():
+        tally: dict = {}
+        with db.SessionLocal() as s:
+            for (caught,) in (s.query(db.AssuranceEvent.caught)
+                              .filter(db.tenant_filter(db.AssuranceEvent, tenant),
+                                      db.AssuranceEvent.created_at >= since)):
+                for rule in (caught or []):
+                    tally[str(rule)] = tally.get(str(rule), 0) + 1
+        return dict(sorted(tally.items(), key=lambda kv: -kv[1])[:LIST_MAX])
+    _part(out, "caught", _caught)
+    return out
 
 
 # ---------------------------------------------------------------------------

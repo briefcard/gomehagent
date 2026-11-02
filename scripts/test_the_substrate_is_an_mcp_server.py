@@ -1,4 +1,4 @@
-"""The data layer is an MCP server: three tools behind one key, nothing leaves.
+"""The data layer is an MCP server: five tools behind one key, nothing leaves.
 
 Owner, 2026-10-22: stop building generators inside the app; expose the data
 layer as an MCP layer that scheduled automation calls, with Claude as the
@@ -17,7 +17,14 @@ What this suite holds:
     `skill_output` approval, and the workroom opens it;
   * no approval `record` writes carries a key `approvals.apply_decision`
     executes — computed from that function's source, not from a list here;
-  * the app can start twice (a restart) and /mcp still answers.
+  * the app can start twice (a restart) and /mcp still answers;
+  * a request carrying the PRODUCTION Host header is served (2026-11-02: the
+    SDK's default host check refused every non-localhost Host with a 421, so
+    the deployed door answered nobody);
+  * get_plan and get_results read the console's own state, scoped to the
+    account asked for, and refuse an unknown account or dimension by name;
+  * `python -m app.mcp_stdio` refuses without DATABASE_URL, and with it serves
+    the same five tools to the official stdio client.
 
 Mutation run before this was committed (the assertion-discipline rule): the
 bearer compare was changed to accept any non-empty token, and the first and
@@ -47,6 +54,7 @@ T = "baci"
 CLAIM = "Designed in Milan by the Italian design house Baci Milano."
 KEY = "mcp-test-key"
 ACCEPT = "application/json, text/event-stream"
+PROD_HOST = "assistant-web-zm2d.onrender.com"
 
 
 def ck(label, cond, detail=""):
@@ -58,8 +66,8 @@ def ck(label, cond, detail=""):
 class Rpc:
     """JSON-RPC over the Streamable HTTP route — the wire, not the SDK."""
 
-    def __init__(self, client, key=KEY):
-        self.c, self.key, self.n = client, key, 0
+    def __init__(self, client, key=KEY, host=""):
+        self.c, self.key, self.n, self.host = client, key, 0, host
 
     def post(self, method, params=None, *, notify=False):
         self.n += 1
@@ -69,6 +77,8 @@ class Rpc:
         headers = {"Accept": ACCEPT, "Content-Type": "application/json"}
         if self.key:
             headers["Authorization"] = f"Bearer {self.key}"
+        if self.host:
+            headers["Host"] = self.host
         return self.c.post("/mcp", json=msg, headers=headers)
 
     def open(self):
@@ -117,6 +127,9 @@ def main() -> int:
         ck("keyless /health says the door is keyed", h.get("mcp") == "keyed", str(h.get("mcp")))
 
         print("— the handshake and the tool list —")
+        r = Rpc(c, host=PROD_HOST).open()
+        ck("the production Host header is served, not refused as misdirected",
+           r.status_code == 200, f"{r.status_code} {r.text[:120]}")
         rpc = Rpc(c)
         r = rpc.open()
         ck("initialize answers with the server's name",
@@ -196,6 +209,38 @@ def main() -> int:
         r = c.get(f"/admin/work/{got['output_id']}?key=s3cret")
         ck("the workroom opens it", r.status_code == 200 and "Portofino" in r.text, str(r.status_code))
 
+
+        print("— get_plan and get_results —")
+        plan = rpc.call("get_plan", {"tenant": T})["structuredContent"]
+        ck("get_plan reads every section, none unavailable",
+           plan.get("ok") and not plan.get("unavailable")
+           and {"systems", "plans", "needs_action", "waiting_on", "attention"} <= set(plan),
+           str(plan.get("unavailable") or sorted(plan))[:200])
+        ck("…and its systems are the account's own",
+           any(r["key"] == "campaign_email" and r["tenant"] == T for r in plan["systems"]),
+           str(plan["systems"])[:160])
+        res = rpc.call("get_results", {"tenant": T})["structuredContent"]
+        ck("get_results reads every section, none unavailable",
+           res.get("ok") and not res.get("unavailable")
+           and {"ads", "headline", "drafts", "verdicts", "caught"} <= set(res),
+           str(res.get("unavailable") or sorted(res))[:200])
+        ck("…the drafts this suite recorded: one blocked, one draft",
+           res["drafts"].get("campaign_email", {}).get("blocked") == 1
+           and res["drafts"]["campaign_email"].get("draft") == 1, str(res["drafts"]))
+        ck("…the queued one waits as a pending verdict",
+           res["verdicts"].get("skill_output", {}).get("pending") == 1, str(res["verdicts"]))
+        ck("…and what the gates caught is counted",
+           res["caught"].get("banned_claim", 0) >= 1, str(res["caught"]))
+        other = rpc.call("get_results", {"tenant": "eien"})["structuredContent"]
+        ck("another account sees none of it (tenant-scoped)",
+           other.get("ok") and not other["drafts"] and not other["verdicts"]
+           and not other["caught"], str(other)[:200])
+        bad = rpc.call("get_results", {"tenant": T, "dimension": "vibes"})["structuredContent"]
+        ck("an unknown dimension is refused with the known ones",
+           not bad["ok"] and "positioning" in bad["known"], str(bad))
+        bad = rpc.call("get_plan", {"tenant": "nobody"})["structuredContent"]
+        ck("an unknown account is refused by name", not bad["ok"] and "baci" in bad["known"])
+
         print("— the trust boundary, computed —")
         src = inspect.getsource(approvals.apply_decision)
         executes = set(re.findall(r'\.get\("([a-z_]+)"\)', src)) & {"esp_push", "gbp_post", "send_mail"}
@@ -213,6 +258,34 @@ def main() -> int:
         r = Rpc(c).post("tools/list")
         ck("the app can start again and /mcp answers (a fresh session manager)",
            r.status_code == 200 and "get_package" in r.text, str(r.status_code))
+
+    print("— stdio, for a local Claude Code —")
+    import subprocess
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
+    env.pop("GOMEH_MCP_ALLOW_LOCAL", None)
+    p = subprocess.run([sys.executable, "-m", "app.mcp_stdio"], cwd=root, env=env,
+                       capture_output=True, text=True, timeout=60)
+    ck("without DATABASE_URL it refuses rather than read an empty database",
+       p.returncode == 2 and "DATABASE_URL" in p.stderr, f"{p.returncode} {p.stderr[:120]}")
+    import anyio
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    async def _stdio():
+        params = StdioServerParameters(command=sys.executable, args=["-m", "app.mcp_stdio"],
+                                       cwd=root, env=dict(os.environ))
+        async with stdio_client(params) as (rd, wr):
+            async with ClientSession(rd, wr) as sess:
+                await sess.initialize()
+                tools = sorted(t.name for t in (await sess.list_tools()).tools)
+                got = await sess.call_tool("get_results", {"tenant": T})
+                return tools, got.structuredContent or {}
+    tools, got = anyio.run(_stdio)
+    ck("with it, the official stdio client sees the same five tools",
+       tools == sorted(mcp_server.TOOLS), str(tools))
+    ck("…and reads the same data the HTTP door does",
+       got.get("drafts", {}).get("campaign_email", {}).get("draft") == 1, str(got)[:160])
 
     print()
     print("ALL GREEN" if not _fail else f"{len(_fail)} FAILED: {_fail}")

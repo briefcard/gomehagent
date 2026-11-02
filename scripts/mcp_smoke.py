@@ -2,7 +2,7 @@
 
 The suite speaks JSON-RPC by hand so it can assert on the wire. This proves
 the thing the suite cannot — that an actual MCP client (the SDK's own, the
-same protocol Claude speaks) completes initialize, lists the three tools and
+same protocol Claude speaks) completes initialize, lists the five tools and
 calls one — against uvicorn, not a test client. `app/mcp_client.py` carries
 the warning this script answers: "no call here has ever met a live MCP
 server", and every adapter in this codebase was wrong in some detail on first
@@ -76,7 +76,7 @@ async def _probe(url: str, key: str) -> int:
             ck("initialize", init.serverInfo.name == "gomehagent", init.serverInfo.name)
             tools = await s.list_tools()
             names = sorted(t.name for t in tools.tools)
-            ck("three tools", names == ["check", "get_package", "record"], str(names))
+            ck("five tools", names == ["check", "get_package", "get_plan", "get_results", "record"], str(names))
             got = await s.call_tool("get_package", {"tenant": "baci", "system": "campaign_email"})
             text = "\n".join(c.text for c in got.content if getattr(c, "type", "") == "text")
             ck("get_package returns the package", "hand-decorated" in text and "### The rules" in text,

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gomehagent": {
+      "type": "http",
+      "url": "${GOMEH_MCP_URL:-https://assistant-web-zm2d.onrender.com/mcp}",
+      "headers": {
+        "Authorization": "Bearer ${MCP_KEY:-}"
+      }
+    }
+  }
+}

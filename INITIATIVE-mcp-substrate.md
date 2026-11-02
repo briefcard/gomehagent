@@ -45,12 +45,48 @@ the server exposes acts outward.
   `MCP_URL`/`MCP_KEY` against a deploy): initialize, three tools, a call, a
   refused key.
 
+## 1b. 2026-11-02 — it did not work, and now a Claude Code session can reach it
+
+**The deployed door answered nobody.** `requirements.txt` allows `mcp>=1.12,<2`
+and resolves to 1.30, whose FastMCP defaults `host` to 127.0.0.1 and then
+enables DNS-rebinding protection that admits only localhost Host headers. Every
+request to `assistant-web-zm2d.onrender.com/mcp` got 421 "Invalid Host header"
+whatever its key. The suite missed it because its TestClient's own Host was
+refused too, and the run that raised it was never read past the JSON error.
+FIX: `transport_security` with the host check off (`mcp_server._security`). The
+bearer is the guard: rebinding is an attack on an unauthenticated local server.
+GUARD: the suite calls with the production Host. Mutation run: the fix removed
+→ "the production Host header is served" red with a 421. Restored.
+
+**A session had no way in.** Nothing connected Claude Code to the server. Now:
+- `.mcp.json` (project): the HTTP server, `${GOMEH_MCP_URL:-deploy}/mcp`, with a
+  `Bearer ${MCP_KEY}` header. It works for any Claude Code started in the repo
+  with `MCP_KEY` exported. A cloud session also needs the deploy's host on the
+  environment's network allowlist; on 2026-11-02 the proxy refused it with a
+  403, so the cloud session that found all this could not reach it.
+- `app/mcp_stdio.py`: the same server over stdio, in-process, against
+  `DATABASE_URL`. It needs no network path to the web service and no key, and it
+  refuses when DATABASE_URL is unset rather than read an empty local file.
+- `.claude/skills/gomeh-data-layer/SKILL.md`: the loop. get_plan → get_results →
+  get_package → write → check → fix → record.
+
+**Two tools, needed in a real session.** That session was asked to plan and
+analyse across the systems and had a package to write from, but nothing that
+said what was due or what had worked. `get_plan` wraps `systems.per_system /
+plans / plans_needing_action / waiting_on / attention`. `get_results` wraps
+`results.by|scoreboard|headline` plus draft outcomes by status, the owner's
+verdicts, and the gates that caught what. Both are read-only, scoped by
+`db.tenant_filter`, and name a section that failed (`unavailable`) rather than
+drop it.
+
 ## 2. The tools — the contract
 
 | tool | reads | writes | refuses |
 |---|---|---|---|
 | `get_package(tenant, system, entity_key, audience_key)` | `resolve.resolve` via `handoff.package_sections`; `exemplars.standard` + `notes_text`; `handoff.DELIVER`/`RULES` | nothing | unknown account (names the known ones); unknown system |
 | `check(tenant, body, kind, subject, preheader, headline, claim_ids, entity_key)` | `validator.check`, `artifact_check.check`, `email_craft`/`ad_craft.review`, `fitness.named_unfit`, `coherence.review` | nothing | — (a gate that raises is a BLOCK naming the gate) |
+| `get_plan(tenant, days)` | `systems.per_system`, `plans`, `plans_needing_action`, `waiting_on`, `attention` | nothing | unknown account |
+| `get_results(tenant, dimension, days)` | `results.by`/`scoreboard`/`headline`; Output, Approval, AssuranceEvent counts | nothing | unknown account/dimension |
 | `record(tenant, system, body, …, claim_ids, notes)` | runs `check` | `ledger.record` (+ `ArtifactBody` for artifact formats), `assurance.record(source="mcp")`, ONE `skill_output` approval when clean | unknown account/system; a blocked draft is filed blocked and queues NOTHING |
 
 The package is the same document a failed job hands a chat, plus: "What is
@@ -99,6 +135,16 @@ suite derives that set from the function's source and asserts equality.
    `admin_ui` shrinks to the data-layer editor, the queue and connections.
 
 ## 5. How to connect
+
+Started in this repo, Claude Code picks up `.mcp.json` by itself. Export the key
+first: `export MCP_KEY=…`. Without network access to the deploy, use stdio:
+
+```
+claude mcp add gomehagent-local --env DATABASE_URL=<render postgres external url> \
+  -- python3 -m app.mcp_stdio
+```
+
+By hand, for anywhere else:
 
 ```
 claude mcp add --transport http gomehagent https://assistant-web-zm2d.onrender.com/mcp \
