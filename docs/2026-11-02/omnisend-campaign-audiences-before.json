@@ -1,0 +1,15 @@
+{"captured_at":"2026-11-02T02:27Z","note":"before-state of 12 scheduled Baci Consumer campaigns; undo = restore_to_draft, patch audience back to these lists, send",
+"campaigns":[
+{"id":"6ac53e337433198373f6ae31","name":"Baci Consumer · 2026-12-30 · C23 · All","scheduledAt":"2026-12-30T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53e2c0e089b8b060670c5","name":"Baci Consumer · 2027-01-06 · C25 · All","scheduledAt":"2027-01-06T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53ddc7433198373f6ae29","name":"Baci Consumer · 2026-12-16 · C19 · All","scheduledAt":"2026-12-16T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53ddc7433198373f6ae28","name":"Baci Consumer · 2026-12-23 · C21 · All","scheduledAt":"2026-12-23T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53db60e089b8b060670be","name":"Baci Consumer · 2026-12-09 · C17 · Hasn't ordered","scheduledAt":"2026-12-09T15:00:00Z","included":["6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53db30e089b8b060670bb","name":"Baci Consumer · 2026-12-09 · C17 · Has ordered","scheduledAt":"2026-12-09T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53da60e089b8b060670b9","name":"Baci Consumer · 2026-12-02 · C15 · All","scheduledAt":"2026-12-02T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53d67722a95ee46f5a5ba","name":"Baci Consumer · 2026-11-25 · C13 · All","scheduledAt":"2026-11-25T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53d560e089b8b060670b3","name":"Baci Consumer · 2026-11-18 · C11 · All","scheduledAt":"2026-11-18T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53d2b0e089b8b060670ae","name":"Baci Consumer · 2026-11-11 · C09 · All","scheduledAt":"2026-11-11T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4","6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53d130e089b8b060670a5","name":"Baci Consumer · 2026-11-04 · C07 · Hasn't ordered","scheduledAt":"2026-11-04T15:00:00Z","included":["6ac538d1f81df59ca5dd4bb5"],"excluded":["6ae7eba6020ec6d28df70083"]},
+{"id":"6ac53d117433198373f6ae15","name":"Baci Consumer · 2026-11-04 · C07 · Has ordered","scheduledAt":"2026-11-04T15:00:00Z","included":["6ac538cdf81df59ca5dd4bb4"],"excluded":["6ae7eba6020ec6d28df70083"]}
+]}
