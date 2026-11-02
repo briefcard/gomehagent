@@ -195,6 +195,9 @@ formats) against the account, and say which rules we break today.
 
 ## 6. The game plan (in this order; each step ends with an owner check)
 
+**The full task-by-task version, with the $1M targets and the model's
+break-even MER, is `ops/baci-ads/PLAN-profitable-1m.md`. Work from that.**
+
 1. **Read** Sam's guide/flowchart. Write the rule-by-rule audit (§5).
 2. **Map** the account to his structure, keeping the $40 cost-cap scale
    campaign and the four winners. Output: campaigns → ad sets/packs → ads,
