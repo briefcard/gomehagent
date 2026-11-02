@@ -787,7 +787,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`add_label`**(alias, message_id, label_name) → `None`  ·  from `worker.py`
 - **`create_draft`**(alias, to, subject, body, thread_id?, cc?) → `str`  ·  from `command_agent.py`, `mcp_server.py`, `worker.py`
 - **`creds_for`**(alias) → `Credentials`  ·  from `command_agent.py`, `creative.py`, `data_tools.py`, `drive_io.py`, `google_seo.py`
-- **`download_attachment`**(alias, message_id, attachment_id) → `bytes`  ·  from `archive.py`, `data_tools.py`, `ops_jobs.py`, `worker.py`
+- **`download_attachment`**(alias, message_id, attachment_id) → `bytes`  ·  from `archive.py`, `data_tools.py`, `mcp_server.py`, `ops_jobs.py`, `worker.py`
 - **`draft_exists`**(alias, draft_id) → `bool`  ·  **from nothing**
 - **`ensure_label`**(alias, name) → `str`  ·  **from nothing**
 - **`fetch_body`**(alias, message_id, limit?) → `str`  ·  from `archive.py`
@@ -800,6 +800,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`forget`**(alias) → `None`  ·  from `command_agent.py`, `credentials.py`, `kb.py`, `seo_tools.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `web.py`
 - **`get_thread_context`**(alias, thread_id, limit?, exclude_id?) → `str`  ·  from `digest.py`, `test_grounding.py`, `worker.py`
 - **`mark_read`**(alias, message_id) → `None`  ·  from `worker.py`
+- **`message_attachments`**(alias, message_id) → `list[dict]`  ·  from `mcp_server.py`
 - **`read_draft`**(alias, draft_id) → `dict`  ·  from `approvals.py`
 - **`search_threads`**(alias, query, max_results?) → `list[dict]`  ·  from `mcp_server.py`
 - **`send_draft`**(alias, draft_id) → `str`  ·  from `approvals.py`
@@ -1183,6 +1184,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`get_package`**(tenant, system?, entity_key?, audience_key?) → `str`  ·  **from nothing**
 - **`get_plan`**(tenant, days?) → `dict[str, Any]`  ·  **from nothing**
 - **`get_results`**(tenant, dimension?, days?) → `dict[str, Any]`  ·  **from nothing**
+- **`inbox_attachment`**(tenant, message_id, filename?) → `dict[str, Any]`  ·  **from nothing**
 - **`inbox_draft`**(tenant, thread_id, body, to?, cc?, subject?) → `dict[str, Any]`  ·  **from nothing**
 - **`inbox_search`**(tenant, query?, days?, limit?) → `dict[str, Any]`  ·  **from nothing**
 - **`inbox_thread`**(tenant, thread_id) → `dict[str, Any]`  ·  **from nothing**

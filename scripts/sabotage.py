@@ -38,6 +38,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "an_attachment_with_no_text_reads_as_empty",
+        "file": "app/mcp_server.py",
+        "find": '    if not text.strip():\n        return {"ok": False, "why": f"{hit[\'filename\']!r} has no text layer "\n',
+        "replace": '    if False:  # SABOTAGE\n        return {"ok": False, "why": f"{hit[\'filename\']!r} has no text layer "\n',
+        "suites": ["test_the_substrate_is_an_mcp_server.py"],
+        "why": "a scanned 7501 comes back as an empty success, and a duty figure "
+               "reads as zero instead of 'read it by eye'",
+    },
+    {
         "name": "an_html_only_email_reads_empty",
         "file": "app/gmail_client.py",
         "find": '    return _first_part(payload, "text/plain") or _html_to_text(\n        _first_part(payload, "text/html"))\n',

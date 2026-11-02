@@ -295,7 +295,57 @@ def main() -> int:
             names = {t["name"]: t for t in rpc.post("tools/list").json()["result"]["tools"]}
             ck("no inbox tool takes an alias or an inbox — the account decides",
                all(not ({"alias", "inbox", "account"} & set(names[n]["inputSchema"].get("properties", {})))
-                   for n in ("inbox_search", "inbox_thread", "inbox_draft")))
+                   for n in ("inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")))
+
+            # inbox_attachment: the duty on a 7501 is in the inbox's records
+            ATTS = {"baci": {"m-7501": [
+                {"filename": "7501_NEW_07036093.pdf", "attachment_id": "a1", "mime": "application/pdf"},
+                {"filename": "PKLIST.xlsx", "attachment_id": "a2", "mime": "application/vnd.ms-excel"},
+                {"filename": "scan.pdf", "attachment_id": "a3", "mime": "application/pdf"}]}, "eien": {}}
+
+            def fake_atts(alias, message_id):
+                calls.append(("atts", alias, message_id))
+                if message_id not in ATTS[alias]:
+                    raise RuntimeError("HttpError 404: Requested entity was not found.")
+                return ATTS[alias][message_id]
+
+            def fake_dl(alias, message_id, att_id):
+                calls.append(("dl", alias, message_id, att_id))
+                return {"a1": b"PDF", "a2": b"XLSX", "a3": b"SCAN"}[att_id]
+
+            def fake_text(name, data):
+                return {b"PDF": "Duty 25% $1,234.56", b"XLSX": "Plates\t12", b"SCAN": ""}[data]
+
+            real_att = (gmail_client.message_attachments, gmail_client.download_attachment,
+                        mcp_server._attachment_text)
+            gmail_client.message_attachments = fake_atts
+            gmail_client.download_attachment = fake_dl
+            mcp_server._attachment_text = fake_text
+            try:
+                r = rpc.call("inbox_attachment", {"tenant": T, "message_id": "m-7501"})["structuredContent"]
+                ck("inbox_attachment with no filename lists the message's attachments",
+                   r["ok"] and r["attachments"][0] == "7501_NEW_07036093.pdf"
+                   and calls[-1] == ("atts", "baci", "m-7501"), str(r))
+                r = rpc.call("inbox_attachment", {"tenant": T, "message_id": "m-7501",
+                                                  "filename": "7501"})["structuredContent"]
+                ck("…and reads the TEXT of the one asked for, from baci's inbox",
+                   r["ok"] and "$1,234.56" in r["text"]
+                   and calls[-1] == ("dl", "baci", "m-7501", "a1"), str(r))
+                r = rpc.call("inbox_attachment", {"tenant": "eien", "message_id": "m-7501",
+                                                  "filename": "7501"})["structuredContent"]
+                ck("a baci message asked through eien is a failure, not baci's document",
+                   not r["ok"] and "404" in r["why"]
+                   and not any(c[0] == "dl" and c[1] == "eien" for c in calls), str(r))
+                r = rpc.call("inbox_attachment", {"tenant": T, "message_id": "m-7501",
+                                                  "filename": "scan"})["structuredContent"]
+                ck("a scanned PDF with no text says so instead of returning nothing",
+                   not r["ok"] and "no text layer" in r["why"], str(r))
+                r = rpc.call("inbox_attachment", {"tenant": "agency", "message_id": "m-7501"})["structuredContent"]
+                ck("the owner's personal inbox is refused for attachments too",
+                   not r["ok"] and "personal" in r["why"], str(r))
+            finally:
+                (gmail_client.message_attachments, gmail_client.download_attachment,
+                 mcp_server._attachment_text) = real_att
 
             n_before = len([c for c in calls if c[0] == "draft"])
             r = rpc.call("inbox_draft", {"tenant": T, "thread_id": "t-baci",

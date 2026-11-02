@@ -491,6 +491,17 @@ def fetch_with_attachments(alias: str, days: int, max_results: int = 150) -> lis
     return out
 
 
+def message_attachments(alias: str, message_id: str) -> list[dict]:
+    """Every attachment of ONE message in ONE inbox, nested parts included.
+
+    A message id from another inbox is a 404 here, the same boundary
+    `thread_messages` keeps.
+    """
+    msg = service_for(alias).users().messages().get(
+        userId="me", id=message_id, format="full").execute()
+    return _extract_attachments(msg.get("payload", {}))
+
+
 def download_attachment(alias: str, message_id: str, attachment_id: str) -> bytes:
     att = service_for(alias).users().messages().attachments().get(
         userId="me", messageId=message_id, id=attachment_id

@@ -30,6 +30,10 @@ that said what was due, what was stuck or what had worked:
                   blocked, approved, denied, and the gates that caught it
     inbox_search  the account's OWN inbox, searched (Gmail query syntax)
     inbox_thread  one thread of that inbox, every message, with attachments
+    inbox_attachment the TEXT of one attachment on one message of that inbox
+                  (pdf, xlsx, csv, txt, eml). Owner, 2026-11-02: duty is in
+                  the inbox's records, on the broker's 7501 entries and
+                  invoices, which inbox_thread lists by name only.
     inbox_draft   a reply DRAFT in that thread — never sent. Owner, 2026-11-02:
                   answer Silvia, Chanel and Baci customer service from Claude
                   Code; the owner reads and sends from Gmail. It runs the
@@ -93,7 +97,7 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
-         "inbox_search", "inbox_thread", "inbox_draft")
+         "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
 #: ad copy is short and lives in the row itself.
@@ -112,7 +116,8 @@ INSTRUCTIONS = (
     "The gomehagent data layer for five client brands. Call get_package "
     "first and write ONLY from what it returns; a fact it does not carry is "
     "a fact you do not have — leave it out and say so. inbox_search, "
-    "inbox_thread and inbox_draft reach the account's own inbox; a draft is "
+    "inbox_thread, inbox_attachment and inbox_draft reach the account's own "
+    "inbox; a draft is "
     "never sent. get_plan says what is "
     "due and what is stuck; get_results what worked. Run check on every "
     "draft and fix its blocks before you record. record files the draft in "
@@ -624,6 +629,78 @@ def inbox_thread(tenant: str, thread_id: str) -> dict[str, Any]:
         return _failed(exc)
     return {"ok": True, "tenant": tenant, "thread_id": thread_id,
             "messages": msgs}
+
+
+#: Attachment text returned per call. A customs entry or freight invoice is a
+#: page or two; this caps a catalogue someone attached.
+ATTACHMENT_MAX_CHARS = 12000
+
+
+def _attachment_text(name: str, data: bytes) -> str | None:
+    """Text of a PDF, spreadsheet or plain-text file; None for anything else."""
+    low = name.lower()
+    if low.endswith(".pdf"):
+        from .data_tools import _pdf_text
+        return _pdf_text(data)
+    if low.endswith((".xlsx", ".xlsm")):
+        import io
+
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+        rows = []
+        for ws in wb.worksheets:
+            rows.append(f"## {ws.title}")
+            for r in ws.iter_rows(values_only=True):
+                if any(c not in (None, "") for c in r):
+                    rows.append("\t".join("" if c is None else str(c) for c in r))
+        return "\n".join(rows)
+    if low.endswith((".txt", ".csv", ".eml")):
+        return data.decode(errors="replace")
+    return None
+
+
+@server.tool()
+def inbox_attachment(tenant: str, message_id: str, filename: str = "") -> dict[str, Any]:
+    """Read the TEXT of one attachment on one message of the account's own inbox.
+
+    Use the message `id` from inbox_thread. `filename` picks the attachment by
+    a case-insensitive substring; empty returns the list of attachments. Reads
+    PDF (text layer), xlsx, csv, txt and eml: customs entries (7501),
+    freight and broker invoices, packing lists. Read-only; nothing is stored
+    or sent. A scanned PDF with no text layer says so instead of guessing.
+    """
+    from . import gmail_client
+    alias, refusal = _inbox(tenant)
+    if refusal:
+        return refusal
+    try:
+        atts = gmail_client.message_attachments(alias, message_id)
+    except Exception as exc:                                      # noqa: BLE001
+        return _failed(exc)
+    names = [a.get("filename", "") for a in atts]
+    want = (filename or "").strip().lower()
+    if not want:
+        return {"ok": True, "tenant": tenant, "message_id": message_id,
+                "attachments": names}
+    hit = next((a for a in atts if want in a.get("filename", "").lower()), None)
+    if hit is None:
+        return {"ok": False, "why": f"no attachment matching {filename!r}",
+                "attachments": names}
+    try:
+        data = gmail_client.download_attachment(alias, message_id, hit["attachment_id"])
+        text = _attachment_text(hit["filename"], data)
+    except Exception as exc:                                      # noqa: BLE001
+        return _failed(exc)
+    if text is None:
+        return {"ok": False, "why": f"{hit['filename']!r} is not a type this tool reads "
+                "(pdf, xlsx, csv, txt, eml)", "attachments": names}
+    if not text.strip():
+        return {"ok": False, "why": f"{hit['filename']!r} has no text layer "
+                "(likely a scanned image); read it by eye", "attachments": names}
+    return {"ok": True, "tenant": tenant, "message_id": message_id,
+            "filename": hit["filename"], "chars": len(text),
+            "truncated": len(text) > ATTACHMENT_MAX_CHARS,
+            "text": text[:ATTACHMENT_MAX_CHARS]}
 
 
 @server.tool()
