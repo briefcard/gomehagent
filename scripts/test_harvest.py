@@ -80,6 +80,32 @@ def _get(url, **kw):
     return _Resp("", 404)
 
 
+#: The crawl section's site: big enough that discovery (>200) and budgeting
+#: (limit 2, then 20) are both exercised. Until 2026-11-02 that section ran
+#: AFTER the mock was restored and crawled the live bacimilanousa.com, so it
+#: passed wherever the site was reachable and failed in any sandbox — an
+#: offline suite with a hidden network dependency.
+BIG = [f"https://bacimilanousa.com/products/piece-{i}" for i in range(300)]
+BIG_SITEMAP = ("<?xml version=\"1.0\"?><urlset>"
+               + "".join(f"<url><loc>{u}</loc></url>" for u in BIG) + "</urlset>")
+
+
+def _big_get(url, **kw):
+    if url.endswith("/sitemap.xml"):
+        return _Resp(BIG_SITEMAP)
+    if "/products/piece-" in url:
+        n = url.rsplit("-", 1)[-1]
+        # Enough copy to clear the reader's thin-page floor; distinct per page
+        # so the content hash tells every page apart.
+        return _Resp(f"<html><body><main><h1>Piece {n}</h1>"
+                     f"<p>Piece {n} is one of {len(BIG)} pieces in the collection, "
+                     f"designed in Milan for tables that are used every day.</p>"
+                     f"<p>It is sold individually and ships from our US warehouse "
+                     f"within two business days of the order being placed.</p>"
+                     f"</main></body></html>")
+    return _Resp("", 404)
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -377,6 +403,7 @@ def main() -> int:
 
     print("\n— the crawl walks the site instead of restarting it —")
     from app import harvest as _hv
+    httpx.get = _big_get
     _hv.forget_pages("baci")
     ck("a fresh account has read nothing", not _hv._page_state("baci"))
 
@@ -440,6 +467,7 @@ def main() -> int:
        harvest.harvest("baci", limit=2, apply=False,
                        recrawl=True)["pages_read"] > 0)
 
+    httpx.get = real
     print("\n— a thin queue must say WHY it is thin —")
     check_known_drops_are_counted(ck)
 
