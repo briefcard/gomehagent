@@ -28,6 +28,19 @@ that said what was due, what was stuck or what had worked:
     get_results   what worked — ad outcomes by the data layer's dimensions
                   (`results.by`) and what became of every draft: shipped,
                   blocked, approved, denied, and the gates that caught it
+    inbox_search  the account's OWN inbox, searched (Gmail query syntax)
+    inbox_thread  one thread of that inbox, every message, with attachments
+    inbox_draft   a reply DRAFT in that thread — never sent. Owner, 2026-11-02:
+                  answer Silvia, Chanel and Baci customer service from Claude
+                  Code; the owner reads and sends from Gmail. It runs the
+                  triage guard first (`validator.check`, ban list, fail closed).
+
+THE INBOX IS THE ACCOUNT'S, NEVER THE CALLER'S. No inbox tool takes an alias:
+`Tenant.gmail_alias` is resolved here, so a call about baci cannot read eien's
+mail, and a thread id from another inbox is a 404 from Gmail itself. An
+account without an inbox (coverings, ironside today) is refused by name.
+`agency` resolves to the owner's personal inbox and is refused too — the
+personal inbox is not client data and this server serves clients.
 
 THE TRUST BOUNDARY HOLDS (ARCHITECTURE.md). Nothing here acts outward: no
 send, push or publish. Approving in the console is the owner's act, through
@@ -79,7 +92,8 @@ log = logging.getLogger("mcp_server")
 NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
-TOOLS = ("get_package", "check", "record", "get_plan", "get_results")
+TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
+         "inbox_search", "inbox_thread", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
 #: ad copy is short and lives in the row itself.
@@ -97,7 +111,9 @@ EXEMPLAR_MAX = 12_000
 INSTRUCTIONS = (
     "The gomehagent data layer for five client brands. Call get_package "
     "first and write ONLY from what it returns; a fact it does not carry is "
-    "a fact you do not have — leave it out and say so. get_plan says what is "
+    "a fact you do not have — leave it out and say so. inbox_search, "
+    "inbox_thread and inbox_draft reach the account's own inbox; a draft is "
+    "never sent. get_plan says what is "
     "due and what is stuck; get_results what worked. Run check on every "
     "draft and fix its blocks before you record. record files the draft in "
     "the owner's approval queue; nothing is sent, pushed or published by "
@@ -530,6 +546,151 @@ def get_results(tenant: str, dimension: str = "", days: int = 90) -> dict[str, A
         return dict(sorted(tally.items(), key=lambda kv: -kv[1])[:LIST_MAX])
     _part(out, "caught", _caught)
     return out
+
+
+# ---------------------------------------------------------------------------
+# The inbox — read, and draft a reply. Nothing here sends.
+# ---------------------------------------------------------------------------
+
+#: Accounts whose resolved inbox is NOT client mail. `agency`'s alias is the
+#: owner's personal inbox; the three accounts are never mixed (DNA #9).
+INBOX_REFUSED = ("agency",)
+
+
+def _inbox(tenant: str):
+    """`(alias, None)` or `(None, refusal)` — the ONE place an inbox is chosen."""
+    from . import tenants
+    tn = tenants.get(tenant)
+    if tn is None:
+        return None, {"ok": False, "why": f"unknown account {tenant!r}",
+                      "known": sorted(t.key for t in tenants.all_tenants())}
+    if tenant in INBOX_REFUSED:
+        return None, {"ok": False, "why": f"{tenant!r} resolves to the owner's "
+                      "personal inbox, which this server does not serve"}
+    alias = getattr(tn, "gmail_alias", "") or ""
+    if not alias:
+        with_inbox = sorted(t.key for t in tenants.all_tenants()
+                            if getattr(t, "gmail_alias", "") and t.key not in INBOX_REFUSED)
+        return None, {"ok": False, "why": f"{tenant!r} has no inbox connected",
+                      "accounts_with_an_inbox": with_inbox}
+    return alias, None
+
+
+def _failed(exc: Exception) -> dict:
+    return {"ok": False, "why": f"the inbox call failed: {exc.__class__.__name__}: {exc}"}
+
+
+@server.tool()
+def inbox_search(tenant: str, query: str = "", days: int = 30,
+                 limit: int = 20) -> dict[str, Any]:
+    """Search ONE account's own inbox (baci or eien), newest threads first.
+
+    `query` is Gmail search syntax (from:, subject:, "exact phrase", is:unread,
+    has:attachment …); `days` bounds it (newer_than), 0 for no bound. Returns
+    a summary per thread: subject, first and last sender, date, message count,
+    unread, whether the last message is ours (answered) and a snippet. Read a
+    thread with inbox_thread before replying to it.
+    """
+    from . import gmail_client
+    alias, refusal = _inbox(tenant)
+    if refusal:
+        return refusal
+    q = " ".join(x for x in [query.strip(),
+                             f"newer_than:{int(days)}d" if int(days or 0) > 0 else ""] if x)
+    try:
+        threads = gmail_client.search_threads(alias, q, max_results=limit)
+    except Exception as exc:                                      # noqa: BLE001
+        return _failed(exc)
+    return {"ok": True, "tenant": tenant, "query": q, "count": len(threads),
+            "threads": threads}
+
+
+@server.tool()
+def inbox_thread(tenant: str, thread_id: str) -> dict[str, Any]:
+    """One thread of the account's own inbox, every message oldest first.
+
+    Each message: from, to, cc, reply_to, date, subject, whether it is ours
+    (sent from this inbox), its text, and attachment file names. Write a reply
+    from what the thread says and what get_package carries — never invent an
+    order status, a date, a price or a stock level.
+    """
+    from . import gmail_client
+    alias, refusal = _inbox(tenant)
+    if refusal:
+        return refusal
+    try:
+        msgs = gmail_client.thread_messages(alias, thread_id)
+    except Exception as exc:                                      # noqa: BLE001
+        return _failed(exc)
+    return {"ok": True, "tenant": tenant, "thread_id": thread_id,
+            "messages": msgs}
+
+
+@server.tool()
+def inbox_draft(tenant: str, thread_id: str, body: str, to: str = "",
+                cc: str = "", subject: str = "") -> dict[str, Any]:
+    """Draft a reply in a thread of the account's own inbox. It is NOT sent.
+
+    The draft lands in that inbox's Gmail Drafts, threaded, for the owner to
+    read, edit and send. `to` defaults to the last message that is not ours
+    (its Reply-To, else its From); `subject` to "Re: " + the thread's subject.
+    Plain text body, signed the way the brand signs.
+
+    Runs the guard the triage path runs before anything can send: the ban list
+    and an unavailable product are hard blocks, and a guard that cannot run is
+    a block (fail closed). A blocked draft is NOT created; the blocks come back.
+    """
+    from . import assurance, gmail_client, validator
+    alias, refusal = _inbox(tenant)
+    if refusal:
+        return refusal
+    if not (body or "").strip():
+        return {"ok": False, "why": "the body is empty"}
+    try:
+        msgs = gmail_client.thread_messages(alias, thread_id)
+    except Exception as exc:                                      # noqa: BLE001
+        return _failed(exc)
+    theirs = [m for m in msgs if not m.get("ours")]
+    if not to:
+        last = theirs[-1] if theirs else {}
+        to = last.get("reply_to") or last.get("from") or ""
+    if not to:
+        return {"ok": False, "why": "no recipient: the thread has no message "
+                "that is not ours — pass `to`"}
+    if not subject:
+        base = (msgs[0].get("subject") if msgs else "") or ""
+        subject = base if base.lower().startswith("re:") else f"Re: {base}".strip()
+
+    try:
+        report = validator.check(tenant, f"{subject} {body}", claim_ids=[],
+                                 require_citation=False)
+        hard = [f for f in report.get("failures") or []
+                if f.get("rule") in ("banned_claim", "entity_unavailable")]
+        checked = list(report.get("checked") or [])
+    except Exception as exc:                                      # noqa: BLE001
+        hard = [{"rule": "gate_failed:validator",
+                 "detail": f"{exc.__class__.__name__}: {exc}",
+                 "fix": "the guard could not run, so this is not clean"}]
+        checked = []
+    try:
+        assurance.record(tenant, source="mcp-mail", system_key="inbox_reply",
+                         checked=checked, caught=[f["rule"] for f in hard],
+                         verdict="blocked" if hard else "passed", grounded=False)
+    except Exception:                                             # noqa: BLE001
+        log.exception("assurance.record failed for an inbox draft")
+    if hard:
+        return {"ok": False, "status": "blocked", "blocks": hard,
+                "says": "NOT drafted — fix the blocks and draft again"}
+
+    try:
+        draft_id = gmail_client.create_draft(alias, to, subject, body,
+                                             thread_id=thread_id, cc=cc)
+    except Exception as exc:                                      # noqa: BLE001
+        return _failed(exc)
+    return {"ok": True, "status": "drafted", "draft_id": draft_id,
+            "to": to, "cc": cc, "subject": subject,
+            "says": "a draft in the inbox's Gmail Drafts, threaded — NOT sent; "
+                    "the owner reads and sends it"}
 
 
 # ---------------------------------------------------------------------------

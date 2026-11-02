@@ -79,6 +79,25 @@ verdicts, and the gates that caught what. Both are read-only, scoped by
 `db.tenant_filter`, and name a section that failed (`unavailable`) rather than
 drop it.
 
+## 1c. 2026-11-02: the inbox, read and drafted, never sent
+
+Owner: "get you connected to the emails in Baci Milano & Eien Health through
+the data layer." Asked for in a real session (answering Silvia, Chanel and Baci
+customer service), so three tools:
+`inbox_search`, `inbox_thread`, `inbox_draft`, over two new locked
+`gmail_client` reads (`search_threads`, `thread_messages`).
+- **The inbox is the account's.** It is resolved from `Tenant.gmail_alias` in
+  ONE place (`mcp_server._inbox`); no tool takes an alias. `agency` (the
+  owner's personal inbox) is refused, and so is an account with no inbox.
+- **Drafts only**, owner's choice pending (recommended): no send exists in the
+  module, and the suite asserts that from the source. One-tap send from the
+  approval queue would cross §0's trust boundary and is a separate decision.
+- **The triage guard, fail closed.** `validator.check(require_citation=False)`;
+  `banned_claim` and `entity_unavailable` block, and a guard that raises
+  blocks. Every draft is logged to assurance (`source="mcp-mail"`).
+- GUARDS: mutation 1 (every call → baci's inbox) turns 3 checks red;
+  mutation 2 (guard verdict ignored) turns 2 red. Both restored.
+
 ## 2. The tools — the contract
 
 | tool | reads | writes | refuses |
@@ -87,6 +106,8 @@ drop it.
 | `check(tenant, body, kind, subject, preheader, headline, claim_ids, entity_key)` | `validator.check`, `artifact_check.check`, `email_craft`/`ad_craft.review`, `fitness.named_unfit`, `coherence.review` | nothing | — (a gate that raises is a BLOCK naming the gate) |
 | `get_plan(tenant, days)` | `systems.per_system`, `plans`, `plans_needing_action`, `waiting_on`, `attention` | nothing | unknown account |
 | `get_results(tenant, dimension, days)` | `results.by`/`scoreboard`/`headline`; Output, Approval, AssuranceEvent counts | nothing | unknown account/dimension |
+| `inbox_search(tenant, query, days, limit)` / `inbox_thread(tenant, thread_id)` | the account's own inbox via `gmail_client` | nothing | unknown account; `agency`; no inbox |
+| `inbox_draft(tenant, thread_id, body, to, cc, subject)` | the thread; `validator.check` | ONE Gmail draft, never a send; `assurance.record` | as above; empty body; a banned phrase or a guard that cannot run |
 | `record(tenant, system, body, …, claim_ids, notes)` | runs `check` | `ledger.record` (+ `ArtifactBody` for artifact formats), `assurance.record(source="mcp")`, ONE `skill_output` approval when clean | unknown account/system; a blocked draft is filed blocked and queues NOTHING |
 
 The package is the same document a failed job hands a chat, plus: "What is

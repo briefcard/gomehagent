@@ -785,7 +785,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `gmail_client.py`
 
 - **`add_label`**(alias, message_id, label_name) → `None`  ·  from `worker.py`
-- **`create_draft`**(alias, to, subject, body, thread_id?, cc?) → `str`  ·  from `command_agent.py`, `worker.py`
+- **`create_draft`**(alias, to, subject, body, thread_id?, cc?) → `str`  ·  from `command_agent.py`, `mcp_server.py`, `worker.py`
 - **`creds_for`**(alias) → `Credentials`  ·  from `command_agent.py`, `creative.py`, `data_tools.py`, `drive_io.py`, `google_seo.py`
 - **`download_attachment`**(alias, message_id, attachment_id) → `bytes`  ·  from `archive.py`, `data_tools.py`, `ops_jobs.py`, `worker.py`
 - **`draft_exists`**(alias, draft_id) → `bool`  ·  **from nothing**
@@ -801,11 +801,13 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`get_thread_context`**(alias, thread_id, limit?, exclude_id?) → `str`  ·  from `digest.py`, `test_grounding.py`, `worker.py`
 - **`mark_read`**(alias, message_id) → `None`  ·  from `worker.py`
 - **`read_draft`**(alias, draft_id) → `dict`  ·  from `approvals.py`
+- **`search_threads`**(alias, query, max_results?) → `list[dict]`  ·  from `mcp_server.py`
 - **`send_draft`**(alias, draft_id) → `str`  ·  from `approvals.py`
 - **`send_email`**(alias, to, subject, body, thread_id?, html?, cc?) → `str`  ·  from `approvals.py`, `command_agent.py`, `digest.py`, `ops_jobs.py`, `skills.py`, `whatsapp.py`, `worker.py`
 - **`sent_in_thread`**(alias, thread_id) → `dict`  ·  from `approvals.py`
 - **`sent_to_since`**(alias, to, since) → `dict`  ·  from `approvals.py`
 - **`service_for`**(alias) → `—`  ·  from `archive.py`, `command_agent.py`, `data_tools.py`, `ops_jobs.py`, `skills.py`, `tenants.py`, `web.py`
+- **`thread_messages`**(alias, thread_id, body_limit?) → `list[dict]`  ·  from `mcp_server.py`
 
 ### `google_seo.py`
 
@@ -1181,6 +1183,9 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`get_package`**(tenant, system?, entity_key?, audience_key?) → `str`  ·  **from nothing**
 - **`get_plan`**(tenant, days?) → `dict[str, Any]`  ·  **from nothing**
 - **`get_results`**(tenant, dimension?, days?) → `dict[str, Any]`  ·  **from nothing**
+- **`inbox_draft`**(tenant, thread_id, body, to?, cc?, subject?) → `dict[str, Any]`  ·  **from nothing**
+- **`inbox_search`**(tenant, query?, days?, limit?) → `dict[str, Any]`  ·  **from nothing**
+- **`inbox_thread`**(tenant, thread_id) → `dict[str, Any]`  ·  **from nothing**
 - **`mount`**(app) → `None`  ·  from `web.py`
 - **`record`**(tenant, system, body, kind?, subject?, preheader?, title?, entity_key?, audience_key?, claim_ids?, notes?) → `dict[str, Any]`  ·  from `approvals.py`, `canva.py`, `command_agent.py`, `commerce_events.py`, `compliance.py`, `gemini_images.py`, `imagegen.py`, `inbox_events.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `skill.py`, `skill_pack.py`, `test_artifact_check.py`, `test_assets.py`, `test_assurance.py`, `test_assurance_tab.py`, `test_claim_rotation.py`, `test_claim_trace.py`, `test_client_report.py`, `test_compliance_reports.py`, `test_console_frame.py`, `test_correlate.py`, `test_diagnostics.py`, `test_grounding.py`, `test_metrics.py`, `test_moment_pressure.py`, `test_moments.py`, `test_offers.py`, `test_perishable.py`, `test_plan_lifecycle.py`, `test_portal.py`, `test_responder.py`, `test_schema_tab.py`, `test_strategy.py`, `test_strategy_ledger.py`, `tools.py`, `triage.py`, `web.py`
 - **`run_checks`**(tenant, body, kind?, subject?, preheader?, headline?, claim_ids?, entity_key?) → `dict`  ·  **from nothing**

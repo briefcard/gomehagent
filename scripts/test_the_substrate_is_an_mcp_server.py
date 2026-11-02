@@ -24,7 +24,11 @@ What this suite holds:
   * get_plan and get_results read the console's own state, scoped to the
     account asked for, and refuse an unknown account or dimension by name;
   * `python -m app.mcp_stdio` refuses without DATABASE_URL, and with it serves
-    the same five tools to the official stdio client.
+    the same tools to the official stdio client;
+  * the inbox tools reach ONLY the account's own inbox (resolved from
+    `Tenant.gmail_alias`, never passed), refuse the personal inbox and an
+    account with none, and `inbox_draft` creates a draft — never a send — only
+    after the triage guard passes, failing closed when the guard cannot run.
 
 Mutation run before this was committed (the assertion-discipline rule): the
 bearer compare was changed to accept any non-empty token, and the first and
@@ -241,6 +245,85 @@ def main() -> int:
         bad = rpc.call("get_plan", {"tenant": "nobody"})["structuredContent"]
         ck("an unknown account is refused by name", not bad["ok"] and "baci" in bad["known"])
 
+
+        print("— the inbox: the account's own, read and drafted, never sent —")
+        from app import gmail_client, validator
+        BOXES = {"baci": {"t-baci": [
+                    {"id": "m1", "from": "Silvia <silvia@shop.example>", "reply_to": "",
+                     "subject": "Zodiac bread plates", "ours": False, "body": "Do you have them?"},
+                    {"id": "m2", "from": "Baci <info@bacimilanousa.com>", "reply_to": "",
+                     "subject": "Re: Zodiac bread plates", "ours": True, "body": "Checking."}]},
+                 "eien": {"t-eien": [
+                    {"id": "e1", "from": "Ann <ann@example.com>", "reply_to": "",
+                     "subject": "Order", "ours": False, "body": "Where is it?"}]}}
+        calls = []
+
+        def fake_search(alias, query, max_results=20):
+            calls.append(("search", alias, query))
+            return [{"thread_id": t, "subject": m[0]["subject"]} for t, m in BOXES[alias].items()]
+
+        def fake_thread(alias, thread_id, body_limit=6000):
+            calls.append(("thread", alias, thread_id))
+            if thread_id not in BOXES[alias]:
+                raise RuntimeError("HttpError 404: Requested entity was not found.")
+            return BOXES[alias][thread_id]
+
+        def fake_draft(alias, to, subject, body, thread_id=None, cc=""):
+            calls.append(("draft", alias, to, subject, thread_id))
+            return "d-1"
+
+        real = (gmail_client.search_threads, gmail_client.thread_messages,
+                gmail_client.create_draft, validator.check)
+        gmail_client.search_threads = fake_search
+        gmail_client.thread_messages = fake_thread
+        gmail_client.create_draft = fake_draft
+        try:
+            r = rpc.call("inbox_search", {"tenant": T, "query": "from:silvia", "days": 30})["structuredContent"]
+            ck("inbox_search reads baci's inbox, with the window applied",
+               r["ok"] and calls[-1] == ("search", "baci", "from:silvia newer_than:30d")
+               and r["threads"][0]["thread_id"] == "t-baci", str(calls[-1:]))
+            r = rpc.call("inbox_search", {"tenant": "eien"})["structuredContent"]
+            ck("…and eien's when eien is asked", r["ok"] and calls[-1][1] == "eien", str(calls[-1:]))
+            r = rpc.call("inbox_thread", {"tenant": "eien", "thread_id": "t-baci"})["structuredContent"]
+            ck("a baci thread asked through eien is a failure, not baci's mail",
+               not r["ok"] and calls[-1] == ("thread", "eien", "t-baci") and "404" in r["why"], str(r))
+            r = rpc.call("inbox_search", {"tenant": "agency"})["structuredContent"]
+            ck("the owner's personal inbox is refused", not r["ok"] and "personal" in r["why"], str(r))
+            r = rpc.call("inbox_search", {"tenant": "coverings"})["structuredContent"]
+            ck("an account with no inbox is refused, naming the ones that have one",
+               not r["ok"] and r.get("accounts_with_an_inbox") == ["baci", "eien"], str(r))
+            names = {t["name"]: t for t in rpc.post("tools/list").json()["result"]["tools"]}
+            ck("no inbox tool takes an alias or an inbox — the account decides",
+               all(not ({"alias", "inbox", "account"} & set(names[n]["inputSchema"].get("properties", {})))
+                   for n in ("inbox_search", "inbox_thread", "inbox_draft")))
+
+            n_before = len([c for c in calls if c[0] == "draft"])
+            r = rpc.call("inbox_draft", {"tenant": T, "thread_id": "t-baci",
+                                         "body": "Yes, they are hand decorated and back in stock."})["structuredContent"]
+            ck("a reply with a banned phrase is NOT drafted, and says which rule",
+               not r["ok"] and r["status"] == "blocked"
+               and any(b["rule"] == "banned_claim" for b in r["blocks"])
+               and len([c for c in calls if c[0] == "draft"]) == n_before, str(r)[:200])
+            validator.check = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+            r = rpc.call("inbox_draft", {"tenant": T, "thread_id": "t-baci",
+                                         "body": "Thank you, Silvia."})["structuredContent"]
+            ck("a guard that cannot run is a block (fails closed), and nothing is drafted",
+               not r["ok"] and r["blocks"][0]["rule"] == "gate_failed:validator"
+               and len([c for c in calls if c[0] == "draft"]) == n_before, str(r)[:200])
+            validator.check = real[3]
+            r = rpc.call("inbox_draft", {"tenant": T, "thread_id": "t-baci",
+                                         "body": "Thank you, Silvia. Here is what we have."})["structuredContent"]
+            ck("a clean reply is drafted in baci's inbox, threaded, to the customer and not to us",
+               r["ok"] and r["status"] == "drafted"
+               and calls[-1] == ("draft", "baci", "Silvia <silvia@shop.example>",
+                                 "Re: Zodiac bread plates", "t-baci"), str(calls[-1:]))
+        finally:
+            (gmail_client.search_threads, gmail_client.thread_messages,
+             gmail_client.create_draft, validator.check) = real
+        src = inspect.getsource(mcp_server)
+        ck("the server never sends mail — no send call exists in the module",
+           not re.search(r"\b(send_email|send_draft|send_message)\s*\(", src))
+
         print("— the trust boundary, computed —")
         src = inspect.getsource(approvals.apply_decision)
         executes = set(re.findall(r'\.get\("([a-z_]+)"\)', src)) & {"esp_push", "gbp_post", "send_mail"}
@@ -282,7 +365,7 @@ def main() -> int:
                 got = await sess.call_tool("get_results", {"tenant": T})
                 return tools, got.structuredContent or {}
     tools, got = anyio.run(_stdio)
-    ck("with it, the official stdio client sees the same five tools",
+    ck("with it, the official stdio client sees the same tools",
        tools == sorted(mcp_server.TOOLS), str(tools))
     ck("…and reads the same data the HTTP door does",
        got.get("drafts", {}).get("campaign_email", {}).get("draft") == 1, str(got)[:160])

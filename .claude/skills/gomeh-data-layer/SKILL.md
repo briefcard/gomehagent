@@ -1,6 +1,6 @@
 ---
 name: gomeh-data-layer
-description: Plan, write and analyse marketing work for Gomeh's accounts (baci, eien, coverings, ironside, agency) from the gomehagent data layer. Use whenever a session is asked what to make next, to draft a campaign email / blog article / ad copy / Google Business post for one of these brands, or to judge what has worked. The data layer is the `gomehagent` MCP server (tools get_plan, get_results, get_package, check, record).
+description: Plan, write and analyse marketing work for Gomeh's accounts (baci, eien, coverings, ironside, agency) from the gomehagent data layer. Use whenever a session is asked what to make next, to draft a campaign email / blog article / ad copy / Google Business post for one of these brands, or to judge what has worked. The data layer is the `gomehagent` MCP server (tools get_plan, get_results, get_package, check, record, inbox_search, inbox_thread, inbox_draft). Also use it to answer customer and partner email for baci or eien.
 ---
 
 # Working from the gomehagent data layer
@@ -50,6 +50,21 @@ is there, say so in one line, name the fix, and do not write from memory:
 2. `record(...)` only once check is clean. Put in `notes` what you could not
    verify and what you left out. Hand the owner the `review_url`.
 3. A blocked record queues nothing. Do not try to get around a block.
+
+## 4. Email: answering a customer or partner (baci, eien)
+
+1. `inbox_search(tenant, query, days)`, e.g. `from:silvia`, `is:unread`,
+   `subject:shipping`. `last_is_ours: false` means nobody has answered yet.
+2. `inbox_thread(tenant, thread_id)`: read all of it before writing.
+3. For facts, use `get_package(tenant, ...)` (claims, products, the site's own
+   pages). Stock, order status, prices and ship dates come from the thread or a
+   tool, never from memory. If you don't have one, say so in the reply, or ask
+   the owner.
+4. `inbox_draft(tenant, thread_id, body)`: it lands in that inbox's Gmail
+   Drafts, threaded. **It is never sent.** The owner reads and sends it. A
+   banned phrase blocks the draft; fix it and draft again.
+5. The tool picks the inbox from the account. Never mix accounts: a baci
+   thread is answered through `baci` only.
 
 ## Brand guardrails (the package carries them too; these are never negotiable)
 

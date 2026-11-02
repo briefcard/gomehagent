@@ -323,6 +323,61 @@ def fetch_recent(alias: str, days: int, max_results: int = 200) -> list[dict]:
     return out
 
 
+def _headers(msg: dict) -> dict:
+    return {h["name"].lower(): h["value"]
+            for h in (msg.get("payload") or {}).get("headers", [])}
+
+
+def search_threads(alias: str, query: str, max_results: int = 20) -> list[dict]:
+    """Threads matching a Gmail query in ONE inbox, newest first, as summaries.
+
+    For the data layer's `inbox_search` (`app/mcp_server.py`). Metadata only —
+    a summary per thread, not its bodies; `thread_messages` reads one whole.
+    """
+    svc = service_for(alias)
+    resp = svc.users().threads().list(
+        userId="me", q=query or "", maxResults=max(1, min(int(max_results), 50))).execute()
+    out = []
+    for ref in resp.get("threads", []):
+        t = svc.users().threads().get(
+            userId="me", id=ref["id"], format="metadata",
+            metadataHeaders=["From", "To", "Subject", "Date"]).execute()
+        msgs = t.get("messages", []) or [{}]
+        first, last = _headers(msgs[0]), _headers(msgs[-1])
+        out.append({
+            "thread_id": ref["id"], "subject": first.get("subject", ""),
+            "first_from": first.get("from", ""), "last_from": last.get("from", ""),
+            "last_date": last.get("date", ""), "messages": len(msgs),
+            "unread": any("UNREAD" in (m.get("labelIds") or []) for m in msgs),
+            "last_is_ours": "SENT" in (msgs[-1].get("labelIds") or []),
+            "snippet": msgs[-1].get("snippet", ""),
+        })
+    return out
+
+
+def thread_messages(alias: str, thread_id: str, body_limit: int = 6000) -> list[dict]:
+    """Every message of one thread in ONE inbox, oldest first, with its text.
+
+    A thread id from another inbox is a 404 here, because the client is that
+    alias's — which is what keeps one account's mail out of another's reply.
+    """
+    svc = service_for(alias)
+    thread = svc.users().threads().get(userId="me", id=thread_id, format="full").execute()
+    out = []
+    for m in thread.get("messages", []):
+        h = _headers(m)
+        out.append({
+            "id": m.get("id", ""), "from": h.get("from", ""), "to": h.get("to", ""),
+            "cc": h.get("cc", ""), "reply_to": h.get("reply-to", ""),
+            "date": h.get("date", ""), "subject": h.get("subject", ""),
+            "ours": "SENT" in (m.get("labelIds") or []),
+            "body": _extract_text(m.get("payload", {}))[:body_limit],
+            "attachments": [a.get("filename", "") for a in
+                            _extract_attachments(m.get("payload", {}))],
+        })
+    return out
+
+
 def fetch_body(alias: str, message_id: str, limit: int = 12000) -> str:
     """One message's plain text, by id.
 
@@ -559,5 +614,5 @@ for _name in ("fetch_unread", "fetch_unanswered", "get_thread_context",
               "fetch_sent", "fetch_recent", "fetch_with_attachments",
               "download_attachment", "ensure_label", "add_label", "mark_read",
               "fetch_sent_threads", "sent_in_thread", "sent_to_since",
-              "create_draft", "send_email"):
+              "create_draft", "send_email", "search_threads", "thread_messages"):
     globals()[_name] = _serialize(globals()[_name])
