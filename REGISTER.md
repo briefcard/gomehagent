@@ -833,7 +833,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `handoff.py`
 
 - **`for_job`**(job_id) → `dict`  ·  from `test_a_job_is_a_file_for_claude.py`, `test_whats_new_reaches_every_writer.py`, `web.py`
-- **`package_sections`**(tenant, system?, tier?, entity_key?, audience_key?, inputs?) → `tuple[list[str], dict]`  ·  from `mcp_server.py`
+- **`package_sections`**(tenant, system?, tier?, entity_key?, audience_key?, utterance?, inputs?) → `tuple[list[str], dict]`  ·  from `mcp_server.py`
 
 ### `harvest.py`
 
@@ -1144,7 +1144,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`best_for`**(tenant, entity_keys?, dests?) → `str`  ·  from `skill_pack.py`
 - **`check`**(html, tenant, dests?) → `list[str]`  ·  from `ab_context.py`, `admin_ui.py`, `mcp_server.py`, `recreate.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_can_the_engines_read_us.py`, `test_claim_trace.py`, `test_seo_guard.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_email_is_for_its_reader.py`, `test_the_email_is_the_brands.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `test_whats_new_reaches_every_writer.py`, `triage.py`, `web.py`, `wordpress_seo.py`
-- **`destinations`**(tenant, fetch?) → `list[dict]`  ·  from `email_header.py`, `handoff.py`, `recreate.py`, `skill_pack.py`, `test_the_email_is_the_brands.py`
+- **`destinations`**(tenant, fetch?) → `list[dict]`  ·  from `email_header.py`, `handoff.py`, `mcp_server.py`, `recreate.py`, `skill_pack.py`, `test_the_email_is_the_brands.py`
 - **`for_words`**(words, dests) → `dict | None`  ·  from `test_the_email_is_the_brands.py`
 - **`match_buttons`**(html, dests) → `tuple[str, list[str]]`  ·  from `recreate.py`, `test_the_email_is_the_brands.py`
 - **`menu_from`**(page, dom) → `list[dict]`  ·  from `test_the_email_is_the_brands.py`
@@ -1181,7 +1181,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 ### `mcp_server.py`
 
 - **`check`**(tenant, body, kind?, subject?, preheader?, headline?, claim_ids?, entity_key?) → `dict[str, Any]`  ·  from `ab_context.py`, `admin_ui.py`, `recreate.py`, `responder.py`, `seo_guard.py`, `seo_tools.py`, `shopify_seo.py`, `skill.py`, `test_artifact_check.py`, `test_campaign_variety.py`, `test_can_the_engines_read_us.py`, `test_claim_trace.py`, `test_seo_guard.py`, `test_the_ban_list_reaches_the_fields.py`, `test_the_email_is_for_its_reader.py`, `test_the_email_is_the_brands.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `test_whats_new_reaches_every_writer.py`, `triage.py`, `web.py`, `wordpress_seo.py`
-- **`get_package`**(tenant, system?, entity_key?, audience_key?) → `str`  ·  **from nothing**
+- **`get_package`**(tenant, system?, entity_key?, audience_key?, utterance?, news?) → `str`  ·  **from nothing**
 - **`get_plan`**(tenant, days?) → `dict[str, Any]`  ·  **from nothing**
 - **`get_results`**(tenant, dimension?, days?) → `dict[str, Any]`  ·  **from nothing**
 - **`inbox_attachment`**(tenant, message_id, filename?) → `dict[str, Any]`  ·  **from nothing**

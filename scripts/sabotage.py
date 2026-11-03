@@ -10482,6 +10482,16 @@ SABOTAGES = [
                "if it were clean — the check the routine ran becomes advice, "
                "and the owner is back to catching hand-decorated by eye",
     },
+    {
+        "name": "the_package_says_nothing_is_missing",
+        "file": "app/mcp_server.py",
+        "find": "    missing += _absent(kind, html, notes, entity_key, utterance)\n",
+        "replace": "    missing += []  # SABOTAGE\n",
+        "suites": ["test_the_substrate_is_an_mcp_server.py"],
+        "why": "the brief tells the generator nothing is missing while it carries "
+               "no exemplar, no owner notes, no product and no objection — the "
+               "false reassurance the first live Baci read handed back on 2026-11-03",
+    },
 ]
 
 

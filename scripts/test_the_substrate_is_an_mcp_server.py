@@ -9,7 +9,11 @@ What this suite holds:
     unset (fails closed, like READ_KEY);
   * the live tool list IS `mcp_server.TOOLS`, read over the wire;
   * get_package carries the ban list, the claim WITH ITS ID, the audience, the
-    product, the deliverable spec and the rules, and NAMES what is missing;
+    product, the deliverable spec and the rules, and NAMES what is missing —
+    including what the resolver never lists (no exemplar, no notes, no product
+    named, no utterance), with a one-line inventory; an utterance and the
+    owner's news ride through (2026-11-03, after the first live Baci read said
+    nothing was missing while carrying no exemplar, notes, product or objection);
   * check catches a banned claim written with a space instead of the hyphen,
     reports an uncited draft, and passes a clean cited one;
   * record of a blocked draft files a blocked ledger row and NO approval;
@@ -153,6 +157,21 @@ def main() -> int:
            "### What to hand back" in pkg and "{{UNSUBSCRIBE}}" in pkg and "### The rules" in pkg)
         ck("names what is missing instead of inventing it",
            "## What is missing" in pkg and "voice" in pkg.lower())
+        ck("…including the absences the resolver never lists: no exemplar, no notes, no utterance",
+           "no approved exemplar" in pkg and "no owner notes" in pkg and "no utterance was given" in pkg)
+        ck("…and NOT a product gap when the product was named", "no entity_key was given" not in pkg)
+        ck("carries a one-line inventory a reader can check",
+           "## What this package holds" in pkg and "claims 1" in pkg and "exemplar no" in pkg)
+        bare = _text(rpc.call("get_package", {"tenant": T, "system": "campaign_email"}))
+        ck("without a product the package says so", "no entity_key was given" in bare)
+        told = _text(rpc.call("get_package", {"tenant": T, "system": "campaign_email",
+                                              "entity_key": "portofino",
+                                              "utterance": "is this dishwasher safe for everyday use",
+                                              "news": "Portofino ships free in November."}))
+        ck("an utterance is searched, so the package no longer says it was not",
+           "no utterance was given" not in told)
+        ck("the owner's news rides the package as given",
+           "Portofino ships free in November." in told and "### news" in told)
         bad = _text(rpc.call("get_package", {"tenant": "nobody"}))
         ck("an unknown account is refused by name", "unknown account" in bad and "baci" in bad)
         bad = _text(rpc.call("get_package", {"tenant": T, "system": "nope"}))

@@ -98,6 +98,41 @@ customer service), so three tools:
 - GUARDS: mutation 1 (every call → baci's inbox) turns 3 checks red;
   mutation 2 (guard verdict ignored) turns 2 red. Both restored.
 
+## 1d. 2026-11-03 — the first keyed read of the Baci package, and what it hid
+
+The owner connected from Claude Code (user scope, after a stale local entry
+whose header was literally `Bearer <MCP_KEY>` was removed) and the first keyed
+`get_package("baci", "campaign_email")` came back: 20.8k chars — rules + ban list
+(2.3k), 4 audiences (one half-empty), SIX claims (two product facts mis-scoped
+brand-wide: "Set of 6 acrylic water glasses … Aqua", "sold as a set of 6
+pieces"), situations and objections NOT searched (no utterance), no product (no
+entity_key), no exemplar, no owner notes, 150 site pages (12k). And "What is
+missing" said: *nothing the platform knows to be missing.*
+
+**The content is the gap, not the plumbing.** A capable model writes the Baci
+email from this mostly from its own knowledge plus the ban list and the
+audiences — which is the Oct 2 session with a fence around it. The Phase 2 test
+(three runs vs. Oct 2) now has its first answer before the first run: the data
+layer must be FILLED (claims scoped to their products, an approved exemplar, the
+owner's notes on Baci's own look) before it can be judged.
+
+Shipped: `get_package` names the absences the resolver never lists (`_absent`:
+no exemplar, no notes, no entity_key, no utterance), carries a one-line
+inventory (`_inventory`), and takes `utterance` (what the piece answers → the
+resolver searches situations and objections; `handoff.package_sections` passes
+it through) and `news` (the owner's facts for THIS piece, ridden as
+OWNER_INPUT). Suite: the absences toggle, the inventory, utterance, news. Guard:
+`the_package_says_nothing_is_missing` — caught.
+
+**What the owner fixes in the console, not code:** re-scope the two product
+claims to their entities; add claims (Baci has six); fill "Boutique Becky";
+after the first approved email, the exemplar exists; the Baci look (cobalt /
+red / cream / lemon, staged cut-outs, sticky-note tips, wavy edges — the owner's
+own description) belongs in the owner's notes for Baci emails.
+
+**Also found:** Baci `campaign_email` is still `live` at rung `shadow` — Phase 0
+has not been pressed; the generator still runs and spends.
+
 ## 2. The tools — the contract
 
 | tool | reads | writes | refuses |

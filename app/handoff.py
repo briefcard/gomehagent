@@ -75,6 +75,7 @@ def _empty(value) -> bool:
 
 def package_sections(tenant: str, *, system: str = "", tier: int = 3,
                      entity_key: str = "", audience_key: str = "",
+                     utterance: str = "",
                      inputs: dict | None = None) -> tuple[list[str], dict]:
     """The brand package as markdown sections, and the bundle it was read from.
 
@@ -87,7 +88,12 @@ def package_sections(tenant: str, *, system: str = "", tier: int = 3,
     """
     from . import bundle, resolve
     inputs = dict(inputs or {})
-    got = resolve.resolve(tenant, system=system, tier=tier,
+    # `utterance` is what the piece answers — the hesitation, the occasion.
+    # Without it the resolver searches no objections and classifies no
+    # situation (`resolve._situated` returns early), and the first live read of
+    # the Baci package (2026-11-03) came back with neither and said nothing was
+    # missing. The MCP passes it through; the job file has none to pass.
+    got = resolve.resolve(tenant, system=system, tier=tier, utterance=utterance,
                           entity_key=entity_key, audience_key=audience_key)
     out = ["## The context — the brand package the job reads", ""]
     for key, part in bundle.PARTS.items():

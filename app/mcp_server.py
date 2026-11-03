@@ -250,9 +250,50 @@ server = FastMCP(NAME, instructions=INSTRUCTIONS,
                  stateless_http=True, json_response=True, **_security)
 
 
+
+def _absent(kind: str, exemplar_html: str, notes: str, entity_key: str,
+            utterance: str) -> list[str]:
+    """The absences the resolver never lists, each with what would fill it."""
+    out = []
+    if kind and not exemplar_html:
+        out.append(f"- no approved exemplar for this brand's {kind}s yet — the first "
+                   f"approval becomes the standard; hold the work to the brand's own "
+                   f"best, not to a generic one")
+    if kind and not notes.strip():
+        out.append(f"- no owner notes for this brand's {kind}s yet — nothing the owner "
+                   f"has said about them is on file; ask after the review and record it")
+    if not entity_key:
+        out.append("- no entity_key was given — the package carries no product's own "
+                   "facts; pass the product's key, or state no product fact")
+    if not utterance.strip():
+        out.append("- no utterance was given — objections and situations were not "
+                   "searched; pass what this piece answers (the hesitation, the "
+                   "occasion) to get the approved answers")
+    return out
+
+
+def _inventory(got: dict, exemplar_html: str, notes: str) -> str:
+    """One line a reader can check the package against."""
+    def n(key):
+        v = got.get(key)
+        return len(v) if isinstance(v, (list, dict)) else (1 if v else 0)
+    pages = 0
+    try:
+        from . import links as _links
+        pages = len([d for d in _links.destinations(got.get("tenant", ""), fetch=False)
+                     if d.get("url")])
+    except Exception:                                             # noqa: BLE001
+        pages = -1
+    return (f"claims {n('claims')} · objections {n('objections')} · audiences "
+            f"{n('audiences')} · entities {n('entities')} · site pages "
+            f"{pages if pages >= 0 else '?'} · exemplar {'yes' if exemplar_html else 'no'}"
+            f" · owner notes {'yes' if notes.strip() else 'no'}")
+
+
 @server.tool()
 def get_package(tenant: str, system: str = "campaign_email",
-                entity_key: str = "", audience_key: str = "") -> str:
+                entity_key: str = "", audience_key: str = "",
+                utterance: str = "", news: str = "") -> str:
     """The brand package for one account, as a brief you write from and nothing else.
 
     Every part the platform declares, in order: the rules (voice, positioning,
@@ -266,7 +307,10 @@ def get_package(tenant: str, system: str = "campaign_email",
 
     `system` is the pipeline asking and scopes the rules: campaign_email,
     blog_article, ad_copy or gbp_post. `entity_key` is the product or thing
-    the piece is about; `audience_key` the reader.
+    the piece is about — without it there are no product facts; `audience_key`
+    the reader. `utterance` is what the piece answers (the hesitation, the
+    occasion, the question) — without it no objections are searched. `news` is
+    the owner's facts for THIS piece, stated as given and never as a claim.
     """
     from . import exemplars, handoff, skill, tenants
     if tenants.get(tenant) is None:
@@ -278,7 +322,10 @@ def get_package(tenant: str, system: str = "campaign_email",
     kind, _fmt = KIND_FORMAT.get(system, ("", ""))
     lines, got = handoff.package_sections(
         tenant, system=sk.system_key, tier=sk.tier,
-        entity_key=entity_key, audience_key=audience_key)
+        entity_key=entity_key, audience_key=audience_key,
+        utterance=utterance, inputs=({"news": news} if news.strip() else None))
+    html, said = exemplars.standard(tenant, kind) if kind else ("", "")
+    notes = exemplars.notes_text(tenant, kind) if kind else ""
 
     out = ["---", f"name: {tenant}-{system}",
            f"description: the brand package for {sk.name} — {tenant}", "---", "",
@@ -292,21 +339,24 @@ def get_package(tenant: str, system: str = "campaign_email",
     missing += [f"- {g.get('missing', '')}: {g.get('means', '')}"
                 + (f" (fix: {g['fix']})" if g.get("fix") else "")
                 for g in (got.get("gaps") or []) if isinstance(g, dict)]
+    # WHAT THE RESOLVER DOES NOT REPORT AS A GAP, said anyway. The first live
+    # read of the Baci package (2026-11-03) carried no exemplar, no notes, no
+    # product and no objections, and this block said "nothing the platform
+    # knows to be missing" — a false reassurance handed to the generator.
+    missing += _absent(kind, html, notes, entity_key, utterance)
     out += ["## What is missing — write around it, never invent it"]
     out += missing or ["- nothing the platform knows to be missing"]
-    out += [""]
+    out += ["", "## What this package holds", _inventory(got, html, notes), ""]
 
     out += lines
 
     if kind:
-        html, said = exemplars.standard(tenant, kind)
         if html:
             cut = len(html) - EXEMPLAR_MAX
             out += [f"### exemplar — {said}; the standard of craft this is held to",
                     "```html", html[:EXEMPLAR_MAX]
                     + (f"\n… ({cut:,} more characters — the platform holds the rest)"
                        if cut > 0 else ""), "```", ""]
-        notes = exemplars.notes_text(tenant, kind)
         if notes.strip():
             out += [f"### the owner's notes on this brand's {kind}s — taste, in their words",
                     notes.strip(), ""]
