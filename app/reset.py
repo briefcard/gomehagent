@@ -43,7 +43,7 @@ KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_contexts", "kb_statements", "page_snapshots",
              "kb_statement_terms", "unaccounted_numbers", "extract_cache",
              "known_answers", "audit_samples", "kb_sources", "kb_fact_values",
-             "kb_page_scopes", "findings"}
+             "kb_page_scopes", "findings", "kb_api_sources"}
 # `kb_sources`, `kb_fact_values` and `kb_page_scopes` are the TRUTH QA set
 # about this account's content; `findings` are computed from it and the
 # statements — all knowledge, cleared with the knowledge they judge.

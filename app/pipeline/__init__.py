@@ -23,6 +23,12 @@ STAGES: dict[str, dict] = {
                 "writes": "unaccounted_numbers", "version": 1},
     "policy":  {"module": "app.pipeline.policy", "reads": "url + document",
                 "writes": "page_snapshots.risk_tier", "version": 1},
+    "render":  {"module": "app.pipeline.render", "reads": "url (when needed)",
+                "writes": "page_snapshots.rendered", "version": 1},
+    "documents": {"module": "app.pipeline.documents", "reads": "linked PDFs",
+                  "writes": "page_snapshots + kb_statements", "version": 1},
+    "feeds":   {"module": "app.pipeline.apis", "reads": "kb_api_sources",
+                "writes": "kb_statements (field api)", "version": 1},
     "reprocess": {"module": "app.pipeline.reprocess", "reads": "page_snapshots",
                   "writes": "kb_statements + unaccounted_numbers", "version": 1},
 }

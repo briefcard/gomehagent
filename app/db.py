@@ -2575,6 +2575,23 @@ class ChangeTask(Base):
     verified_at = Column(DateTime(timezone=True))
 
 
+class KbApiSource(Base):
+    """A public data feed counted as a statement of one subject (pipeline.apis)."""
+
+    __tablename__ = "kb_api_sources"
+    __table_args__ = (UniqueConstraint("tenant", "url", "subject", name="uq_kb_api_source"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    subject = Column(String, nullable=False)
+    list_path = Column(String, default="")         # dotted path to the list in the JSON
+    filter_key = Column(String, default="")        # count only entries with this flag true
+    label = Column(String, default="")
+    added_by = Column(String, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class PageSnapshot(Base):
     """A page as last fetched, stored ONCE, read by every reader.
 

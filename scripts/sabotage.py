@@ -38,6 +38,40 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "an_unrendered_page_reads_as_empty",
+        "file": "app/harvest.py",
+        "find": "            if render_state != 1:\n                render_state = 2\n",
+        "replace": "            if False:  # SABOTAGE\n                render_state = 2\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a page whose content only a browser shows is reported as read, "
+               "and its figures are silently missing",
+    },
+    {
+        "name": "a_linked_pdf_is_never_opened",
+        "file": "app/pipeline/documents.py",
+        "find": "    for u in pdf_links(doc, page_url):\n",
+        "replace": "    for u in []:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "the licence register PDF — where the binding figure lives — is never read",
+    },
+    {
+        "name": "a_data_feed_is_never_counted",
+        "file": "app/pipeline/apis.py",
+        "find": "        if got.get(\"ok\") and apply:\n",
+        "replace": "        if False:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "the API that lists every supported country is registered and never "
+               "becomes a figure anyone can compare",
+    },
+    {
+        "name": "trust_ignores_pages_it_could_not_draw",
+        "file": "app/pipeline/checks.py",
+        "find": "        if unrendered:\n",
+        "replace": "        if False:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "trust reads green while pages that need a browser were never read",
+    },
+    {
         "name": "a_change_task_closes_before_the_page_agrees",
         "file": "app/change.py",
         "find": "                    ok = not still\n",

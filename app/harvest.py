@@ -33,7 +33,8 @@ import re
 from . import compliance, db, extract, kb, provenance as prov, statements, tenants
 from .pipeline import (account as pipeline_account, extractors as pipeline_extractors,
                        fetch as pipeline_fetch, parse as pipeline_parse,
-                       policy as pipeline_policy)
+                       policy as pipeline_policy, render as pipeline_render,
+                       documents as pipeline_documents, apis as pipeline_apis)
 from .urls import url as _url
 
 _MIN, _MAX = 25, 240
@@ -582,6 +583,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     by_reader: dict[str, int] = {}        # statements per extractor
     unaccounted_total = 0                 # figures no reader explained
     tiers_seen: dict[str, int] = {}       # pages read, by risk tier
+    pages_rendered: list[str] = []        # drawn in a browser first
+    pages_needing_render: list[str] = []  # needed a browser the deploy lacks
+    documents_read: list[dict] = []       # linked PDFs, one row each
+    pdf_seen: set[str] = set()
+    pdf_budget = {"left": pipeline_documents.MAX_PER_RUN}
     cut_by_tier: dict[str, int] = {}      # pages partly read, by risk tier
     terms = statements.terms(tenant)      # the account's taught vocabulary
     # Every page this run tried, read or not. A page that could not be read
@@ -645,6 +651,21 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # or, for a page drawn by JavaScript whose HTML body is nearly empty,
         # the strings in its embedded page data.
         doc = pipeline_parse.parse(html)
+        # RENDER stage (pipeline.render): a page drawn by script, or built of
+        # sliders and tabs with little text, is drawn in a browser when the
+        # deploy has one. When it does not, the page is RECORDED as needing it
+        # (rendered = 2) — reported, and counted against trust.
+        render_state = 0
+        if pipeline_render.needed(doc):
+            drawn = pipeline_render.render(url) if pipeline_render.available() else ""
+            if drawn:
+                doc2 = pipeline_parse.parse(drawn)
+                if doc2["numbers_total"] >= doc["numbers_total"] and doc2["blocks"]:
+                    html, doc, render_state = drawn, doc2, 1
+                    pages_rendered.append(url)
+            if render_state != 1:
+                render_state = 2
+                pages_needing_render.append(url)
         blocks = doc["blocks"]
         text = " ".join(blocks)
         if doc["from_page_data"]:
@@ -661,7 +682,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         if apply:
             pipeline_fetch.store(tenant, url, html, page_hash,
                                  p.get("source_label", ""), document=doc,
-                                 risk_tier=page_tier)
+                                 risk_tier=page_tier, rendered=render_state)
+        # DOCUMENTS (pipeline.documents): PDFs a legal or coverage page links
+        # to — a licence register, a terms PDF — read like pages.
+        documents_read += pipeline_documents.read_linked(
+            tenant, url, doc, page_tier, apply, pdf_seen, pdf_budget, terms)
         # THE FACT SWEEP — before the unchanged and dead checks, on every page
         # fetched, because it is code (no model call) and a figure stated in
         # a footer or a stat tile is exactly what the claim reader misses.
@@ -933,6 +958,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "pages_by_tier": tiers_seen,
         "partly_read_by_tier": cut_by_tier,
         "tier_policy": pipeline_policy.table(),
+        # M9 — what a plain fetch cannot see. Pages that needed a browser and
+        # did not get one are listed: their content is UNREAD, not empty.
+        "pages_rendered": len(pages_rendered),
+        "pages_needing_render": pages_needing_render[:20],
+        "pages_needing_render_count": len(pages_needing_render),
+        "documents_read": documents_read[:30],
+        "documents_read_count": sum(1 for d in documents_read if d.get("status") == "read"),
+        "feeds": pipeline_apis.read_all(tenant, apply=apply),
         # KNOWN ANSWERS (pipeline.checks): facts QA wrote down in advance,
         # tested against what this read recorded. A failure is P1.
         "known_answers": (_known_after(tenant) if apply else None),

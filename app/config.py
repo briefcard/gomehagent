@@ -384,3 +384,8 @@ TELEGRAM_ALLOWED_CHAT_IDS = _chat_ids(
     os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", ""), TELEGRAM_CHAT_ID)
 
 TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+# Draw JavaScript pages in a headless browser before reading them (BUILD-MAP
+# M9). Off unless the deploy has a browser (Playwright + Chromium); while off,
+# every page that needed it is reported and counts against trust.
+RENDER_JS = os.environ.get("RENDER_JS", "").strip().lower() in ("1", "true", "yes")

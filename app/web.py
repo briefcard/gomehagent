@@ -9289,6 +9289,23 @@ def qa_log_csv(request: Request, key: str = Depends(admin_key), tenant: str = ""
                     headers={"Content-Disposition": f'attachment; filename="qa-log-{tenant}.csv"'})
 
 
+@app.post("/admin/api_source", response_class=HTMLResponse)
+async def api_source(request: Request, key: str = Depends(admin_key)):
+    """Register a public data feed as a source of figures (pipeline.apis)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from .pipeline import apis
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    out = apis.add(tenant, str(form.get("url", "")), str(form.get("subject", "")),
+                   str(form.get("list_path", "")).strip(), filter_key=str(form.get("filter_key", "")).strip(),
+                   by=_qa_by(form, request))
+    if out.get("error"):
+        return _back_to_content(tenant, sub="truth", err=out["error"])
+    return _back_to_content(tenant, sub="truth",
+                            msg="Feed added — it is counted on the next harvest")
+
+
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
 async def claims_decide(request: Request, key: str = Depends(admin_key)):
     """Decide many proposals in one submit.

@@ -705,6 +705,105 @@ def check_m8_changes_reach_every_place():
        and "change requested" not in "".join(x["what"] for x in change.audit_log("eien")))
 
 
+def _make_pdf(lines):
+    """A real, minimal PDF — so pypdf is exercised, not mocked."""
+    content = "BT /F1 12 Tf 72 720 Td 14 TL " + " ".join(f"({x}) Tj T*" for x in lines) + " ET"
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+            "/Resources << /Font << /F1 5 0 R >> >> >>",
+            f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    out, offs = b"%PDF-1.4\n", []
+    for i, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += f"{i} 0 obj\n{o}\nendobj\n".encode()
+    x = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    for o in offs:
+        out += f"{o:010d} 00000 n \n".encode()
+    return out + f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF".encode()
+
+
+class _BResp:
+    def __init__(self, content, code=200, ctype="application/pdf"):
+        self.content, self.status_code, self.headers = content, code, {"content-type": ctype}
+        self.text = content.decode("latin-1")
+
+
+def check_m9_what_a_fetch_cannot_see():
+    """M9 — JavaScript pages, linked PDFs and public data feeds."""
+    import httpx
+    from fastapi.testclient import TestClient
+    from app import statements as st, web as _web
+    from app.pipeline import apis, checks, fetch, render
+    picker = f"{BASE}/pages/where-we-operate"
+    licence_page = f"{BASE}/pages/licensing"
+    pdf = f"{BASE}/docs/licence-register.pdf"
+    feed = "https://api.example.com/api/v2/countries"
+    pages = {
+        picker: ("<html><body><main><h1>Countries</h1><div class='tabs__panel'>"
+                 "<button aria-expanded='false'>Europe</button></div></main></body></html>"),
+        licence_page: ("<html><body><main><h1>Licensing</h1><p>Our licences are listed in the "
+                       "<a href='/docs/licence-register.pdf'>licence register (PDF)</a>.</p>"
+                       + FILLER + "</main></body></html>"),
+    }
+    pdf_bytes = _make_pdf(["Licence register", "We hold 21 licences across the United States."])
+    feed_json = '{"response": [' + ",".join(
+        f'{{"name": "C{i}", "isAllowed": {"true" if i % 10 else "false"}}}' for i in range(170)) + "]}"
+    sitemap = ("<?xml version=\"1.0\"?><urlset>"
+               + "".join(f"<url><loc>{u}</loc></url>" for u in pages) + "</urlset>")
+
+    def get(url, **kw):
+        if url.endswith("/sitemap.xml"):
+            return _Resp(sitemap)
+        if url == pdf:
+            return _BResp(pdf_bytes)
+        if url == feed:
+            return _Resp(feed_json)
+        return _Resp(pages[url]) if url in pages else _Resp("", 404)
+    httpx.get = get
+    c = TestClient(_web.app)
+    r = c.post("/admin/api_source?key=s3cret", data={
+        "tenant": "baci", "url": feed, "subject": "coverage.countries",
+        "list_path": "response", "filter_key": "isAllowed", "by": "qa-anna"}, follow_redirects=False)
+    ck("CONSOLE adding a data feed registers it", r.status_code in (200, 303)
+       and any(f.url == feed for f in apis.feeds("baci")))
+    harvest.forget_pages("baci")
+    res = harvest.harvest("baci", limit=10, apply=True, recrawl=True)
+    # 1. A page built of tabs with no text, and no browser on this deploy.
+    ck("M9 a page that needs a browser, without one, is REPORTED as unread — not empty",
+       picker in res.get("pages_needing_render", [])
+       and fetch.latest("baci", picker).rendered == 2, str(res.get("pages_needing_render")))
+    tr = checks.trust("baci")
+    ck("M9 and it counts against trust, with the reason",
+       any("need a browser" in x for x in tr["reasons"]) or tr["grade"] == "red", str(tr["reasons"]))
+    # 2. With a browser: what the visitor sees is read.
+    real_av, real_render = render.available, render.render
+    render.available = lambda: True
+    render.render = lambda url: ("<html><body><main><h1>Countries</h1>"
+                                 "<p>We operate in 168 countries across six regions.</p>"
+                                 + FILLER + "</main></body></html>") if url == picker else ""
+    try:
+        res = harvest.harvest("baci", limit=10, apply=True, recrawl=True)
+    finally:
+        render.available, render.render = real_av, real_render
+    vals = [r.value for r in st.rows_for_url("baci", picker) if r.subject == "coverage.countries"]
+    ck("M9 with a browser, the drawn page is read and its figure recorded",
+       "168" in vals and fetch.latest("baci", picker).rendered == 1 and res.get("pages_rendered") == 1,
+       str(vals))
+    # 3. The PDF a legal page links to.
+    lic = [r for r in st.rows_for_url("baci", pdf) if r.subject == "legal.licences"]
+    ck("M9 a PDF linked from a licensing page is read, and its figure is BINDING",
+       lic and lic[0].value == "21" and lic[0].authority == "binding" and lic[0].field == "document",
+       str([(r.value, r.authority, r.field) for r in lic]) + str(res.get("documents_read")))
+    ck("M9 the report lists the documents read", res.get("documents_read_count") == 1)
+    # 4. The feed: counted, filtered, recorded under its URL.
+    fv = [r for r in st.rows_for_url("baci", feed) if r.subject == "coverage.countries"]
+    ck("M9 a data feed is counted (only allowed entries) and recorded as a statement",
+       fv and fv[0].value == "153" and fv[0].field == "api", str([(r.value, r.field) for r in fv]))
+    ck("M9 feeds are this account's only", not apis.feeds("eien"))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -719,6 +818,7 @@ def main() -> int:
     check_m6_truth_findings_and_questions()
     check_m7_the_fact_gate()
     check_m8_changes_reach_every_place()
+    check_m9_what_a_fetch_cannot_see()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

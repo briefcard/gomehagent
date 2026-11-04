@@ -40,9 +40,24 @@ def download(url: str) -> tuple[int, str, str]:
         return 0, "", exc.__class__.__name__
 
 
+def download_bytes(url: str, max_bytes: int = 15_000_000) -> tuple[int, bytes, str, str]:
+    """(status, bytes, content-type, error) — for documents (PDFs)."""
+    import httpx
+    from .. import compliance
+    try:
+        r = httpx.get(url, timeout=40, follow_redirects=True, headers=compliance.HEADERS)
+        body = getattr(r, "content", None)
+        if body is None:
+            body = (getattr(r, "text", "") or "").encode("latin-1", "replace")
+        ctype = (getattr(r, "headers", {}) or {}).get("content-type", "")
+        return r.status_code, body[:max_bytes], ctype, ""
+    except Exception as exc:  # noqa: BLE001
+        return 0, b"", "", exc.__class__.__name__
+
+
 def store(tenant: str, url: str, html: str, content_hash: str,
           source_label: str = "", http_status: int = 200,
-          rendered: bool = False, document: dict | None = None,
+          rendered: int = 0, document: dict | None = None,
           risk_tier: str = "") -> bool:
     """Keep this page as fetched. Returns True when its content changed."""
     raw = (html or "").encode("utf-8", "replace")
@@ -64,7 +79,8 @@ def store(tenant: str, url: str, html: str, content_hash: str,
         row.bytes_ = len(raw)
         row.content_hash = content_hash
         row.http_status = http_status
-        row.rendered = 1 if rendered else 0
+        # 0 = not needed, 1 = drawn in a browser, 2 = needed one, did not get it
+        row.rendered = int(rendered or 0)
         row.source_label = source_label or row.source_label or ""
         row.fetched_at = _now()
         if risk_tier:

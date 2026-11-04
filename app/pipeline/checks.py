@@ -220,6 +220,11 @@ def trust(tenant: str) -> dict:
         if figs:
             grade = "amber"
             reasons.append(f"{len(figs)} figure(s) on the site not yet understood")
+        unrendered = [r.url for r in snaps if (r.rendered or 0) == 2]
+        if unrendered:
+            grade = "amber"
+            reasons.append(f"{len(unrendered)} page(s) need a browser to be read in full "
+                           f"(RENDER_JS is off) — what they show is unread")
     if not reasons:
         reasons.append("known answers pass, high-risk pages read in full, audits complete, "
                        "every figure accounted for")
@@ -227,6 +232,7 @@ def trust(tenant: str) -> dict:
             "pages_stored": len(snaps), "pages_by_tier": by_tier,
             "high_risk_pages": len(high), "high_risk_partly_read": high_partly[:20],
             "known_answers": ka, "audit": rec, "unaccounted_open": len(figs),
+            "pages_needing_render": [r.url for r in snaps if (r.rendered or 0) == 2][:20],
             "pages_remembered": unread}
 
 

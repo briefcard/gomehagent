@@ -6530,6 +6530,11 @@ def _truth_card(tenant: str) -> str:
     srcs = "".join(f'<li>{_page_link(x.ref)} <span class="mut">governs '
                    f'{_esc(", ".join(FACT_LABELS.get(g, g) for g in (x.governs or [])) or "everything it states")}'
                    f'</span></li>' for x in truth.sources(tenant))
+    from .pipeline import apis as _apis
+    feeds_html = "".join(f'<li>{_page_link(x.url)} <span class="mut">→ '
+                         f'{_esc(FACT_LABELS.get(x.subject, x.subject))} · list {_esc(x.list_path or "(root)")}'
+                         f'{" · only " + _esc(x.filter_key) if x.filter_key else ""}</span></li>'
+                         for x in _apis.feeds(tenant))
     held_html = "".join(f'<li>{_esc(f["question"])} <span class="mut">— {_esc(f["decided_by"])}: '
                         f'“{_esc(f["reason"][:120])}”</span></li>' for f in held)
     return f"""
@@ -6547,6 +6552,17 @@ def _truth_card(tenant: str) -> str:
   <h3>Sources of truth</h3>
   <ul>{srcs or '<li class="mut">None declared. Legal pages count as binding without being declared.</li>'}</ul>
   {f'<h3>Waiting on legal review</h3><ul>{held_html}</ul>' if held_html else ''}
+  <h3>Data feeds</h3>
+  <ul>{feeds_html or '<li class="mut">None. A public API that lists what the brand supports (countries, assets, currencies) can be counted on every read and made the source of truth.</li>'}</ul>
+  <form class="f" method="post" action="/admin/api_source">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input name="url" placeholder="https://api.example.com/countries" size="34">
+    <select name="subject">{"".join(f'<option value="{_esc(k)}">{_esc(v)}</option>' for k, v in FACT_LABELS.items())}</select>
+    <input name="list_path" placeholder="path to the list, e.g. response" size="16">
+    <input name="filter_key" placeholder="count only if (e.g. isAllowed)" size="16">
+    {_reviewer_field()}
+    <button class="sec">Add data feed</button>
+  </form>
 </div>"""
 
 
@@ -9758,6 +9774,9 @@ _KB_DESCRIBED = [
      "Computed after every read and decision: unresolved subjects, pages contradicting "
      "the approved answer, legal pages disagreeing with it, known answers missed. "
      "One that no longer holds closes itself with its reason."),
+    ("KbApiSource", "kb_api_sources", "Public data feeds counted as figures",
+     "A feed (e.g. a supported-countries API) registered by a reviewer; its list is "
+     "counted on every harvest and can be made the source of truth."),
 ]
 # (`change_requests` / `change_tasks` are OPERATIONS — a record of work done
 # to make the site agree with a changed answer — and appear on Review › Changes.)

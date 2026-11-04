@@ -20,7 +20,7 @@ from . import fetch as _fetch
 
 #: Bump when the Document changes shape or content; stored documents at an
 #: older version are re-parsed from the stored bytes, never refetched.
-VERSION = 2
+VERSION = 3
 #: Body text below this many characters means the page is drawn by JavaScript
 #: and its copy is in the embedded data (same floor as harvest.JS_THIN_CHARS).
 JS_THIN_CHARS = 200
@@ -53,6 +53,8 @@ class _Walker(HTMLParser):
         self.hints: set[str] = set()
         self.hidden = 0
         self.depth_hidden: list[str] = []
+        self.links: list[dict] = []
+        self.link: dict | None = None
 
     # -- helpers
     def _section(self) -> str:
@@ -72,6 +74,8 @@ class _Walker(HTMLParser):
             self.hidden += 1
         if tag in ("details", "template"):
             self.hints.add(tag)
+        if tag == "a" and a.get("href"):
+            self.link = {"href": a["href"].strip(), "text": []}
         if tag in _HEAD:
             self.in_head, self.head_buf = int(tag[1]), []
         elif tag == "table":
@@ -94,6 +98,10 @@ class _Walker(HTMLParser):
         if tag in _SKIP:
             self.skip = max(0, self.skip - 1)
             return
+        if tag == "a" and self.link is not None:
+            self.links.append({"href": self.link["href"],
+                               "text": " ".join(" ".join(self.link["text"]).split())[:160]})
+            self.link = None
         if tag in _HEAD and self.in_head is not None:
             text = " ".join(" ".join(self.head_buf).split())
             lvl = self.in_head
@@ -136,6 +144,8 @@ class _Walker(HTMLParser):
     def handle_data(self, data):
         if self.skip:
             return
+        if self.link is not None:
+            self.link["text"].append(data)
         if self.in_head is not None:
             self.head_buf.append(data)
         if self.cell is not None:
@@ -181,6 +191,7 @@ def parse(html: str) -> dict:
         "tables": w.tables,
         "lists": w.lists,
         "jsonld": jsonld,
+        "links": w.links[:500],
         "interactive": sorted(w.hints),
         "hidden_elements": w.hidden,
         "size_blocks": len(read_blocks),
@@ -204,3 +215,17 @@ def document(tenant: str, url: str) -> dict:
             r.document, r.parser_version = doc, VERSION
             s.commit()
     return doc
+
+
+def parse_text(text: str) -> dict:
+    """A Document for plain text — a PDF's extracted text, an API's strings.
+    One block per line; no furniture, tables or links (the source has none
+    we can see)."""
+    lines = [" ".join(ln.split()) for ln in (text or "").splitlines()]
+    lines = statements._join_fragments([ln for ln in lines if ln])
+    return {"version": VERSION, "text_hash": _fetch.text_hash(" ".join(lines)),
+            "blocks": lines, "body_blocks": lines, "lines": lines, "page_data": [],
+            "from_page_data": False, "headings": [], "tables": [], "lists": [],
+            "jsonld": [], "links": [], "interactive": [], "hidden_elements": 0,
+            "size_blocks": len(lines),
+            "numbers_total": sum(len(_NUM_TOKEN.findall(x)) for x in lines)}

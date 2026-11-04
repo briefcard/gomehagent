@@ -7,9 +7,11 @@ judged against them. Companion design: `INITIATIVE-claims-reconciliation.md`
 apply to every line here (tenant scoping, `scripts/ship.sh`, a sabotage guard
 per fix, `REGISTER.md` regenerated).
 
-Status at writing (2026-11-04): Milestone M0 (below) is built on branch
-`claude/sleepy-mendel-lpoz4j` and awaiting the owner's "deploy". Everything
-from M1 on is not built.
+Status (2026-11-04, end of day): **M0–M9 are all built** on branch
+`claude/sleepy-mendel-lpoz4j` — one commit per milestone, each with its
+offline checks in `scripts/test_pipeline.py` and its sabotage guards — and
+NONE is deployed: production is still `19a68f7` and waits on the owner's
+"deploy". §13 lists every place the build departs from this map, and why.
 
 ---
 
@@ -383,3 +385,47 @@ acceptance is shown on that tenant.
 - **Source of truth** — a page/document/system/API QA declared canonical for
   some subjects × scopes; legal pages are binding by default.
 - **Change** — a new truth value and the tasks to make every location agree.
+
+## 13. As built — where it departs from this map (read before extending)
+
+Each item is a deliberate decision or a known gap, not an accident. Commits:
+M1 `1e8ced3` · M2 `9cce423` · M3 `6249013` · M4 `6845318` · M5 `6563882` ·
+M6 `1f1f54d` · M7 `c897356` · M8 `eb525fc` · M9 (this commit).
+
+| Area | Map said | Built | Why / what is left |
+|---|---|---|---|
+| Snapshots (M1) | one row per content hash | ONE row per URL (latest), `prev_hash` + `changed_at` kept | change verification needs only the latest copy; history per version is not stored |
+| Stages as jobs (M4) | a job kind per stage, harvest a coordinator | harvest calls the stages in-process; `reprocess`, `checks`, `findings` are job kinds | a page failure is already contained per page; per-page jobs can come when a site outgrows one run |
+| `extract_runs` (M3) | table with tokens per run | `extract_cache` (paid reading per exact chunk) + report counts | per-run token cost is in `usage`, not per extractor |
+| `kb_facts` register (M6) | a subject table with criticality and owner | `truth.CRITICALITY` by subject area, `truth.QUESTIONS` per subject | a per-tenant override of severity needs this table |
+| Findings (M6) | migrate `KbConflict` | `findings` is new; field-level `KbConflict` stays on Review › Conflicts | they judge different things (an approved field vs a later import); merge when one queue is wanted |
+| QA identity (M5) | per-user logins + `qa` role | the reviewer NAMED on each decision is recorded (`by`); `users.role` documents `qa` | owner decision: "QA = owner for now". Logins change only who may sign in, not the data |
+| Auto-edit (M8) | Shopify + WordPress | Shopify product / page / collection bodies, exact-once replacement on approval | WordPress pages, SEO meta fields and ad creatives are `manual` tasks |
+| Change locations (M8) | pages, outputs, ESP sends, ads, GBP, settings | stored pages, pending approvals, unreadable pages | live ESP schedules, ad creatives and GBP posts are not yet scanned |
+| Render (M9) | browser for interactive pages | `pipeline.render` behind `RENDER_JS`; off ⇒ page marked `rendered=2`, reported, trust amber | owner decision §11.3: Chromium on Render, or a render service |
+| Documents (M9) | PDF reading for binding docs | PDFs linked from legal/coverage pages, 20 per run, binding when legal | scanned PDFs need OCR (reported as "no text") |
+| Surfaces (§7) | digest, binding-documents library, screenshots | not built | Review tabs: Site facts, Checks & trust, Questions for QA, Changes; QA log CSV |
+
+### Where each piece lives
+
+`app/pipeline/` — `fetch`, `parse`, `extractors/{numbers,enumerations,structured}`,
+`account`, `policy`, `checks`, `reprocess`, `render`, `documents`, `apis` ·
+`app/truth.py` (answers, sources, scopes, `resolve`, `agrees`, `check_text`) ·
+`app/findings.py` (`compute`, `rebuild`, `decide`) · `app/change.py`
+(`create`, `locations`, `propose`, `execute_fix`, `verify`, `audit_log`) ·
+`shopify_seo.replace_text` · the gate in `validator.check` (and so in triage
+and `seo_guard`) · MCP `get_statements`, `get_trust`, `get_truth`.
+
+### After deploy — the first run, in order
+
+1. Deploy (gates, `jobs_running 0`, `SHIP_GATED=1 git push origin HEAD:main`).
+2. `/admin/harvest?tenant=transak&apply=1&limit=100&recrawl=1`, then without
+   `recrawl` until `pages_remaining` is 0. Read the run card: tiers, partly
+   read, figures not understood, pages needing a browser, documents read.
+3. Review › Checks & trust: add the known answers you are sure of (e.g. the
+   compliance page's licence count), draw 3 audits.
+4. Review › Site facts: label or dismiss the figures not understood, then
+   "Re-read stored pages".
+5. Review › Questions for QA: answer each, P1 first, with a reason.
+6. Review › Changes: propose store fixes (each is an approval), fix the rest
+   by hand; a task closes when the next read shows the page agrees.
