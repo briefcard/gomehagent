@@ -301,8 +301,14 @@ def _apply_guards(result: dict, tenant: str, sender_trusted: bool,
                                 f"yourself. " + (result.get("reason") or ""))
             return result
 
+        # A figure that disagrees with the approved truth, a legal page, or a
+        # subject the site still disputes is as FALSE as a banned phrase on
+        # the path that answers customers (BUILD-MAP M7) — and a fact gate
+        # that could not run is not a pass.
         hard = [f for f in report["failures"]
-                if f["rule"] in ("banned_claim", "entity_unavailable")]
+                if f["rule"] in ("banned_claim", "entity_unavailable",
+                                 "contradicts_fact", "contradicts_legal",
+                                 "disputed_fact", "facts_unchecked")]
         # Logged whether it hit or not. A check that only records its failures
         # cannot tell you it is running, and this is the path that actually
         # answers customers — the one where "is the layer switched on" most
@@ -328,7 +334,11 @@ def _apply_guards(result: dict, tenant: str, sender_trusted: bool,
             # banned-claim guard since it was written. A rule that fires should
             # say which rule it was, at the front, where a grep finds it.
             marker = {"banned_claim": "BANNED CLAIM",
-                      "entity_unavailable": "UNAVAILABLE"}
+                      "entity_unavailable": "UNAVAILABLE",
+                      "contradicts_fact": "WRONG FIGURE",
+                      "contradicts_legal": "CONTRADICTS LEGAL",
+                      "disputed_fact": "DISPUTED FIGURE",
+                      "facts_unchecked": "UNCHECKED FIGURES"}
             head = ", ".join(dict.fromkeys(
                 marker.get(f["rule"], f["rule"].upper()) for f in hard))
             result["reason"] = (f"{head}: "

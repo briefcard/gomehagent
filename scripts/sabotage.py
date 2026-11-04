@@ -38,6 +38,42 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_wrong_figure_ships",
+        "file": "app/validator.py",
+        "find": "        for f in _truth.check_text(tenant, body, entity_key=entity_key):\n",
+        "replace": "        for f in []:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a draft, reply or site edit stating 40 countries against an "
+               "approved 162 goes out",
+    },
+    {
+        "name": "a_disputed_figure_ships",
+        "file": "app/truth.py",
+        "find": "        if f[\"subject\"] in disputed:\n",
+        "replace": "        if False:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a figure the site states three ways is published before QA "
+               "has said which is right",
+    },
+    {
+        "name": "a_reply_with_a_wrong_figure_auto_sends",
+        "file": "app/triage.py",
+        "find": "                                 \"contradicts_fact\", \"contradicts_legal\",\n",
+        "replace": "                                 # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "the inbox answers a customer with a coverage figure QA has "
+               "ruled wrong",
+    },
+    {
+        "name": "the_brief_omits_the_approved_figures",
+        "file": "app/mcp_server.py",
+        "find": "    answers = [a for a in _truth.table(tenant) if not a[\"unknown\"]]\n",
+        "replace": "    answers = []  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a writer drafts with no idea which figure was approved, and "
+               "learns only when the gate blocks the draft",
+    },
+    {
         "name": "an_overclaim_agrees_with_the_truth",
         "file": "app/truth.py",
         "find": "        return number <= t_number\n",
@@ -2706,8 +2742,9 @@ SABOTAGES = [
         "name": "banned_claims_mail",
         "file": "app/triage.py",
         "find": ('        hard = [f for f in report["failures"]\n'
-                 '                if f["rule"] in ("banned_claim", "entity_unavailable")]'),
-        "replace": "        hard = []  # SABOTAGE",
+                 '                if f["rule"] in ("banned_claim", "entity_unavailable",\n'),
+        "replace": ('        hard = [f for f in report["failures"]\n'
+                    '                if False and f["rule"] in ("banned_claim", "entity_unavailable",  # SABOTAGE\n'),
         "suites": ["test_grounding.py", "test_tenant_isolation.py"],
         "why": "a phrase the client has banned goes out to a customer",
     },

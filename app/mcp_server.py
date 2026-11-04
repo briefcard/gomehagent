@@ -383,6 +383,25 @@ def get_package(tenant: str, system: str = "campaign_email",
                 "point out."]
         out += [f"- {c.claim} [{c.id}] — {c.source}" for c in legal]
         out += [""]
+    # THE APPROVED ANSWERS (BUILD-MAP M7): figures QA decided are true, per
+    # scope. A draft stating any of these subjects must use these values —
+    # `check` blocks one that does not — and must leave out a subject that is
+    # still disputed.
+    from . import findings as _fd, truth as _truth
+    answers = [a for a in _truth.table(tenant) if not a["unknown"]]
+    if answers:
+        out += ["## Approved figures — use exactly these; `check` blocks any other value"]
+        out += [f"- {a['question'].replace('do we say we', 'do we')} {a['value']} "
+                f"({a['scope']}{'; follows ' + a['source_url'] if a['mode'] == 'follows_source' else ''})"
+                for a in answers]
+        out += [""]
+    disputed = sorted({f["subject"] for f in _fd.listing(tenant)
+                       if f["kind"] in ("unresolved", "binding_conflict")})
+    if disputed:
+        out += ["## Disputed figures — do NOT state these; the site disagrees with "
+                "itself and no answer is approved yet"]
+        out += [f"- {_truth.question(sbj)}" for sbj in disputed]
+        out += [""]
 
     out += lines
 

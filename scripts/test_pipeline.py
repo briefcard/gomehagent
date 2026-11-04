@@ -540,6 +540,42 @@ def check_m6_truth_findings_and_questions():
        not truth.values("eien") and not findings.listing("eien", "all") and not truth.sources("eien"))
 
 
+def check_m7_the_fact_gate():
+    """M7 — every draft, reply and site edit is held to the approved truth."""
+    from app import mcp_server, seo_guard, triage, validator
+
+    def rules(body, entity=""):
+        return [f["rule"] for f in validator.check("baci", body, entity_key=entity,
+                                                    require_citation=False)["failures"]]
+    ck("M7 a draft saying 'ships to 40 countries' against the brand answer 162+ is blocked",
+       "contradicts_fact" in rules("Our tableware now ships to 40 countries."))
+    ck("M7 the same figure on the Aqua product (its own answer is 40) passes",
+       "contradicts_fact" not in rules("Aqua ships to 40 countries.", entity="aqua"))
+    ck("M7 'over 100 countries' is true of 162 and passes",
+       not {"contradicts_fact", "disputed_fact", "contradicts_legal"} & set(rules("Loved in over 100 countries.")))
+    ck("M7 an overclaim ('200+ countries') is blocked", "contradicts_fact" in rules("In 200+ countries!"))
+    ck("M7 a figure a legal page states otherwise, with no answer approved, is blocked",
+       "contradicts_legal" in rules("We ship to 5 regions."), str(rules("We ship to 5 regions.")))
+    ck("M7 a figure the site disputes, with no answer approved, waits for QA",
+       "disputed_fact" in rules("We ship to 3 regions."), str(rules("We ship to 3 regions.")))
+    got = mcp_server.check("baci", body="Now shipping to 40 countries.", kind="email")
+    ck("M7 the MCP check a Claude session runs carries the block",
+       not got.get("ok") and any(b.get("rule") == "contradicts_fact" for b in got.get("blocks", [])),
+       str(got.get("blocks"))[:300])
+    profile = {"key": "baci", "domain": "bacimilanousa.com"}
+    why = seo_guard.check(profile, {"body_html": "<p>Available in 75 countries.</p>"}, what="test")
+    ck("M7 an SEO edit to the live site stating a wrong figure is refused", "contradicts_fact" in why, why[:200])
+    res = triage._apply_guards({"action": "auto_reply", "category": "order_routine",
+                                "reply_subject": "Re: shipping",
+                                "reply_body": "Yes — we deliver to 75 countries."},
+                               "baci", sender_trusted=True)
+    ck("M7 an email reply stating a wrong figure cannot auto-send",
+       res.get("action") != "auto_reply", str({k: res.get(k) for k in ("action", "reason")}))
+    pkg = mcp_server.get_package("baci", system="campaign_email")
+    ck("M7 the brief a writer works from carries the approved figures and the disputed ones",
+       "Approved figures" in pkg and "162+" in pkg and "Disputed figures" in pkg)
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -552,6 +588,7 @@ def main() -> int:
     check_console_controls_do_what_they_say()
     check_m6_the_agreement_rule()
     check_m6_truth_findings_and_questions()
+    check_m7_the_fact_gate()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

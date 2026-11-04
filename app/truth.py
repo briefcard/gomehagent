@@ -252,3 +252,63 @@ def table(tenant: str) -> list[dict]:
                     "decided_by": v.decided_by,
                     "decided_at": v.decided_at.isoformat() if v.decided_at else ""})
     return out
+
+
+# --- the gate (BUILD-MAP M7) ---------------------------------------------
+
+def check_text(tenant: str, text: str, entity_key: str = "") -> list[dict]:
+    """Every figure a DRAFT states, judged against the truth. Fails closed.
+
+    Called by `validator.check`, so it guards every path that can send or
+    publish: the MCP `check`, triage replies, SEO edits. Three failures:
+
+    * contradicts_fact — the draft states a figure that disagrees with the
+      approved answer for its scope ("ships to 40 countries" against 162+).
+    * contradicts_legal — no answer approved, but a LEGAL page states the
+      subject one way and the draft another.
+    * disputed_fact — no answer approved and the site states the subject
+      several ways: the draft cannot be right on purpose, so it waits for QA.
+
+    A figure on a subject nothing on file knows about passes: there is nothing
+    to contradict (the citation rule is what grounds it)."""
+    found = []
+    seen = set()
+    for ln in statements._lines(text or "") or [text or ""]:
+        found += statements.find(ln, statements.terms(tenant))
+    if not found:
+        return []
+    vals = values(tenant)
+    with db.SessionLocal() as s:
+        disputed = {r.subject for r in s.query(db.Finding)
+                    .filter(db.Finding.tenant == tenant, db.Finding.status.in_(("open", "escalated")),
+                            db.Finding.kind.in_(("unresolved", "binding_conflict")))}
+    out = []
+    for f in found:
+        key = (f["subject"], f["value"])
+        if key in seen:
+            continue
+        seen.add(key)
+        t = resolve(tenant, f["subject"], {"entity": entity_key}, _cache=vals)
+        if t and not t.get("unknown"):
+            if not agrees(f["number"], f["qualifier"], t["number"], t["qualifier"]):
+                out.append({"rule": "contradicts_fact",
+                            "detail": f"the draft says {f['match']!r}; the approved answer "
+                                      f"({t['scope']}) is {t['value']}",
+                            "fix": f"use {t['value']}, or have QA change the answer "
+                                   f"(Review › Questions for QA)"})
+            continue
+        binding = [r for r in statements.rows(tenant, f["subject"]) if r.authority == "binding"]
+        if binding and not any(agrees(f["number"], f["qualifier"], r.number, r.qualifier)
+                               for r in binding):
+            out.append({"rule": "contradicts_legal",
+                        "detail": f"the draft says {f['match']!r}; a legal page says "
+                                  f"{binding[0].value} ({binding[0].url})",
+                        "fix": "agree with the legal page, or leave the figure out"})
+            continue
+        if f["subject"] in disputed:
+            out.append({"rule": "disputed_fact",
+                        "detail": f"the draft says {f['match']!r}, and the site states "
+                                  f"{question(f['subject']).lower().rstrip('?')} several ways "
+                                  f"with no answer approved",
+                        "fix": "leave the figure out, or have QA approve the answer first"})
+    return out

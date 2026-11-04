@@ -125,6 +125,20 @@ def check(tenant: str, body: str, *, claim_ids: list[str] | None = None,
         fail("banned_claim", f"the draft says {hit['phrase']!r}",
              "reword it, or retire the rule if it is no longer true")
 
+    # --- every figure agrees with the approved truth ----------------------
+    # (BUILD-MAP M7) A figure on a subject QA has answered must match the
+    # answer for its scope; one on a subject the site disputes, or that a
+    # legal page states otherwise, blocks. Fails closed: a gate that cannot
+    # run is a failure, never a pass.
+    checked.append("facts")
+    try:
+        from . import truth as _truth
+        for f in _truth.check_text(tenant, body, entity_key=entity_key):
+            fail(f["rule"], f["detail"], f["fix"])
+    except Exception as exc:  # noqa: BLE001
+        fail("facts_unchecked", f"the fact gate could not run ({exc.__class__.__name__})",
+             "fix the gate before this ships — it is not clean, only unchecked")
+
     # --- every fact is attributable ---------------------------------------
     checked.append("citation")
     ids = [c for c in (claim_ids or []) if c]
