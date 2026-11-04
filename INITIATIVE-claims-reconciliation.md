@@ -17,6 +17,13 @@ STATUS: design only. Nothing below is built. §1 is the problem, §2 the
 evidence (each item says how it was verified), §3 what already exists, §4 the
 architecture, §5 the phases, §6 open decisions.
 
+**Engineer's build map: `BUILD-MAP-truth-pipeline.md`** — the process
+invariants, the modular stage architecture (discover → fetch → parse →
+extract plug-ins → account → compare → checks → change), every new table with
+its tenant-first unique, per-stage specs and guards, and milestones M0–M9 with
+acceptance tests on the real Baci and Transak cases. M0 (statements sweep,
+no silent cuts, Site facts) is built on the branch.
+
 ---
 
 ## 1. The problem, precisely
