@@ -154,6 +154,31 @@ def check_m2_scan_reads_the_store():
        any(v["url"] == url for v in res.get("violations", [])), str(res.get("violations"))[:200])
 
 
+def check_m3_one_sentence_punctuated_twice_is_one_figure():
+    """A page that states a figure twice, punctuated differently, must not end
+    the harvest. transak.com/compliance carries "Chicago IL, 60661" and
+    "Chicago, IL 60661": two raw lines, one fingerprint, so both reached one
+    INSERT and the unique constraint stopped the run at the first page read
+    (2026-11-04). No fixture page had the shape."""
+    from app.pipeline import account
+    doc = {"lines": ["Chicago IL, 60661", "Chicago, IL 60661"], "page_data": []}
+    figs, _ = account.unaccounted(doc, [])
+    ck("M3 one sentence punctuated two ways is one figure",
+       [g["number_text"] for g in figs] == ["60661"], str(figs))
+    url, item = "https://example.test/compliance", {
+        "number_text": "60661", "context": "Chicago IL, 60661",
+        "context_hash": "same-hash"}
+    try:
+        n = account.record("dup_fixture", url, [dict(item), dict(item)])
+    except Exception as e:                                       # noqa: BLE001
+        n = f"raised {type(e).__name__}"
+    with db.SessionLocal() as s:
+        rows = (s.query(db.UnaccountedNumber)
+                .filter(db.UnaccountedNumber.tenant == "dup_fixture").count())
+    ck("M3 a repeated figure in one batch is stored once, not a failed run",
+       n == 1 and rows == 1, f"record={n} rows={rows}")
+
+
 def check_m3_readers_accounting_and_reprocess():
     """M3 — pluggable readers, counted tables, unaccounted figures, re-reads."""
     from app import extract, statements as st
@@ -885,6 +910,7 @@ def main() -> int:
     check_m1_snapshots_and_documents()
     check_m2_scan_reads_the_store()
     check_m3_readers_accounting_and_reprocess()
+    check_m3_one_sentence_punctuated_twice_is_one_figure()
     check_m4_risk_tiers()
     check_m5_known_answers_audits_trust()
     check_console_controls_do_what_they_say()

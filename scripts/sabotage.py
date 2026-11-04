@@ -314,6 +314,23 @@ SABOTAGES = [
         "why": "every re-read pays the model again for text it has already read",
     },
     {
+        "name": "one_sentence_two_punctuations_is_two_figures",
+        "file": "app/pipeline/account.py",
+        "find": "            k = (tok, prov.fingerprint(key))\n",
+        "replace": "            k = (tok, key)  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a page that repeats a figure with different punctuation lists it twice",
+    },
+    {
+        "name": "a_repeated_figure_ends_the_harvest",
+        "file": "app/pipeline/account.py",
+        "find": "                old[k] = row    # a repeat in this batch finds it, not a 2nd INSERT\n",
+        "replace": "                pass  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "one duplicate in a batch fails the INSERT and the whole harvest stops "
+               "at that page, every page after it unread",
+    },
+    {
         "name": "figures_read_every_account",
         "file": "app/pipeline/account.py",
         "find": "                .filter(db.tenant_filter(db.UnaccountedNumber, tenant),\n",

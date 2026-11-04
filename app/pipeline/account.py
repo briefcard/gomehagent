@@ -82,12 +82,15 @@ def unaccounted(doc: dict, stmts: list[dict]) -> tuple[list[dict], dict]:
                 counts["non_fact"] += 1
                 continue
             counts["unaccounted"] += 1
-            k = (tok, key)
+            # Keyed on the fingerprint, the same identity the table's unique
+            # constraint holds: "Chicago IL, 60661" and "Chicago, IL 60661"
+            # are two lines and one sentence.
+            k = (tok, prov.fingerprint(key))
             if k in seen:
                 continue
             seen.add(k)
             out.append({"number_text": tok, "context": ln[:400],
-                        "context_hash": prov.fingerprint(key)})
+                        "context_hash": k[1]})
     counts["listed"] = min(len(out), MAX_PER_PAGE)
     counts["cut"] = len(out) > MAX_PER_PAGE
     return out[:MAX_PER_PAGE], counts
@@ -114,6 +117,7 @@ def record(tenant: str, url: str, items: list[dict]) -> int:
             if row is None:
                 row = db.UnaccountedNumber(tenant=tenant, url=url, **it)
                 s.add(row)
+                old[k] = row    # a repeat in this batch finds it, not a 2nd INSERT
             row.last_seen = now
             if k in decided:
                 row.status, row.label_subject = decided[k]
