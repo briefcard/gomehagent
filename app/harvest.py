@@ -35,6 +35,13 @@ from .urls import url as _url
 
 _MIN, _MAX = 25, 240
 
+#: How many pages ONE source may list. Discovery is a sitemap read — no page
+#: is fetched to count it — and the run's `limit` decides how much is READ.
+#: At 500 a help centre or docs site of more pages had a tail that no number
+#: of runs could reach, because discovery returns a stable order and the cut
+#: always fell in the same place (owner, 2026-11-04, on Transak's subdomains).
+DISCOVERY_CAP = 10_000
+
 # Boilerplate that appears on every page of every storefront. None of it is a
 # claim, and all of it would otherwise pass a "contains a number" filter.
 _NOISE = re.compile(
@@ -440,7 +447,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     pages, src_report = [], []
     for src in srcs:
         found, how = compliance.discover_pages(src["url"],
-                                               limit=max(limit * 20, 500))
+                                               limit=max(limit * 20, DISCOVERY_CAP))
         for pg in found:
             # Which site this page was read off, carried on the page itself so
             # every finding downstream can name it without re-deriving.
@@ -522,15 +529,36 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                     queues.remove(q)
         return out
 
+    # A cart, login or policy link is not brand copy, known from the URL
+    # alone. Discovery already drops them (`compliance._SKIP`); filtering here
+    # as well, BEFORE the budget is cut, keeps a source that does not filter
+    # from spending a run's slots on them or counting them as still to read.
+    readable = [p for p in pages if not compliance.skip_url(p["url"])]
     ordered_pages = (
-        _interleave([p for p in pages if p["url"] not in seen_pages])
-        + _interleave([p for p in pages if p["url"] in seen_pages]))
+        _interleave([p for p in readable if p["url"] not in seen_pages])
+        + _interleave([p for p in readable if p["url"] in seen_pages]))
     unchanged = 0
+    # Every page this run tried, read or not. A page that could not be read
+    # still leaves the unread band (see `_tried` below), so `pages_remaining`
+    # is what has never been TRIED — and reaches zero when the site is done.
+    attempted: set[str] = set()
+
+    def _tried(url: str, content_hash: str = "") -> None:
+        """Remember a page that could not be read, ON APPLY ONLY.
+
+        Without this, a 404, a timeout or a dead page was never recorded, so
+        it stayed first in line on every run and a sitemap that led with
+        enough of them starved the whole crawl. Recorded with the page's text
+        hash when there is one, so an unchanged dead page is passed over on
+        its hash; a fetch failure carries no hash, so it is retried — after
+        the new ground, in the already-seen band, where a transient error
+        costs one slot instead of blocking the queue."""
+        attempted.add(url)
+        if apply:
+            _record_page(tenant, url, content_hash, 0, False)
+
     for p in ordered_pages[:limit]:
         url = p["url"]
-        if compliance.skip_url(url):
-            skipped.append({"url": url, "why": "not brand copy"})
-            continue
         # A product page is not skipped and not flattened. What it holds is
         # true OF that product, so it is harvested against the entity the
         # catalogue already knows — which is what makes the FAQ and the copy
@@ -544,10 +572,12 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                               headers=compliance.HEADERS)
                 if r.status_code != 200:
                     skipped.append({"url": url, "why": f"HTTP {r.status_code}"})
+                    _tried(url)
                     continue
                 html = r.text
             except Exception as exc:  # noqa: BLE001
                 skipped.append({"url": url, "why": exc.__class__.__name__})
+                _tried(url)
                 continue
         # One string per block, never one string for the page. Sentences are
         # only split WITHIN a block, so a spec cell and the FAQ heading beside
@@ -574,6 +604,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         page_hash = prov.fingerprint(text[:20000])
         if not recrawl and seen_pages.get(url) == page_hash:
             unchanged += 1
+            attempted.add(url)
             skipped.append({"url": url, "why": "unchanged since it was last read"})
             continue
         # Reviews are read BEFORE the page is judged. A product page carries
@@ -587,6 +618,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                                        min_chars=0 if reviews else 200)
         if dead:
             skipped.append({"url": url, "why": dead})
+            _tried(url, page_hash)
             continue
         cands = [{**r, "entity_key": entity} for r in reviews]
         if model_on:
@@ -611,6 +643,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                 cands += [{**c, "entity_key": entity}
                           for c in _claims_from(block, url, dropped)]
         per_page.append((url, cands))
+        attempted.add(url)
         # ONLY on apply. Recording during a rehearsal was the obvious
         # optimisation — reading the page is the expensive part — and it is
         # wrong: a rehearsal files nothing, so the apply that follows would
@@ -790,7 +823,12 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "pages_unchanged": unchanged,
         "pages_known": len(seen_pages),
         "pages_discovered": len(pages),
-        "pages_remaining": max(0, len(pages) - len(seen_pages) - len(per_page)),
+        # Readable pages never yet tried — neither in the memory this run
+        # started from nor tried by this run. Zero means every page the site
+        # lists has been read or found unreadable at least once.
+        "pages_remaining": sum(1 for p in readable
+                               if p["url"] not in seen_pages
+                               and p["url"] not in attempted),
         "truncated_pages": truncated_pages[:10],
         "truncated_page_count": len(truncated_pages),
         "situations_wanted": wanted,
