@@ -38,6 +38,35 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "an_unreadable_page_holds_the_front_of_the_queue",
+        "file": "app/harvest.py",
+        "find": "        attempted.add(url)\n        if apply:\n            _record_page(tenant, url, content_hash, 0, False)\n",
+        "replace": "        attempted.add(url)\n        if False:  # SABOTAGE\n            _record_page(tenant, url, content_hash, 0, False)\n",
+        "suites": ["test_harvest.py"],
+        "why": "a 404 or a dead page is never remembered, so it stays first in "
+               "line on every run and a sitemap that leads with enough of them "
+               "starves the whole crawl — runs loop on the same pages for ever",
+    },
+    {
+        "name": "discovery_stops_at_500_pages_a_source",
+        "file": "app/harvest.py",
+        "find": "DISCOVERY_CAP = 10_000\n",
+        "replace": "DISCOVERY_CAP = 500  # SABOTAGE\n",
+        "suites": ["test_harvest.py"],
+        "why": "a help centre or docs site of more than 500 pages has a tail no "
+               "number of runs can reach, because discovery's order is stable "
+               "and the cut always falls in the same place",
+    },
+    {
+        "name": "get_claims_reads_every_account",
+        "file": "app/mcp_server.py",
+        "find": "                .filter(db.KbClaim.tenant == tenant)\n                .order_by(db.KbClaim.verified_at.desc(), db.KbClaim.id).all())\n",
+        "replace": "                .order_by(db.KbClaim.verified_at.desc(), db.KbClaim.id).all())  # SABOTAGE\n",
+        "suites": ["test_the_substrate_is_an_mcp_server.py"],
+        "why": "one client's claims export lists another client's knowledge "
+               "base — tenant isolation broken on the door a Claude session reads",
+    },
+    {
         "name": "an_attachment_with_no_text_reads_as_empty",
         "file": "app/mcp_server.py",
         "find": '    if not text.strip():\n        return {"ok": False, "why": f"{hit[\'filename\']!r} has no text layer "\n',

@@ -467,6 +467,9 @@ def main() -> int:
        harvest.harvest("baci", limit=2, apply=False,
                        recrawl=True)["pages_read"] > 0)
 
+    print("\n— pages that cannot be read do not hold the front of the queue —")
+    check_unreadable_pages_do_not_loop(ck, httpx)
+
     httpx.get = real
     print("\n— a thin queue must say WHY it is thin —")
     check_known_drops_are_counted(ck)
@@ -480,6 +483,76 @@ def main() -> int:
     print("all checks passed")
     return 0
 
+
+
+def check_unreadable_pages_do_not_loop(ck, httpx):
+    """Owner, 2026-11-04, adding Transak: "how are we making sure that the
+    harvests dont run from the same starting points and just endlessly loop".
+
+    They did, for one class of page. A page that answered 404, timed out or
+    read as dead was `continue`d past BEFORE `_record_page`, so it was never
+    remembered and sat in the "unread first" band on every run, in the same
+    sitemap position. With as many of those at the head of a sitemap as the
+    run's limit, every run spent its whole budget on them and read nothing
+    new, for ever — reproduced: 0 of 6 real pages after 4 runs — while
+    `pages_remaining` counted them as still to do, so the report never said
+    the site was done. (Cart and policy links are dropped at discovery and
+    never reach the queue; the check below holds that too.)
+    """
+    from app import harvest as hv
+
+    dead = [f"https://bacimilanousa.com/pages/gone-{i}" for i in range(4)]
+    junk = [f"https://bacimilanousa.com/cart/item-{i}" for i in range(3)]
+    good = [f"https://bacimilanousa.com/pages/story-{i}" for i in range(6)]
+    sitemap = ("<?xml version=\"1.0\"?><urlset>"
+               + "".join(f"<url><loc>{u}</loc></url>" for u in junk + dead + good)
+               + "</urlset>")
+
+    def _get(url, **kw):
+        if url.endswith("/sitemap.xml"):
+            return _Resp(sitemap)
+        if "/pages/story-" in url:
+            n = url.rsplit("-", 1)[-1]
+            return _Resp(f"<html><body><main><h1>Story {n}</h1>"
+                         f"<p>Chapter {n} of how the Milan studio designs a "
+                         f"collection, from the first sketch to the table.</p>"
+                         f"<p>Every chapter is written by the studio itself and "
+                         f"published on our own site for collectors.</p>"
+                         f"</main></body></html>")
+        return _Resp("", 404)
+
+    httpx.get = _get
+    hv.forget_pages("baci")
+    runs = [harvest.harvest("baci", limit=4, apply=True) for _ in range(4)]
+    state = hv._page_state("baci")
+    ck("every readable page is reached within a few runs, past the dead ones",
+       all(u in state for u in good),
+       f"{sum(u in state for u in good)}/{len(good)} story pages read")
+    ck("a dead page is remembered on apply, so it leaves the unread band",
+       all(u in state for u in dead), f"{sum(u in state for u in dead)}/{len(dead)}")
+    ck("a cart link never reaches the queue: not tried, not remembered",
+       not any(s["url"] in junk for r in runs for s in r["skipped_examples"])
+       and not any(u in state for u in junk),
+       str([s["url"] for s in runs[0]["skipped_examples"]]))
+    ck("the report reaches zero remaining once everything has been tried",
+       runs[-1]["pages_remaining"] == 0, str([r["pages_remaining"] for r in runs]))
+
+    hv.forget_pages("baci")
+    harvest.harvest("baci", limit=4, apply=False)
+    ck("a rehearsal still consumes nothing, dead pages included",
+       not hv._page_state("baci"))
+
+    # The other way a crawl never finishes: discovery capped at 500 pages per
+    # source, in a stable order, so a help centre of 700 articles had 200 that
+    # no number of runs could ever reach.
+    many = [f"https://bacimilanousa.com/pages/help-{i}" for i in range(700)]
+    big_map = ("<?xml version=\"1.0\"?><urlset>"
+               + "".join(f"<url><loc>{u}</loc></url>" for u in many) + "</urlset>")
+    httpx.get = lambda url, **kw: (_Resp(big_map) if url.endswith("/sitemap.xml")
+                                   else _Resp("", 404))
+    got = harvest.harvest("baci", limit=1, apply=False)
+    ck("discovery reaches every page of a 700-page source, not the first 500",
+       got.get("pages_discovered") == len(many), str(got.get("pages_discovered")))
 
 
 def check_known_drops_are_counted(ck):

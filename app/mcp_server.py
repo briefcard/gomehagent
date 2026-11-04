@@ -28,6 +28,11 @@ that said what was due, what was stuck or what had worked:
     get_results   what worked — ad outcomes by the data layer's dimensions
                   (`results.by`) and what became of every draft: shipped,
                   blocked, approved, denied, and the gates that caught it
+    get_claims    the whole claims register — proposed, approved, rejected —
+                  with evidence, source page and tags, filtered and paged,
+                  plus how much of the account's sites the harvest has read.
+                  Owner, 2026-11-04: what a harvest captures must be
+                  exportable to a Claude session to dig into. Read-only.
     inbox_search  the account's OWN inbox, searched (Gmail query syntax)
     inbox_thread  one thread of that inbox, every message, with attachments
     inbox_attachment the TEXT of one attachment on one message of that inbox
@@ -97,6 +102,7 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
+         "get_claims",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
@@ -119,7 +125,9 @@ INSTRUCTIONS = (
     "inbox_thread, inbox_attachment and inbox_draft reach the account's own "
     "inbox; a draft is "
     "never sent. get_plan says what is "
-    "due and what is stuck; get_results what worked. Run check on every "
+    "due and what is stuck; get_results what worked; get_claims lists every "
+    "claim in an account's knowledge base with its evidence and source, "
+    "including proposals awaiting the owner. Run check on every "
     "draft and fix its blocks before you record. record files the draft in "
     "the owner's approval queue; nothing is sent, pushed or published by "
     "these tools.")
@@ -601,6 +609,118 @@ def get_results(tenant: str, dimension: str = "", days: int = 90) -> dict[str, A
         return dict(sorted(tally.items(), key=lambda kv: -kv[1])[:LIST_MAX])
     _part(out, "caught", _caught)
     return out
+
+
+#: Most claims one get_claims call returns. Page with `offset` past this.
+CLAIMS_MAX = 500
+#: The review states a claim can be in, plus "all".
+CLAIM_REVIEWS = ("all", "proposed", "approved", "rejected")
+
+
+def _host(text: str) -> str:
+    """The host a claim's `source` names — "stated on https://x.y/z" → x.y."""
+    import re as _re
+    m = _re.search(r"https?://([^/\s]+)", text or "")
+    return (m.group(1).lower().removeprefix("www.") if m else "")
+
+
+@server.tool()
+def get_claims(tenant: str, review: str = "all", query: str = "",
+               source: str = "", offset: int = 0,
+               limit: int = 200) -> dict[str, Any]:
+    """Every claim in one account's knowledge base, with its evidence — to read, sort and dig into.
+
+    Owner, 2026-11-04: the claims a harvest captures must be exportable so a
+    Claude session can work through them directly. get_package hands over
+    only the APPROVED claims a pipeline selects; this is the whole register:
+    proposed (awaiting the owner), approved and rejected, each with its
+    evidence, proof type, the page it came from, its situation tags, the
+    entity it is true of and when it was verified.
+
+    `review`: all | proposed | approved | rejected. `query`: words to find in
+    the claim, its evidence or its source. `source`: only claims whose source
+    names this (a host such as support.transak.com, or a path). Paged:
+    `offset` + `limit` (max 500); `next_offset` is set while more remain.
+    `harvest` says how much of the account's own sites has been read, by
+    host — the coverage behind the register. Read-only: nothing is approved,
+    changed or filed here.
+    """
+    from . import db, provenance as prov, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}",
+                "known": sorted(t.key for t in tenants.all_tenants())}
+    review = (review or "all").strip().lower()
+    if review not in CLAIM_REVIEWS:
+        return {"ok": False, "why": f"unknown review {review!r}",
+                "known": list(CLAIM_REVIEWS)}
+    offset = max(0, int(offset or 0))
+    limit = max(1, min(int(limit or 200), CLAIMS_MAX))
+    words = [w for w in (query or "").lower().split() if w]
+    want_src = (source or "").strip().lower()
+
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbClaim)
+                .filter(db.KbClaim.tenant == tenant)
+                .order_by(db.KbClaim.verified_at.desc(), db.KbClaim.id).all())
+        pages = (s.query(db.HarvestedPage)
+                 .filter(db.HarvestedPage.tenant == tenant).all())
+        s.expunge_all()
+
+    def _review_of(c) -> str:
+        r = (c.review or "").strip()
+        return r if r in (prov.PROPOSED, prov.APPROVED, prov.REJECTED) else prov.APPROVED
+
+    counts = {"proposed": 0, "approved": 0, "rejected": 0}
+    by_host: dict[str, int] = {}
+    matched = []
+    for c in rows:
+        r = _review_of(c)
+        counts[r] = counts.get(r, 0) + 1
+        h = _host(c.source or "") or "(no url)"
+        by_host[h] = by_host.get(h, 0) + 1
+        if review != "all" and r != review:
+            continue
+        hay = " ".join((c.claim or "", c.evidence or "", c.source or "")).lower()
+        if words and not all(w in hay for w in words):
+            continue
+        if want_src and want_src not in (c.source or "").lower():
+            continue
+        matched.append((c, r))
+
+    def _iso(v):
+        return v.isoformat() if v else ""
+
+    claims = [{
+        "id": c.id, "claim": c.claim or "", "evidence": c.evidence or "",
+        "proof_type": c.proof_type or "", "source": c.source or "",
+        "host": _host(c.source or ""), "attributed_to": c.attributed_to or "",
+        "context": c.context or "", "proves": c.proves or "",
+        "situations": list(c.situations or []), "entity_key": c.entity_key or "",
+        "review": r, "status": c.status or "", "origin": c.origin or "",
+        "strength": c.strength or "", "verified_at": _iso(c.verified_at),
+        "expires_at": _iso(c.expires_at),
+    } for c, r in matched[offset:offset + limit]]
+
+    pages_by_host: dict[str, int] = {}
+    for p in pages:
+        h = _host(p.url or "") or "(unknown)"
+        pages_by_host[h] = pages_by_host.get(h, 0) + 1
+    nxt = offset + limit
+    return {
+        "ok": True, "tenant": tenant, "review": review,
+        "total_in_account": len(rows), "by_review": counts,
+        "by_source_host": dict(sorted(by_host.items(), key=lambda kv: -kv[1])),
+        "matched": len(matched), "offset": offset, "returned": len(claims),
+        "next_offset": nxt if nxt < len(matched) else None,
+        "claims": claims,
+        "harvest": {
+            "pages_read": len(pages),
+            "pages_by_host": dict(sorted(pages_by_host.items(), key=lambda kv: -kv[1])),
+            "pages_with_claims": sum(1 for p in pages if (p.claims_found or 0) > 0),
+            "pages_truncated": sum(1 for p in pages if p.truncated == "yes"),
+            "last_read": _iso(max((p.read_at for p in pages if p.read_at), default=None)),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

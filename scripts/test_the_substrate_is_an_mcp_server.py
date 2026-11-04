@@ -264,6 +264,47 @@ def main() -> int:
         bad = rpc.call("get_plan", {"tenant": "nobody"})["structuredContent"]
         ck("an unknown account is refused by name", not bad["ok"] and "baci" in bad["known"])
 
+        print("— get_claims: the whole register, exportable to a session —")
+        PROPOSED_CLAIM = "Transak-style support articles answer KYC questions in 3 steps."
+        kb.add_claim(T, PROPOSED_CLAIM, "3 steps", [], status="pending", origin="crawl",
+                     source="stated on https://support.bacimilanousa.com/kyc")
+        kb.add_claim("eien", "Eien's own claim that must never show in baci.", "x", [],
+                     origin="human", source="stated on https://eienhealth.com/a")
+        with db.SessionLocal() as s:
+            s.add(db.HarvestedPage(tenant=T, url="https://support.bacimilanousa.com/kyc",
+                                   content_hash="h1", claims_found=1))
+            s.add(db.HarvestedPage(tenant="eien", url="https://eienhealth.com/a",
+                                   content_hash="h2", claims_found=1))
+            s.commit()
+        got = rpc.call("get_claims", {"tenant": T})["structuredContent"]
+        texts = [c["claim"] for c in got.get("claims", [])]
+        ck("get_claims returns approved AND proposed claims, with their evidence and source",
+           got.get("ok") and CLAIM in texts and PROPOSED_CLAIM in texts
+           and any(c["review"] == "proposed" and c["evidence"] == "3 steps"
+                   and c["host"] == "support.bacimilanousa.com"
+                   for c in got["claims"]), str(got)[:300])
+        ck("…and never another account's claim (tenant-scoped)",
+           not any("Eien" in t for t in texts), str(texts))
+        ck("…with the harvest coverage behind it, by host, this account only",
+           got["harvest"]["pages_read"] == 1
+           and got["harvest"]["pages_by_host"] == {"support.bacimilanousa.com": 1},
+           str(got.get("harvest")))
+        only = rpc.call("get_claims", {"tenant": T, "review": "proposed"})["structuredContent"]
+        ck("review=proposed returns only proposals",
+           only["ok"] and [c["claim"] for c in only["claims"]] == [PROPOSED_CLAIM],
+           str([c["claim"] for c in only.get("claims", [])]))
+        by_src = rpc.call("get_claims", {"tenant": T, "source": "support."})["structuredContent"]
+        ck("source filters to one host", [c["claim"] for c in by_src["claims"]] == [PROPOSED_CLAIM])
+        page = rpc.call("get_claims", {"tenant": T, "limit": 1})["structuredContent"]
+        ck("it pages: limit 1 returns one and says where to continue",
+           page["returned"] == 1 and page["next_offset"] == 1 and page["matched"] >= 2,
+           str({k: page.get(k) for k in ("returned", "next_offset", "matched")}))
+        bad = rpc.call("get_claims", {"tenant": T, "review": "maybe"})["structuredContent"]
+        ck("an unknown review state is refused with the known ones",
+           not bad["ok"] and "proposed" in bad["known"], str(bad))
+        bad = rpc.call("get_claims", {"tenant": "nobody"})["structuredContent"]
+        ck("get_claims refuses an unknown account by name", not bad["ok"] and "baci" in bad["known"])
+
 
         print("— the inbox: the account's own, read and drafted, never sent —")
         from app import gmail_client, validator
