@@ -108,11 +108,55 @@ def check_m1_snapshots_and_documents():
     ck("M1 snapshots are this account's only", not fetch.snapshots("eien"))
 
 
+def check_m2_scan_reads_the_store():
+    """M2 — the ban-list scan checks the stored copy; the site is fetched once."""
+    import datetime as dt
+    from app import compliance, kb
+    from app.pipeline import fetch
+    ck("M2 baci has rules to scan with", bool(kb.banned_claims("baci")))
+    # The scan reads marketing pages only (legal pages are binding, not
+    # phrase-checked), and discovery reads robots.txt / sitemap.xml.
+    scanned = [u for u in PAGES if not compliance.is_legal_url(u)]
+    calls = net(PAGES)
+    res = compliance.scan("baci", limit=20)
+    pages_hit = [u for u in calls if u in PAGES]
+    ck("M2 a scan right after a harvest fetches no page again",
+       not pages_hit and res.get("pages_from_store") == len(scanned)
+       and res.get("pages_checked") == len(scanned),
+       str({"fetched": pages_hit, "from_store": res.get("pages_from_store"),
+            "checked": res.get("pages_checked")}))
+    # An old copy is not trusted: fetched again and re-stored.
+    with db.SessionLocal() as s:
+        for r in s.query(db.PageSnapshot).filter(db.PageSnapshot.tenant == "baci"):
+            r.fetched_at = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=3)
+        s.commit()
+    calls = net(PAGES)
+    res = compliance.scan("baci", limit=20)
+    ck("M2 a stale stored copy is fetched again, and the report says so",
+       res.get("pages_fetched") == len(scanned)
+       and len([u for u in calls if u in PAGES]) == len(scanned), str(res.get("pages_fetched")))
+    newest = max(r.fetched_at.replace(tzinfo=dt.timezone.utc) if r.fetched_at.tzinfo is None
+                 else r.fetched_at for r in fetch.snapshots("baci"))
+    ck("M2 what the scan fetched is stored for the next reader",
+       dt.datetime.now(dt.timezone.utc) - newest < dt.timedelta(minutes=5))
+    # A banned phrase on a stored page is still found from the stored copy.
+    phrase = kb.banned_claims("baci")[0]
+    url = f"{BASE}/pages/coverage"
+    bad = PAGES[url].replace("<h1>Coverage</h1>", f"<h1>Coverage</h1><p>Every piece is {phrase}.</p>")
+    from app.pipeline import parse
+    fetch.store("baci", url, bad, parse.parse(bad)["text_hash"])
+    calls = net(PAGES)            # the network still serves the clean page
+    res = compliance.scan("baci", limit=20)
+    ck("M2 the scan's finding comes from the stored copy",
+       any(v["url"] == url for v in res.get("violations", [])), str(res.get("violations"))[:200])
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
     kb_seed.seed_all()
     check_m1_snapshots_and_documents()
+    check_m2_scan_reads_the_store()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

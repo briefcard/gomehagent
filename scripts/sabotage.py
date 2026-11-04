@@ -38,6 +38,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "the_ban_scan_fetches_the_site_again",
+        "file": "app/compliance.py",
+        "find": "                          max_age_hours=0 if changed_since else SCAN_FRESH_HOURS,\n",
+        "replace": "                          max_age_hours=0,  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "every scan re-crawls the whole site, and its findings are about a "
+               "different copy of the page than the one the harvest read",
+    },
+    {
         "name": "a_fetched_page_is_not_kept",
         "file": "app/harvest.py",
         "find": "        if apply:\n            pipeline_fetch.store(tenant, url, html, page_hash,\n",

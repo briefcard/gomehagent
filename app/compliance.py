@@ -635,6 +635,10 @@ def _match(tenant: str, text: str) -> tuple[list[dict], list[dict]]:
     return hits, questions
 
 
+#: A stored page younger than this is checked from the store, not refetched.
+SCAN_FRESH_HOURS = 24
+
+
 def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
     """Check a client's live site against its own rules.
 
@@ -691,9 +695,29 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
     # THE DISAPPROVED PUBLIC PICTURES, read once for the whole sweep.
     disapproved = kb.disapproved_public(tenant)
     still_public: list[dict] = []
+    # ONE FETCH, MANY READERS (BUILD-MAP §1.4, M2). A page the harvest or an
+    # earlier scan fetched within SCAN_FRESH_HOURS is checked from its stored
+    # copy instead of fetched again; anything older, or never stored, is
+    # fetched and stored for the next reader. A page the sitemap says changed
+    # on or after `since` is always fetched — that is what `since` means.
+    from .pipeline import fetch as _pf
+    from_store = fetched = 0
     for p in considered[:limit]:
-        res = check_page(tenant, p["url"], html=p.get("html", ""),
-                         pictures=disapproved)
+        html = p.get("html", "")
+        if not html:
+            changed_since = bool(since and p.get("lastmod")
+                                 and p["lastmod"][:10] >= since)
+            got = _pf.get(tenant, p["url"],
+                          max_age_hours=0 if changed_since else SCAN_FRESH_HOURS,
+                          store_it=True, source_label=p.get("site", ""))
+            if got["error"] or got["status"] != 200:
+                errors.append({"url": p["url"],
+                               "status": got["error"] or f"HTTP {got['status']}"})
+                continue
+            html = got["html"]
+            from_store += 1 if got["from_store"] else 0
+            fetched += 0 if got["from_store"] else 1
+        res = check_page(tenant, p["url"], html=html, pictures=disapproved)
         if res["status"] != "ok":
             errors.append({"url": res["url"], "status": res["status"]})
             continue
@@ -727,6 +751,11 @@ def scan(tenant: str, limit: int = 60, since: str = "") -> dict:
         "pages_in_sitemap": len(pages),
         "pages_checked": len(checked),
         "pages_skipped_unchanged": len(pages) - len(considered),
+        # How many pages were read from the stored copy vs fetched now, so a
+        # clean scan says how fresh what it checked was.
+        "pages_from_store": from_store,
+        "pages_fetched": fetched,
+        "fresh_hours": SCAN_FRESH_HOURS,
         "violations": violations,
         "questions_to_review": to_review[:20],
         "questions_count": len(to_review),
