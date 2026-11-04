@@ -31,7 +31,8 @@ import json
 import re
 
 from . import compliance, db, extract, kb, provenance as prov, statements, tenants
-from .pipeline import fetch as pipeline_fetch, parse as pipeline_parse
+from .pipeline import (account as pipeline_account, extractors as pipeline_extractors,
+                       fetch as pipeline_fetch, parse as pipeline_parse)
 from .urls import url as _url
 
 _MIN, _MAX = 25, 240
@@ -552,6 +553,9 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     unchanged = 0
     pages_from_data: list[str] = []       # read from embedded page data (JS sites)
     fact_subjects: dict[str, int] = {}    # statements the sweep found, by subject
+    by_reader: dict[str, int] = {}        # statements per extractor
+    unaccounted_total = 0                 # figures no reader explained
+    terms = statements.terms(tenant)      # the account's taught vocabulary
     # Every page this run tried, read or not. A page that could not be read
     # still leaves the unread band (see `_tried` below), so `pages_remaining`
     # is what has never been TRIED — and reaches zero when the site is done.
@@ -631,14 +635,22 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # fetched, because it is code (no model call) and a figure stated in
         # a footer or a stat tile is exactly what the claim reader misses.
         # Recorded on apply only; a rehearsal consumes nothing.
-        facts = statements.sweep(html, blocks)
+        # EXTRACT stage: every registered reader (numbers, table/list counts,
+        # structured data) over the Document; ACCOUNT stage: every figure no
+        # reader explained is listed for a reviewer, never dropped.
+        facts, _by_reader = pipeline_extractors.run_all(doc, terms)
+        figures, fig_counts = pipeline_account.unaccounted(doc, facts)
+        unaccounted_total += len(figures)
         for f in facts:
             fact_subjects[f["subject"]] = fact_subjects.get(f["subject"], 0) + 1
+        for k, v in _by_reader.items():
+            by_reader[k] = by_reader.get(k, 0) + max(v, 0)
         if apply:
             statements.record(tenant, url, facts,
                               authority=("binding" if compliance.is_legal_url(url)
                                          else "derived"),
                               entity_key=entity)
+            pipeline_account.record(tenant, url, figures)
         if not recrawl and seen_pages.get(url) == page_hash:
             unchanged += 1
             attempted.add(url)
@@ -880,6 +892,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "statements_found": sum(fact_subjects.values()),
         "statements_by_subject": dict(sorted(fact_subjects.items(),
                                              key=lambda kv: -kv[1])),
+        "statements_by_extractor": by_reader,
+        # Figures on the pages read that NO reader turned into a statement
+        # and that are not a year, price, date or phone number — listed for a
+        # reviewer (Review › Site facts), never dropped.
+        "unaccounted_figures": unaccounted_total,
         # Pages whose body was nearly empty and whose copy was read from the
         # page's embedded data instead.
         "pages_from_page_data": len(pages_from_data),

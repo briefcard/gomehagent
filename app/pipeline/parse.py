@@ -20,7 +20,7 @@ from . import fetch as _fetch
 
 #: Bump when the Document changes shape or content; stored documents at an
 #: older version are re-parsed from the stored bytes, never refetched.
-VERSION = 1
+VERSION = 2
 #: Body text below this many characters means the page is drawn by JavaScript
 #: and its copy is in the embedded data (same floor as harvest.JS_THIN_CHARS).
 JS_THIN_CHARS = 200
@@ -161,6 +161,13 @@ def parse(html: str) -> dict:
     except Exception:  # noqa: BLE001 — malformed markup still yields blocks
         pass
     lines = statements._lines(html)
+    jsonld = []
+    import json as _json
+    for m in re.finditer(r"<script\b[^>]*ld\+json[^>]*>(.*?)</script>", html, re.I | re.S):
+        try:
+            jsonld.append(_json.loads(m.group(1).strip()))
+        except ValueError:
+            continue
     numbers_total = sum(len(_NUM_TOKEN.findall(x)) for x in lines + data_lines)
     return {
         "version": VERSION,
@@ -173,6 +180,7 @@ def parse(html: str) -> dict:
         "headings": w.headings,
         "tables": w.tables,
         "lists": w.lists,
+        "jsonld": jsonld,
         "interactive": sorted(w.hints),
         "hidden_elements": w.hidden,
         "size_blocks": len(read_blocks),

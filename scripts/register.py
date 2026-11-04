@@ -50,7 +50,21 @@ os.environ.setdefault("APPROVAL_SECRET", "s3cret")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-APP = sorted((ROOT / "app").glob("*.py"))
+class _AppPath(type(pathlib.Path())):
+    """An app module, NAMED by its path under app/ — "harvest.py" for a
+    top-level module, "pipeline/fetch.py" for one in a package — so modules in
+    subpackages are walked too and two `__init__.py` files never collide."""
+
+    @property
+    def name(self):  # noqa: D401
+        return pathlib.PurePosixPath(*self.parts[len((ROOT / "app").parts):]).as_posix()
+
+
+#: Every module under app/, packages included. The register used to read only
+#: app/*.py, so a whole package (app/pipeline, app/roles) was invisible to
+#: every check here and nothing said so.
+APP = sorted(_AppPath(p) for p in (ROOT / "app").rglob("*.py")
+             if "__pycache__" not in p.parts)
 SCRIPTS = sorted((ROOT / "scripts").glob("*.py"))
 
 #: What this register does NOT reach. Stated, because a register that is silent

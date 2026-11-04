@@ -9110,6 +9110,42 @@ async def conflict_resolve(request: Request, key: str = Depends(admin_key)):
     return _back_to_content(tenant, sub="conflicts")
 
 
+@app.post("/admin/figure_decide", response_class=HTMLResponse)
+async def figure_decide(request: Request, key: str = Depends(admin_key)):
+    """A reviewer says what an unaccounted figure is: not a fact, or a
+    statement of a subject (which teaches the account the word)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from .pipeline import account
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    fid = str(form.get("figure_id", ""))
+    if str(form.get("action", "")) == "ignore":
+        account.ignore(tenant, fid)
+        return _back_to_content(tenant, sub="facts", msg="Marked as not a fact")
+    subject = str(form.get("new_subject", "") or form.get("subject", "")).strip()
+    out = account.label(tenant, fid, subject, by="console")
+    return _back_to_content(tenant, sub="facts", err=out.get("error", ""),
+                            msg="" if out.get("error") else
+                            f"'{out['term']}' now records as {out['subject']} — "
+                            "re-read stored pages to apply it")
+
+
+@app.post("/admin/reprocess", response_class=HTMLResponse)
+async def reprocess_pages(request: Request, key: str = Depends(admin_key)):
+    """Re-read every stored page with the current readers. No crawl."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from .pipeline import reprocess
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    out = reprocess.reprocess(tenant, apply=True)
+    return _back_to_content(tenant, sub="facts",
+                            msg=f"Re-read {out['pages_read_from_store']} stored pages: "
+                                f"{out['statements']} facts, "
+                                f"{out['unaccounted_figures']} figures still open")
+
+
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
 async def claims_decide(request: Request, key: str = Depends(admin_key)):
     """Decide many proposals in one submit.

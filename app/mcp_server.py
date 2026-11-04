@@ -632,7 +632,8 @@ def get_results(tenant: str, dimension: str = "", days: int = 90) -> dict[str, A
 #: get_statements' CSV columns, one row per statement.
 STATEMENT_CSV_COLUMNS = ("subject", "value", "number", "qualifier", "unit",
                          "authority", "field", "url", "text", "entity_key",
-                         "market", "observed_at", "subject_conflict")
+                         "market", "observed_at", "subject_conflict",
+                         "extractor", "section", "locator")
 
 
 @server.tool()
@@ -651,7 +652,11 @@ def get_statements(tenant: str, subject: str = "", conflicts_only: bool = False,
     pages for each, and `conflict` when the site states more than one value;
     conflicting subjects first. `subject` narrows to one; `conflicts_only`
     keeps the disagreements. `format="csv"`: one row per statement in `csv`,
-    with `subject_conflict` so it can be filtered in a sheet. Read-only.
+    with `subject_conflict` so it can be filtered in a sheet, and the reader
+    that saw it (`extractor`: numbers | enumerations = a counted table/list |
+    structured), its heading path (`section`) and position (`locator`).
+    `unaccounted` lists figures no reader understood, with their sentence and
+    pages — the capture's known gaps. Read-only.
     """
     from . import statements, tenants
     if tenants.get(tenant) is None:
@@ -668,8 +673,14 @@ def get_statements(tenant: str, subject: str = "", conflicts_only: bool = False,
         "subjects_total": len(subjects),
         "subjects_in_conflict": sum(1 for x in subjects if x["conflict"]),
     }
+    # Figures on the site no reader understood — the capture's own gaps,
+    # stated so a clean summary is never mistaken for a complete one.
+    from .pipeline import account as _acc
+    figs = _acc.open_figures(tenant, limit=500)
+    out["unaccounted_open"] = len(figs)
     if fmt == "json":
         out["subjects"] = subjects
+        out["unaccounted"] = figs[:100]
         return out
     import csv as _csv
     import io as _io
@@ -684,7 +695,8 @@ def get_statements(tenant: str, subject: str = "", conflicts_only: bool = False,
         w.writerow([r.subject, r.value, r.number, r.qualifier, r.unit, r.authority,
                     r.field, r.url, r.text, r.entity_key, r.market,
                     r.observed_at.isoformat() if r.observed_at else "",
-                    "yes" if conflict[r.subject] else ""])
+                    "yes" if conflict[r.subject] else "",
+                    r.extractor or "", r.section or "", r.locator or ""])
         n += 1
     out["rows"] = n
     out["csv"] = buf.getvalue()

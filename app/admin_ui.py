@@ -6303,7 +6303,38 @@ FACT_LABELS = {
 }
 
 
-def _facts_card(subjects: list, n_conflicts: int) -> str:
+def _figures_block(figs: list, tenant: str) -> str:
+    """Figures on the site that NO reader understood (`pipeline.account`).
+
+    Each is a sentence with a number in it. Two decisions, both reusable: "Not
+    a fact" (applies to that sentence on every page) and "This counts …" with
+    the subject it states — which teaches the account the word, so every
+    later read records it. Then "Re-read stored pages" applies it now, with no
+    crawl."""
+    if not figs:
+        return ('<p class="mut">Every figure on the pages read is accounted for — '
+                'a recorded fact, or a year, price, date or phone number.</p>')
+    opts = "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>'
+                   for k, v in FACT_LABELS.items())
+    items = []
+    for g in figs:
+        pages = ", ".join(_esc(u.split("://", 1)[-1][:50]) for u in g["pages"][:3])
+        items.append(f"""
+<li><b>{_esc(g["number"])}</b> <span class="mut">on {g["page_count"]} page{'' if g["page_count"] == 1 else 's'} · {pages}</span>
+  <div class="when">“{_esc(g["context"][:220])}”</div>
+  <form class="f" method="post" action="/admin/figure_decide" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="figure_id" value="{_esc(g["id"])}">
+    <button class="sec" name="action" value="ignore">Not a fact</button>
+    <select name="subject"><option value="">This counts…</option>{opts}</select>
+    <input name="new_subject" placeholder="or a new subject, e.g. coverage.corridors" size="28">
+    <button name="action" value="label">Record it</button>
+  </form></li>""")
+    return f'<ul>{"".join(items)}</ul>'
+
+
+def _facts_card(subjects: list, n_conflicts: int, figs: list | None = None,
+                tenant: str = "") -> str:
     """Site facts — every figure the site states, by subject, with its pages.
 
     Structured, not sentences: one row per subject, one line per distinct
@@ -6317,7 +6348,7 @@ def _facts_card(subjects: list, n_conflicts: int) -> str:
   <div class="head"><h2>Site facts</h2></div>
   <p class="mut">Nothing recorded yet. The next harvest records every figure the
   site states — countries, states, assets, licences, users — per page.</p>
-</div>"""
+</div>""" + _figures_card(figs or [], tenant)
     rows = []
     for sub in subjects:
         label = FACT_LABELS.get(sub["subject"], sub["subject"])
@@ -6347,8 +6378,27 @@ def _facts_card(subjects: list, n_conflicts: int) -> str:
   <p class="mut">Every figure the site states, read from every page by code —
   the body, the header and footer, and data the page loads. One subject, every
   value it is given, and where. A <b>legal · binding</b> value came off a legal
-  page and is where reconciliation starts. Nothing here is used in drafts.</p>
+  page and is where reconciliation starts. A <b>table</b> or <b>list</b> value is
+  a count of the rows under a heading naming the subject. Nothing here is used
+  in drafts.</p>
   {"".join(rows)}
+</div>""" + _figures_card(figs or [], tenant)
+
+
+def _figures_card(figs: list, tenant: str) -> str:
+    return f"""
+<div class="card">
+  <div class="head"><h2>Figures we could not read</h2>
+    <span class="chip {'off' if figs else 'on'}">{len(figs)} open</span></div>
+  <p class="mut">Numbers on the site that no reader turned into a fact. Nothing
+  is dropped silently: say what each one is, once, and it is recorded on every
+  page from then on.</p>
+  {_figures_block(figs, tenant)}
+  <form class="f" method="post" action="/admin/reprocess" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <button class="sec">Re-read stored pages</button>
+    <span class="mut">applies new words and readers to every stored page — no crawl</span>
+  </form>
 </div>"""
 
 
@@ -8953,6 +9003,11 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         fact_subjects = _st.summary(tenant)
     except Exception:  # noqa: BLE001 — a broken panel must not break the tab
         fact_subjects = []
+    try:
+        from .pipeline import account as _acc
+        open_figs = _acc.open_figures(tenant, limit=60)
+    except Exception:  # noqa: BLE001
+        open_figs = []
     n_fact_conflicts = sum(1 for f in fact_subjects if f["conflict"])
     counts = {"ship": total_ship,
               "claims": total_unfiltered, "pictures": len(waiting),
@@ -9028,7 +9083,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   overwritten. Pick one and the disagreement closes.</p>
   {conflicts_html}
 </div>""",
-        "facts": _facts_card(fact_subjects, n_fact_conflicts),
+        "facts": _facts_card(fact_subjects, n_fact_conflicts, open_figs, tenant),
         "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Store sync</h2>
@@ -9373,6 +9428,16 @@ _KB_DESCRIBED = [
      "Kept so every reader — facts, claims, the ban-list scan — reads one copy "
      "instead of fetching the site again, and so a better reader can re-read "
      "the site without a crawl. Rebuilt by the next harvest."),
+    ("KbStatementTerm", "kb_statement_terms", "Words a reviewer taught the fact reader",
+     "Added when a reviewer says what an unexplained figure counts (\"40 corridors\" "
+     "is a coverage figure); every later read records it as a fact."),
+    ("UnaccountedNumber", "unaccounted_numbers", "Figures no reader understood",
+     "Every number on a page that is not inside a recorded fact and is not a year, "
+     "price, date or phone number — listed so nothing is lost silently. A "
+     "reviewer's \"not a fact\" or label carries across pages and re-reads."),
+    ("ExtractCache", "extract_cache", "Model readings already paid for",
+     "One model reading per exact chunk of page text, so an unchanged chunk is "
+     "never paid for twice. Derived; safe to clear."),
 ]
 
 

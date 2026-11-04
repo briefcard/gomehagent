@@ -133,14 +133,39 @@ def page_data_lines(html_text: str) -> list[str]:
     return out
 
 
-def find(text: str) -> list[dict]:
-    """Every "<number> <unit>" fact in one line of text."""
+def _fact_re(extra: tuple[tuple[str, str], ...] = ()):
+    """The figure pattern, widened by an account's own terms (QA labels)."""
+    if not extra:
+        return _FACT
+    return _fact_re_cached(extra)
+
+
+from functools import lru_cache  # noqa: E402
+
+
+@lru_cache(maxsize=64)
+def _fact_re_cached(extra: tuple[tuple[str, str], ...]):
+    units = "|".join([f"(?:{re.escape(t)})" for t, _s in extra] + [_UNITS])
+    return re.compile(
+        r"(?<![\w$€£.#/])(?:(over|more than|at least|up to|around|about|nearly|almost)\s+)?"
+        + _NUM + r"\s*(\+)?\s*" + _SCALE + r"\b\s*(\+)?\s*"
+        + r"((?:[A-Za-z][\w.'&-]*\s+){0,3}?)"
+        + r"(" + units + r")\b", re.I)
+
+
+def find(text: str, extra: tuple[tuple[str, str], ...] = ()) -> list[dict]:
+    """Every "<number> <unit>" fact in one line of text.
+
+    `extra` is the account's own vocabulary — (term, subject) pairs a reviewer
+    added by labelling an unaccounted figure (`label_number`) — so "40
+    corridors" becomes a statement once someone has said what a corridor is."""
     found = []
-    for m in _FACT.finditer(text or ""):
+    terms = {t.lower(): subj for t, subj in extra}
+    for m in _fact_re(extra).finditer(text or ""):
         qual, num, plus1, scale, plus2, filler, unit = m.groups()
         if filler and _NOT_FILLER.search(filler):
             continue
-        subj = subject_for(unit)
+        subj = terms.get(unit.lower()) or subject_for(unit)
         if not subj:
             continue
         try:
@@ -164,31 +189,48 @@ def find(text: str) -> list[dict]:
     return found
 
 
-def sweep(html_text: str, body_lines: list[str] | None = None) -> list[dict]:
+def sweep(html_text: str, body_lines: list[str] | None = None,
+          extra: tuple[tuple[str, str], ...] = ()) -> list[dict]:
     """Every coverage/scale fact on one page, each tagged with WHERE it sat.
 
     `body_lines` are the page's main-content blocks as the claim reader saw
     them (`compliance.text_blocks`); a fact found there is `body`, a fact only
     in the full page is `furniture` (header, footer, nav), and one only in the
     embedded data is `page_data`."""
+    return sweep_lines(_lines(html_text), page_data_lines(html_text),
+                       body_lines, extra)
+
+
+def sweep_lines(lines: list[str], data_lines: list[str],
+                body_lines: list[str] | None = None,
+                extra: tuple[tuple[str, str], ...] = ()) -> list[dict]:
+    """`sweep` over an already-parsed page (`pipeline.parse` Document)."""
     body = set(" ".join(b.split()) for b in (body_lines or []))
-    body_text = " ".join(body)
+    body_text = " ".join(body).lower()
     seen, out = set(), []
-    for field, lines in (("visible", _lines(html_text)),
-                         ("page_data", page_data_lines(html_text))):
-        for ln in lines:
-            for f in find(ln):
+    for field, group in (("visible", lines), ("page_data", data_lines)):
+        for ln in group:
+            for f in find(ln, extra):
                 key = (f["subject"], f["value"], f["text"])
                 if key in seen:
                     continue
                 seen.add(key)
                 if field == "visible":
-                    f["field"] = ("body" if f["match"].lower() in body_text.lower()
+                    f["field"] = ("body" if f["match"].lower() in body_text
                                   else "furniture")
                 else:
                     f["field"] = "page_data"
                 out.append(f)
     return out
+
+
+def terms(tenant: str) -> tuple[tuple[str, str], ...]:
+    """The account's own figure vocabulary, as (term, subject) pairs."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbStatementTerm)
+                .filter(db.tenant_filter(db.KbStatementTerm, tenant))
+                .order_by(db.KbStatementTerm.term).all())
+        return tuple((r.term, r.subject) for r in rows)
 
 
 def record(tenant: str, url: str, facts: list[dict], authority: str = "derived",
@@ -200,7 +242,8 @@ def record(tenant: str, url: str, facts: list[dict], authority: str = "derived",
          .delete(synchronize_session=False))
         seen = set()
         for f in facts:
-            fp = prov.fingerprint(f"{f['subject']}|{f['value']}|{f['text']}")
+            fp = prov.fingerprint(f"{f['subject']}|{f['value']}|{f['text']}|"
+                                  f"{f.get('locator', '')}")
             if fp in seen:
                 continue
             seen.add(fp)
@@ -208,7 +251,11 @@ def record(tenant: str, url: str, facts: list[dict], authority: str = "derived",
                 tenant=tenant, url=url, subject=f["subject"], value=f["value"],
                 number=f["number"], qualifier=f["qualifier"], unit=f["unit"],
                 text=f["text"], field=f.get("field", "body"),
-                authority=authority, entity_key=entity_key, fingerprint=fp))
+                authority=authority, entity_key=entity_key, fingerprint=fp,
+                origin=f.get("extractor", "sweep"),
+                extractor=f.get("extractor", "numbers"),
+                extractor_version=f.get("extractor_version", 1),
+                section=f.get("section", ""), locator=f.get("locator", "")))
         s.commit()
     return len(seen)
 
@@ -220,6 +267,14 @@ def rows(tenant: str, subject: str = "") -> list:
             q = q.filter(db.KbStatement.subject == subject)
         out = q.order_by(db.KbStatement.subject, db.KbStatement.number,
                          db.KbStatement.url).all()
+        s.expunge_all()
+    return out
+
+
+def rows_for_url(tenant: str, url: str) -> list:
+    with db.SessionLocal() as s:
+        out = (s.query(db.KbStatement)
+               .filter(db.KbStatement.tenant == tenant, db.KbStatement.url == url).all())
         s.expunge_all()
     return out
 

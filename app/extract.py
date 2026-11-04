@@ -391,6 +391,46 @@ def chunks(blocks: list[str]) -> list[list[str]]:
     return out
 
 
+#: Bump when the claim prompt or its parsing changes: every cached reading
+#: at an older version is read again (BUILD-MAP §4 EXTRACT, per-block cache).
+CLAIMS_VERSION = 1
+
+
+def _cache_key(user: str) -> str:
+    import hashlib
+    return hashlib.sha256(f"{CLAIMS_VERSION}|{_SYSTEM}|{user}".encode("utf-8")).hexdigest()
+
+
+def _cached(tenant: str, user: str) -> dict | None:
+    """A model reading of this exact chunk, already paid for."""
+    from . import db
+    with db.SessionLocal() as s:
+        row = (s.query(db.ExtractCache)
+               .filter(db.ExtractCache.tenant == tenant,
+                       db.ExtractCache.key == _cache_key(user)).one_or_none())
+        if row is None or row.version != CLAIMS_VERSION:
+            return None
+        return {"text": row.text, "truncated": bool(row.truncated)}
+
+
+def _cache_put(tenant: str, user: str, got: dict) -> None:
+    from . import db
+    try:
+        with db.SessionLocal() as s:
+            key = _cache_key(user)
+            row = (s.query(db.ExtractCache)
+                   .filter(db.ExtractCache.tenant == tenant,
+                           db.ExtractCache.key == key).one_or_none())
+            if row is None:
+                row = db.ExtractCache(tenant=tenant, key=key)
+                s.add(row)
+            row.version, row.text = CLAIMS_VERSION, got.get("text", "")
+            row.truncated = 1 if got.get("truncated") else 0
+            s.commit()
+    except Exception:  # noqa: BLE001 — a cache write never fails a read
+        pass
+
+
 def extract(tenant: str, url: str, blocks: list[str],
             entity_key: str = "") -> dict:
     """Claims on one page, as verbatim spans.
@@ -425,7 +465,12 @@ def extract(tenant: str, url: str, blocks: list[str],
         user = (_context(tenant, url, entity_key) + "\n\nBLOCKS:\n"
                 + "\n".join(f"- {b}" for b in body))
         try:
-            got = _call(_SYSTEM, user, tenant)
+            got = _cached(tenant, user)
+            if got is None:
+                got = _call(_SYSTEM, user, tenant)
+                _cache_put(tenant, user, got)
+            else:
+                coverage["cached"] = coverage.get("cached", 0) + 1
         except Exception as exc:  # noqa: BLE001
             if not kept:
                 return {"claims": [], "rejected_not_verbatim": [],

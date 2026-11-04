@@ -40,7 +40,11 @@ from . import db
 KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
              "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs",
-             "kb_contexts", "kb_statements", "page_snapshots"}
+             "kb_contexts", "kb_statements", "page_snapshots",
+             "kb_statement_terms", "unaccounted_numbers", "extract_cache"}
+# `kb_statement_terms` (words a reviewer taught), `unaccounted_numbers`
+# (figures no reader explained) and `extract_cache` (paid model readings of
+# page text) are all derived from the site or about it, and go with it.
 # `page_snapshots` is KNOWLEDGE: the pages as last fetched, rebuilt by the
 # next harvest; kept past a reset they would re-feed the old site to readers.
 # `kb_statements` is KNOWLEDGE and goes with `harvested_pages`: it is what the

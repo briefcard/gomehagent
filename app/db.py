@@ -2271,6 +2271,74 @@ class KbStatement(Base):
     locator = Column(String, default="")                   # table/list position
 
 
+class KbStatementTerm(Base):
+    """A word this account uses for a figure, taught by a reviewer.
+
+    The fact sweep knows a fixed vocabulary (countries, states, licences …).
+    A figure it could not name lands in `unaccounted_numbers`; a reviewer who
+    labels "40 corridors" as a coverage figure adds "corridors" here, and
+    every later read — including a re-read of stored pages — records it.
+    """
+
+    __tablename__ = "kb_statement_terms"
+    __table_args__ = (UniqueConstraint("tenant", "term", name="uq_kb_statement_term"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    term = Column(String, nullable=False)          # "corridors"
+    subject = Column(String, nullable=False)       # "coverage.corridors"
+    added_by = Column(String, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class UnaccountedNumber(Base):
+    """A figure on a page that no reader turned into a statement.
+
+    BUILD-MAP §4 ACCOUNT: "no silent loss" applied to figures. Every number
+    on a page either sits inside a recorded statement, is a known kind of
+    non-fact (a year, a price, a phone number, a date), or is listed here
+    with its sentence — so a reviewer can see what the capture did not
+    understand rather than assume it understood everything. A reviewer's
+    decision (`ignored`, or `labelled` with a subject) survives re-reads.
+    """
+
+    __tablename__ = "unaccounted_numbers"
+    __table_args__ = (UniqueConstraint("tenant", "url", "context_hash", "number_text",
+                                       name="uq_unaccounted_number"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    number_text = Column(String, nullable=False)    # "40" as written
+    context = Column(Text, default="")              # the line it sits in
+    context_hash = Column(String, nullable=False)
+    status = Column(String, default="open")        # open | ignored | labelled
+    label_subject = Column(String, default="")
+    first_seen = Column(DateTime(timezone=True), default=utcnow)
+    last_seen = Column(DateTime(timezone=True), default=utcnow)
+
+
+class ExtractCache(Base):
+    """One model reading of one chunk of page text, kept so it is paid once.
+
+    Keyed by the exact prompt (brand context + the chunk's blocks) and the
+    extractor version: an unchanged chunk on a changed page, or a re-read of
+    stored pages, costs nothing; a changed chunk or a new extractor version
+    misses and is read again.
+    """
+
+    __tablename__ = "extract_cache"
+    __table_args__ = (UniqueConstraint("tenant", "key", name="uq_extract_cache"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    key = Column(String, nullable=False)
+    version = Column(Integer, default=1)
+    text = Column(Text, default="")
+    truncated = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class PageSnapshot(Base):
     """A page as last fetched, stored ONCE, read by every reader.
 

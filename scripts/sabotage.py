@@ -38,6 +38,48 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "only_the_number_reader_runs",
+        "file": "app/pipeline/extractors/__init__.py",
+        "find": "EXTRACTORS = [numbers, enumerations, structured]\n",
+        "replace": "EXTRACTORS = [numbers]  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a licence table that never writes its count is not recorded, so "
+               "the one figure the compliance page is the authority for is lost",
+    },
+    {
+        "name": "an_unaccounted_figure_is_not_listed",
+        "file": "app/pipeline/account.py",
+        "find": "    return out[:MAX_PER_PAGE], counts\n",
+        "replace": "    return [], counts  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "figures the capture did not understand vanish, and a clean "
+               "summary reads as a complete one",
+    },
+    {
+        "name": "a_label_teaches_nothing",
+        "file": "app/statements.py",
+        "find": "        return tuple((r.term, r.subject) for r in rows)\n",
+        "replace": "        return ()  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a reviewer says what a figure is and the next read ignores it",
+    },
+    {
+        "name": "the_model_is_paid_twice_for_one_chunk",
+        "file": "app/extract.py",
+        "find": "            got = _cached(tenant, user)\n",
+        "replace": "            got = None  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "every re-read pays the model again for text it has already read",
+    },
+    {
+        "name": "figures_read_every_account",
+        "file": "app/pipeline/account.py",
+        "find": "                .filter(db.tenant_filter(db.UnaccountedNumber, tenant),\n",
+        "replace": "                .filter(  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "one client's unexplained figures are listed for another client",
+    },
+    {
         "name": "the_ban_scan_fetches_the_site_again",
         "file": "app/compliance.py",
         "find": "                          max_age_hours=0 if changed_since else SCAN_FRESH_HOURS,\n",

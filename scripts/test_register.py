@@ -135,7 +135,9 @@ def main() -> int:
     # at the same time.
     import ast
     n_src = 0
-    for _p in sorted((ROOT / "app").glob("*.py")):
+    # Every module under app/, packages included — the register walks them
+    # all, so the independent count must too.
+    for _p in sorted(x for x in (ROOT / "app").rglob("*.py") if "__pycache__" not in x.parts):
         n_src += len([x for x in ast.parse(_p.read_text()).body
                       if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef))
                       and not x.name.startswith("_")])
