@@ -421,9 +421,15 @@ work, Snapshots, etc so plan to keep it as a reachable source."*
   copies), or one page in full with its history; `version=<hash>` reads an
   earlier copy. This is the seam for SEO/AEO work: titles and headings,
   internal links, structured data, what changed when.
-- Not yet: a retention policy (every distinct copy is kept; compressed), a
-  page-diff view in the console, and SEO-role tools reading `get_pages`
-  directly — the MCP tool is the first consumer.
+- **Retention (owner, 2026-11-04): the last 5 distinct earlier copies per
+  page, cleaned passively.** The crawl only APPENDS the previous copy when a
+  page changes — no comparison on the crawl path. The nightly
+  `crawl_retention` (worker, 03:50; also the `crawl_retention` job kind,
+  `pipeline.retention.clean`) drops any copy identical (by text hash) to a
+  newer copy or to the current page, then keeps the newest
+  `KEEP_VERSIONS = 5`. The current page is never touched.
+- Not yet: a page-diff view in the console, and SEO-role tools reading
+  `get_pages` directly — the MCP tool is the first consumer.
 
 ### Where each piece lives
 

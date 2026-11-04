@@ -834,6 +834,16 @@ def media_sweep() -> None:
         log.info("picture retention: %s", got)
 
 
+def crawl_retention() -> None:
+    """Nightly: keep the last five distinct earlier copies of every crawled
+    page and drop duplicates (pipeline.retention). Off the crawl path by the
+    owner's choice; quiet unless it removed something."""
+    from .pipeline import retention
+    got = retention.clean()
+    if got["dropped_duplicates"] or got["dropped_beyond_last"]:
+        log.info("crawl retention: %s", got)
+
+
 def moments_sweep() -> None:
     """Hourly: notice what has gone quiet, and retire what has gone stale.
 
@@ -1463,6 +1473,9 @@ def main() -> None:
     # day is nothing at all.
     sched.add_job(_safe(media_sweep, "picture retention"), "cron",
                   hour=3, minute=40)
+    # The crawl's history: duplicates out, last five distinct copies kept.
+    sched.add_job(_safe(crawl_retention, "crawl retention"), "cron",
+                  hour=3, minute=50)
     # After the tick, so today's results are on the rows before tomorrow's
     # planner reads them.
     sched.add_job(_safe(performance_sharded, "performance sweep", sharded=True), "cron",

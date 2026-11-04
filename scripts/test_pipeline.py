@@ -845,6 +845,35 @@ def check_the_crawl_is_a_kept_source():
     reprocess.reprocess("baci", apply=True)
     ck("CRAWL and the facts are rebuilt FROM the kept crawl, with no re-crawl",
        any(r.url == u and r.value == "30" for r in st.rows("baci", "scale.partners")))
+    # Retention, passively: the crawl appends without comparing; the nightly
+    # clean drops duplicates and keeps the last five distinct earlier copies.
+    from app.pipeline import retention
+    w = f"{BASE}/pages/retention-test"
+    texts = [f"<html><body><main><h1>Rev</h1><p>Revision {i} of this page.</p>" + FILLER
+             + "</main></body></html>" for i in range(9)]
+    order = [0, 1, 0, 2, 3, 2, 4, 5, 6, 7, 8]          # flips back to 0 and 2
+    for i in order:
+        fetch.store("baci", w, texts[i], parse.parse(texts[i])["text_hash"])
+    raw = fetch.versions("baci", w)
+    ck("CRAWL the crawl itself only appends — no comparison at crawl time",
+       len(raw) == len(order) - 1, str(len(raw)))
+    dry = retention.clean("baci", apply=False)
+    ck("CRAWL a dry run removes nothing", len(fetch.versions("baci", w)) == len(raw)
+       and dry["dropped_duplicates"] >= 2)
+    got = retention.clean("baci")
+    left = fetch.versions("baci", w)
+    hashes = [v.content_hash for v in left]
+    cur = fetch.latest("baci", w).content_hash
+    want = [parse.parse(texts[i])["text_hash"] for i in (7, 6, 5, 4, 2)]
+    ck("CRAWL the clean keeps the last 5 DISTINCT earlier copies, newest first",
+       hashes == want, f"{len(left)} kept; dup={got['dropped_duplicates']} over={got['dropped_beyond_last']}")
+    ck("CRAWL no kept copy duplicates another or the current page",
+       len(set(hashes)) == len(hashes) and cur not in hashes)
+    ck("CRAWL the current page is never touched by the clean",
+       fetch.html_of(fetch.latest("baci", w)) == texts[8])
+    from app import jobs
+    ck("CRAWL retention runs as a job, off the crawl path",
+       jobs.KINDS.get("crawl_retention", {}).get("target") == "app.pipeline.retention:job")
     ck("CRAWL is this account's only",
        mcp_server.get_pages("eien")["total"] == 0 and not fetch.versions("eien", u))
 

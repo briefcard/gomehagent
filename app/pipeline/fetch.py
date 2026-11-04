@@ -72,12 +72,11 @@ def store(tenant: str, url: str, html: str, content_hash: str,
         elif changed:
             row.prev_hash = row.content_hash
             # KEEP THE OLD COPY (owner, 2026-11-04: the crawl is a source in
-            # its own right — SEO/AEO, snapshots over time). Archived, never
-            # overwritten; one row per distinct content.
-            if row.html_z and row.content_hash and not (
-                    s.query(db.PageVersion)
-                    .filter(db.PageVersion.tenant == tenant, db.PageVersion.url == url,
-                            db.PageVersion.content_hash == row.content_hash).first()):
+            # its own right — SEO/AEO, snapshots over time). Appended only, with
+            # no comparison here: the crawl stays cheap, and duplicates and
+            # copies past the last five are cleaned passively, nightly
+            # (`pipeline.retention.clean`).
+            if row.html_z and row.content_hash:
                 s.add(db.PageVersion(tenant=tenant, url=url, content_hash=row.content_hash,
                                      html_z=row.html_z, bytes_=row.bytes_,
                                      risk_tier=row.risk_tier or "",

@@ -90,6 +90,11 @@ KINDS: dict[str, dict] = {
         "target": "app.findings:job",
         "retryable": True,
     },
+    "crawl_retention": {
+        "what": "the crawl's history trimmed: duplicates out, last five copies kept",
+        "target": "app.pipeline.retention:job",
+        "retryable": True,
+    },
     "reprocess": {
         "what": "every stored page re-read with the current readers — no crawl",
         "target": "app.pipeline.reprocess:job",

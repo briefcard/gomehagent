@@ -38,10 +38,27 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "retention_keeps_duplicate_copies",
+        "file": "app/pipeline/retention.py",
+        "find": "            if v.content_hash in seen:\n",
+        "replace": "            if False:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "the five kept copies fill with identical text, and the real "
+               "earlier versions of the page are thrown away",
+    },
+    {
+        "name": "retention_keeps_every_copy",
+        "file": "app/pipeline/retention.py",
+        "find": "            for v in keep[KEEP_VERSIONS:]:\n",
+        "replace": "            for v in []:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "the crawl history grows without bound on every changing page",
+    },
+    {
         "name": "a_changed_page_loses_its_old_copy",
         "file": "app/pipeline/fetch.py",
-        "find": "            if row.html_z and row.content_hash and not (\n",
-        "replace": "            if False and not (  # SABOTAGE\n",
+        "find": "            if row.html_z and row.content_hash:\n",
+        "replace": "            if False:  # SABOTAGE\n",
         "suites": ["test_pipeline.py"],
         "why": "every re-crawl overwrites what the page said before, and no "
                "snapshot over time can ever be answered",

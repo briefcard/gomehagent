@@ -2604,8 +2604,11 @@ class PageVersion(Base):
     """
 
     __tablename__ = "page_versions"
-    __table_args__ = (UniqueConstraint("tenant", "url", "content_hash",
-                                       name="uq_page_version"),)
+    # NO uniqueness, deliberately (owner, 2026-11-04: "only save files that
+    # have any difference from a previous version … checked and cleaned
+    # passively, not at the moment of crawl"). The crawl only appends; the
+    # nightly `pipeline.retention.clean` drops copies identical to a newer one
+    # and keeps the last KEEP_VERSIONS per page.
 
     id = Column(String, primary_key=True, default=_uuid)
     tenant = Column(String, nullable=False, index=True)
