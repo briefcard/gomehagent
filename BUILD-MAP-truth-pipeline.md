@@ -406,6 +406,25 @@ M6 `1f1f54d` · M7 `c897356` · M8 `eb525fc` · M9 (this commit).
 | Documents (M9) | PDF reading for binding docs | PDFs linked from legal/coverage pages, 20 per run, binding when legal | scanned PDFs need OCR (reported as "no text") |
 | Surfaces (§7) | digest, binding-documents library, screenshots | not built | Review tabs: Site facts, Checks & trust, Questions for QA, Changes; QA log CSV |
 
+### The crawl is a kept source (owner, 2026-11-04)
+
+*"There is value in the crawl data itself for future operations like SEO/AEO
+work, Snapshots, etc so plan to keep it as a reachable source."*
+
+- `page_snapshots` (each page as last fetched, with its parsed Document) and
+  `page_versions` (every earlier distinct copy, archived when a page changes)
+  form their own reset group, **`crawl`**, outside the default reset. A
+  knowledge reset clears what was concluded and KEEPS the pages;
+  `pipeline.reprocess` rebuilds the facts from them with no re-crawl.
+- MCP **`get_pages`** (read-only): the crawl listed and searchable (tier,
+  title, headings, words, links, tables, JSON-LD, last change, earlier
+  copies), or one page in full with its history; `version=<hash>` reads an
+  earlier copy. This is the seam for SEO/AEO work: titles and headings,
+  internal links, structured data, what changed when.
+- Not yet: a retention policy (every distinct copy is kept; compressed), a
+  page-diff view in the console, and SEO-role tools reading `get_pages`
+  directly — the MCP tool is the first consumer.
+
 ### Where each piece lives
 
 `app/pipeline/` — `fetch`, `parse`, `extractors/{numbers,enumerations,structured}`,

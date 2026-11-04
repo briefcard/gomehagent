@@ -71,6 +71,18 @@ def store(tenant: str, url: str, html: str, content_hash: str,
             s.add(row)
         elif changed:
             row.prev_hash = row.content_hash
+            # KEEP THE OLD COPY (owner, 2026-11-04: the crawl is a source in
+            # its own right — SEO/AEO, snapshots over time). Archived, never
+            # overwritten; one row per distinct content.
+            if row.html_z and row.content_hash and not (
+                    s.query(db.PageVersion)
+                    .filter(db.PageVersion.tenant == tenant, db.PageVersion.url == url,
+                            db.PageVersion.content_hash == row.content_hash).first()):
+                s.add(db.PageVersion(tenant=tenant, url=url, content_hash=row.content_hash,
+                                     html_z=row.html_z, bytes_=row.bytes_,
+                                     risk_tier=row.risk_tier or "",
+                                     first_seen=row.changed_at or row.fetched_at,
+                                     last_seen=_now()))
         if changed:
             row.changed_at = _now()
             row.parser_version = 0          # the document is stale
@@ -148,3 +160,13 @@ def set_tier(tenant: str, url: str, tier: str) -> None:
         if row is not None:
             row.risk_tier = tier
             s.commit()
+
+
+def versions(tenant: str, url: str) -> list:
+    """Earlier copies of one page, newest first (the current copy is `latest`)."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.PageVersion)
+                .filter(db.tenant_filter(db.PageVersion, tenant), db.PageVersion.url == url)
+                .order_by(db.PageVersion.last_seen.desc()).all())
+        s.expunge_all()
+        return rows

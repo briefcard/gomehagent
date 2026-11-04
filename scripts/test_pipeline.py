@@ -804,6 +804,51 @@ def check_m9_what_a_fetch_cannot_see():
     ck("M9 feeds are this account's only", not apis.feeds("eien"))
 
 
+def check_the_crawl_is_a_kept_source():
+    """Owner, 2026-11-04: the crawl itself is valuable (SEO/AEO, snapshots
+    over time) — keep it, and keep it reachable."""
+    from app import mcp_server, reset, statements as st
+    from app.pipeline import fetch, parse, reprocess
+    u = f"{BASE}/pages/history-test"
+    v1 = "<html><body><main><h1>Our story</h1><p>Founded with 12 partners.</p>" + FILLER + "</main></body></html>"
+    v2 = v1.replace("12 partners", "30 partners")
+    fetch.store("baci", u, v1, parse.parse(v1)["text_hash"])
+    fetch.store("baci", u, v1, parse.parse(v1)["text_hash"])       # unchanged: no copy
+    fetch.store("baci", u, v2, parse.parse(v2)["text_hash"])
+    vers = fetch.versions("baci", u)
+    ck("CRAWL a page that changed keeps its earlier copy, once per distinct content",
+       len(vers) == 1 and fetch.html_of(vers[0]) == v1 and fetch.html_of(fetch.latest("baci", u)) == v2,
+       str(len(vers)))
+    got = mcp_server.get_pages("baci", query="our story")
+    ck("CRAWL get_pages lists and searches the crawl",
+       got["ok"] and any(p["url"] == u and p["title"] == "Our story" and p["earlier_copies"] == 1
+                         for p in got["pages"]), str(got.get("pages"))[:300])
+    one = mcp_server.get_pages("baci", url=u)
+    ck("CRAWL one page in full, with its earlier copies",
+       one["ok"] and one["headings"][0]["text"] == "Our story" and len(one["versions"]) == 1
+       and any("30 partners" in b for b in one["blocks"]))
+    old = mcp_server.get_pages("baci", url=u, version=vers[0].content_hash)
+    ck("CRAWL an earlier copy's text is readable", old["ok"] and any("12 partners" in b for b in old["blocks"]))
+    import inspect as _insp
+    default = _insp.signature(reset.reset).parameters["groups"].default
+    prev = str(reset.preview("baci"))
+    ck("CRAWL the crawl is its own reset group, outside the default reset",
+       "crawl" not in default and "page_snapshots" in reset.GROUPS["crawl"]
+       and "page_versions" in reset.GROUPS["crawl"]
+       and not any("page_snapshots" in g for k, g in reset.GROUPS.items() if k != "crawl")
+       and "page_snapshots" not in prev, f"default={default}")
+    n_before = len(fetch.snapshots("baci"))
+    reset.reset("baci", groups=("knowledge",), apply=True)
+    ck("CRAWL a knowledge reset keeps every stored page and its history",
+       len(fetch.snapshots("baci")) == n_before and fetch.versions("baci", u)
+       and not st.rows("baci"), f"{n_before} -> {len(fetch.snapshots('baci'))}")
+    reprocess.reprocess("baci", apply=True)
+    ck("CRAWL and the facts are rebuilt FROM the kept crawl, with no re-crawl",
+       any(r.url == u and r.value == "30" for r in st.rows("baci", "scale.partners")))
+    ck("CRAWL is this account's only",
+       mcp_server.get_pages("eien")["total"] == 0 and not fetch.versions("eien", u))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -819,6 +864,7 @@ def main() -> int:
     check_m7_the_fact_gate()
     check_m8_changes_reach_every_place()
     check_m9_what_a_fetch_cannot_see()
+    check_the_crawl_is_a_kept_source()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

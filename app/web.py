@@ -6377,9 +6377,10 @@ def tenant_reset(key: str = Depends(admin_key), tenant: str = "",
     pre-filled Baci, not a blank client.
 
     Reports by default. `apply=1` deletes. `groups=` is any of
-    knowledge | operations | access — and **access is excluded by default**,
-    because deleting credentials makes your client redo OAuth rather than
-    making work for you.
+    knowledge | operations | access | crawl — and **access and crawl are
+    excluded by default**: deleting credentials makes your client redo OAuth,
+    and the crawl (every page as fetched, with its history) is a source in its
+    own right that a knowledge reset rebuilds facts FROM.
 
     Refuses an empty tenant: that is UNASSIGNED, and deleting on it would
     erase every unattributed row in the system.

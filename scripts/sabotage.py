@@ -38,6 +38,32 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_changed_page_loses_its_old_copy",
+        "file": "app/pipeline/fetch.py",
+        "find": "            if row.html_z and row.content_hash and not (\n",
+        "replace": "            if False and not (  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "every re-crawl overwrites what the page said before, and no "
+               "snapshot over time can ever be answered",
+    },
+    {
+        "name": "a_knowledge_reset_deletes_the_crawl",
+        "file": "app/reset.py",
+        "find": "GROUPS = {\"knowledge\": KNOWLEDGE, \"operations\": OPERATIONS, \"access\": ACCESS,\n",
+        "replace": "KNOWLEDGE = KNOWLEDGE | CRAWL  # SABOTAGE\nGROUPS = {\"knowledge\": KNOWLEDGE, \"operations\": OPERATIONS, \"access\": ACCESS,\n",
+        "suites": ["test_pipeline.py"],
+        "why": "clearing an account's conclusions also throws away the pages "
+               "they were drawn from, and the whole site must be crawled again",
+    },
+    {
+        "name": "get_pages_reads_every_account",
+        "file": "app/pipeline/fetch.py",
+        "find": "                .filter(db.tenant_filter(db.PageVersion, tenant), db.PageVersion.url == url)\n",
+        "replace": "                .filter(db.PageVersion.url == url)  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "one client's page history is served to another client's session",
+    },
+    {
         "name": "an_unrendered_page_reads_as_empty",
         "file": "app/harvest.py",
         "find": "            if render_state != 1:\n                render_state = 2\n",

@@ -2592,6 +2592,32 @@ class KbApiSource(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class PageVersion(Base):
+    """An earlier copy of a page, kept when the page changed.
+
+    Owner, 2026-11-04: *"there is value in the crawl data itself for future
+    operations like SEO/AEO work, Snapshots, etc so plan to keep it as a
+    reachable source."* `page_snapshots` holds each page as last fetched;
+    this holds every earlier distinct copy (compressed), so what a page said
+    on a date, and what changed since, stays answerable. Written by
+    `pipeline.fetch.store` on change; read by MCP `get_pages`.
+    """
+
+    __tablename__ = "page_versions"
+    __table_args__ = (UniqueConstraint("tenant", "url", "content_hash",
+                                       name="uq_page_version"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    content_hash = Column(String, nullable=False)
+    html_z = Column(LargeBinary)
+    bytes_ = Column("bytes", Integer, default=0)
+    risk_tier = Column(String, default="")
+    first_seen = Column(DateTime(timezone=True))   # when this copy was first fetched
+    last_seen = Column(DateTime(timezone=True))    # when it was replaced
+
+
 class PageSnapshot(Base):
     """A page as last fetched, stored ONCE, read by every reader.
 

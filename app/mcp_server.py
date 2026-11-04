@@ -45,6 +45,11 @@ that said what was due, what was stuck or what had worked:
                   CHANGES: a changed answer with every page, draft and
                   unreadable page still to update. Draft from the approved
                   answers; never from a disputed figure. Read-only.
+    get_pages     the CRAWL itself: every page of the account's sites as
+                  fetched — tier, title, headings, size, links, when it last
+                  changed — searchable; one page in full (blocks, headings,
+                  tables, lists, links, structured data) with its earlier
+                  copies. For SEO/AEO and snapshot work. Read-only.
     get_claims    the whole claims register — proposed, approved, rejected —
                   with evidence, source page and tags, filtered and paged,
                   plus how much of the account's sites the harvest has read.
@@ -119,7 +124,7 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
-         "get_claims", "get_statements", "get_trust", "get_truth",
+         "get_claims", "get_statements", "get_trust", "get_truth", "get_pages",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
@@ -781,6 +786,98 @@ def get_truth(tenant: str, subject: str = "", include_closed: bool = False) -> d
             # Changed answers and every place still stating the old one.
             "changes": [c for c in change.listing(tenant, "open")
                         if not subject or c["subject"] == subject][:50]}
+
+
+#: Most pages one get_pages listing returns; page with `offset`.
+PAGES_MAX = 200
+
+
+@server.tool()
+def get_pages(tenant: str, url: str = "", query: str = "", tier: str = "",
+              changed_since: str = "", version: str = "", offset: int = 0,
+              limit: int = 50) -> dict[str, Any]:
+    """The account's crawl as data — every stored page, or one page in full.
+
+    LISTING (no `url`): one row per page — url, risk tier (legal, coverage,
+    product, support, marketing, blog), title, top headings, words, links,
+    tables, lists, figures recorded, fetched_at, changed_at, earlier copies,
+    and whether it needed a browser. `query` matches url, title, headings and
+    body text; `tier` filters; `changed_since` (YYYY-MM-DD) keeps pages whose
+    content changed on or after that date. Paged by `offset`/`limit`.
+
+    ONE PAGE (`url`): its parsed Document — headings, body blocks, every
+    visible line incl. header/footer, tables, lists, links, JSON-LD and
+    embedded page data — plus `versions`, the earlier copies kept when it
+    changed. `version=<content_hash>` returns that earlier copy's text.
+    For SEO / AEO work (titles, headings, internal links, structured data,
+    what changed when). Read-only; never fetches the live site."""
+    from sqlalchemy import func
+
+    from . import db, statements, tenants
+    from .pipeline import fetch, parse
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}",
+                "known": sorted(t.key for t in tenants.all_tenants())}
+
+    def _when(d):
+        return d.isoformat() if d else ""
+
+    if url:
+        row = fetch.latest(tenant, url)
+        if row is None:
+            return {"ok": False, "why": f"{url} is not in this account's crawl"}
+        vers = fetch.versions(tenant, url)
+        out = {"ok": True, "tenant": tenant, "url": url, "tier": row.risk_tier,
+               "fetched_at": _when(row.fetched_at), "changed_at": _when(row.changed_at),
+               "rendered": row.rendered or 0,
+               "versions": [{"content_hash": v.content_hash, "first_seen": _when(v.first_seen),
+                             "replaced_at": _when(v.last_seen), "bytes": v.bytes_} for v in vers]}
+        if version:
+            v = next((v for v in vers if v.content_hash == version), None)
+            if v is None:
+                return {"ok": False, "why": f"no earlier copy {version!r} of {url}"}
+            d = parse.parse(fetch.html_of(v))
+            out.update({"version": version, "blocks": d["blocks"][:600],
+                        "headings": d["headings"], "lines": d["lines"][:800]})
+            return out
+        d = parse.document(tenant, url)
+        out.update({k: d.get(k) for k in ("headings", "tables", "lists", "jsonld",
+                                           "interactive", "from_page_data", "numbers_total")})
+        out.update({"blocks": d.get("blocks", [])[:600], "lines": d.get("lines", [])[:800],
+                    "links": d.get("links", [])[:500], "page_data": d.get("page_data", [])[:300],
+                    "statements": [{"subject": r.subject, "value": r.value, "field": r.field,
+                                    "authority": r.authority, "text": r.text[:200]}
+                                   for r in statements.rows_for_url(tenant, url)]})
+        return out
+
+    q = (query or "").strip().lower()
+    since = (changed_since or "").strip()
+    rows = []
+    for r in fetch.snapshots(tenant):
+        if tier and (r.risk_tier or "") != tier:
+            continue
+        if since and (not r.changed_at or r.changed_at.date().isoformat() < since):
+            continue
+        d = r.document if (r.document and r.parser_version == parse.VERSION) else parse.document(tenant, r.url)
+        heads = [h["text"] for h in d.get("headings", [])]
+        if q and q not in r.url.lower() and not any(q in h.lower() for h in heads) \
+                and q not in " ".join(d.get("blocks", [])).lower():
+            continue
+        rows.append({"url": r.url, "tier": r.risk_tier, "title": heads[0] if heads else "",
+                     "headings": heads[:6],
+                     "words": len(" ".join(d.get("blocks", [])).split()),
+                     "links": len(d.get("links", [])), "tables": len(d.get("tables", [])),
+                     "lists": len(d.get("lists", [])), "has_jsonld": bool(d.get("jsonld")),
+                     "fetched_at": _when(r.fetched_at), "changed_at": _when(r.changed_at),
+                     "rendered": r.rendered or 0, "source": r.source_label})
+    with db.SessionLocal() as s:
+        nver = dict(s.query(db.PageVersion.url, func.count(db.PageVersion.id))
+                    .filter(db.PageVersion.tenant == tenant).group_by(db.PageVersion.url).all())
+    for x in rows:
+        x["earlier_copies"] = nver.get(x["url"], 0)
+    limit = max(1, min(int(limit or 50), PAGES_MAX))
+    return {"ok": True, "tenant": tenant, "total": len(rows), "offset": offset,
+            "returned": len(rows[offset:offset + limit]), "pages": rows[offset:offset + limit]}
 
 
 #: Most claims one get_claims call returns. Page with `offset` past this.

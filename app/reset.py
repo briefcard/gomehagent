@@ -40,7 +40,7 @@ from . import db
 KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
              "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs",
-             "kb_contexts", "kb_statements", "page_snapshots",
+             "kb_contexts", "kb_statements",
              "kb_statement_terms", "unaccounted_numbers", "extract_cache",
              "known_answers", "audit_samples", "kb_sources", "kb_fact_values",
              "kb_page_scopes", "findings", "kb_api_sources"}
@@ -53,8 +53,6 @@ KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
 # `kb_statement_terms` (words a reviewer taught), `unaccounted_numbers`
 # (figures no reader explained) and `extract_cache` (paid model readings of
 # page text) are all derived from the site or about it, and go with it.
-# `page_snapshots` is KNOWLEDGE: the pages as last fetched, rebuilt by the
-# next harvest; kept past a reset they would re-feed the old site to readers.
 # `kb_statements` is KNOWLEDGE and goes with `harvested_pages`: it is what the
 # crawl read off the site, rebuilt by the next harvest. Leaving it behind on a
 # knowledge reset would show a cleared account's old site figures as current.
@@ -162,7 +160,16 @@ ACCESS = {"credentials", "connect_links", "intake_links", "portal_links"}
 # did, not a credential — and a privacy request that survives a reset is the
 # correct behaviour, because the obligation does too.
 
-GROUPS = {"knowledge": KNOWLEDGE, "operations": OPERATIONS, "access": ACCESS}
+#: THE CRAWL — every page as fetched, and every earlier copy. Owner,
+#: 2026-11-04: the crawl data has value of its own (SEO/AEO, snapshots over
+#: time) and must stay reachable. So it is NOT knowledge: a knowledge reset
+#: clears what was concluded from the pages and keeps the pages, and
+#: `pipeline.reprocess` rebuilds the facts from them with no re-crawl.
+#: Opt in by name (groups=crawl) to delete it, as with access.
+CRAWL = {"page_snapshots", "page_versions"}
+
+GROUPS = {"knowledge": KNOWLEDGE, "operations": OPERATIONS, "access": ACCESS,
+          "crawl": CRAWL}
 
 
 def _tenant_models() -> dict[str, object]:
@@ -217,7 +224,7 @@ def _run(tenant: str, groups, apply: bool) -> dict:
     models = _tenant_models()
     # A table carrying `tenant` that no group claims is reported rather than
     # quietly skipped: the point of deriving the list is to notice these.
-    unclassified = sorted(set(models) - KNOWLEDGE - OPERATIONS - ACCESS)
+    unclassified = sorted(set(models) - KNOWLEDGE - OPERATIONS - ACCESS - CRAWL)
 
     counts, deleted = {}, 0
     with db.SessionLocal() as s:
@@ -245,6 +252,10 @@ def _run(tenant: str, groups, apply: bool) -> dict:
         "note": (
             "nothing was deleted — add apply=1 to do it" if not apply else
             f"deleted {deleted} rows across {len(counts)} tables"),
+        "crawl": ("the crawl (pages as fetched and their history) was KEPT — "
+                  "re-read it with reprocess to rebuild facts; add the 'crawl' "
+                  "group to delete it" if "crawl" not in groups else
+                  "the crawl WAS included — the sites must be crawled again"),
         "warning": (
             "credentials were NOT touched — deleting those makes your CLIENT "
             "redo OAuth. Add the 'access' group deliberately if that is what "

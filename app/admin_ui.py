@@ -9742,8 +9742,9 @@ _KB_DESCRIBED = [
      "pages that disagree sit side by side (Review › Site facts)."),
     ("PageSnapshot", "page_snapshots", "Each page as last fetched, with its parsed form",
      "Kept so every reader — facts, claims, the ban-list scan — reads one copy "
-     "instead of fetching the site again, and so a better reader can re-read "
-     "the site without a crawl. Rebuilt by the next harvest."),
+     "instead of fetching the site again, so a better reader can re-read the site "
+     "without a crawl, and so the crawl itself is a source (MCP get_pages). "
+     "Outside the knowledge reset: its own 'crawl' group."),
     ("KbStatementTerm", "kb_statement_terms", "Words a reviewer taught the fact reader",
      "Added when a reviewer says what an unexplained figure counts (\"40 corridors\" "
      "is a coverage figure); every later read records it as a fact."),
@@ -9777,6 +9778,9 @@ _KB_DESCRIBED = [
     ("KbApiSource", "kb_api_sources", "Public data feeds counted as figures",
      "A feed (e.g. a supported-countries API) registered by a reviewer; its list is "
      "counted on every harvest and can be made the source of truth."),
+    ("PageVersion", "page_versions", "Earlier copies of pages that changed",
+     "Kept so the crawl answers what a page said on a date and what changed since "
+     "(SEO/AEO, snapshots). Outside the knowledge reset: its own 'crawl' group."),
 ]
 # (`change_requests` / `change_tasks` are OPERATIONS — a record of work done
 # to make the site agree with a changed answer — and appear on Review › Changes.)
