@@ -333,6 +333,72 @@ Seeded so QA starts with structure, not a blank page:
   Meta creatives are read as statements too, so B4/B5/B6 are caught without
   waiting for a page to repeat them.
 
+### 4.8 Every existing path, in this shape
+
+Owner, 2026-11-04: *"make sure that the harvest / compliance check etc match
+this shape."* Today each path has its own idea of a fact and its own judge. In
+the new shape there are exactly **three shared parts**, and every path either
+PRODUCES statements or CHECKS content through them:
+
+1. **`Statement`** — the one record every reader emits:
+   `tenant, text, subject?, value?, scope{entity, market, channel, audience,
+   valid_from, valid_to}, source{kind: page|document|system|mail|human|agent,
+   ref (url / file / system key), field (body, seo_description, policy…),
+   authority: canonical|binding|derived}, origin, observed_at, content_hash`.
+   A claim becomes a Statement that a person approved; a sentence on a live
+   page is a Statement nobody has to approve to be checked.
+2. **`truth.resolve(tenant, subject, scope)`** — the approved value at the
+   most specific matching scope (entity → its groups → brand, × market ×
+   channel × date), with the source that set it. The ONLY place truth is read.
+3. **`truth.compare(statement) → Finding | None`** — deterministic: same
+   subject and scope, different value = `contradiction`; asserted wider than
+   the truth's scope = `scope_error`; no approved value = `unsupported`;
+   past `valid_to` = `stale`; value forbidden by a binding/regulated fact =
+   `banned_value`. The ONLY judge. Every check below calls it, so a harvest, a
+   draft and a customer reply can never disagree about what is true.
+
+Plus one index, **`statement_locations`** (fact/statement ↔ url, field,
+sentence, observed_at, hash): where each value is stated. This is what makes
+propagation (§4.5) and the closed loop possible, and it is written by the
+readers below as a side effect of reading.
+
+**Producers — must emit Statements with subject + scope + authority:**
+
+| Path (today) | Today it… | In the new shape it… |
+|---|---|---|
+| `harvest.harvest` (website + landing pages + subdomains) | proposes claims; legal pages read first, marked by URL | emits Statements per sentence with **scope from the page** (product URL → entity, locale path `/en-gb/` or `?country=` → market, help-centre/docs → channel), **authority from the source** (legal → binding; a source QA declared canonical → canonical; else derived); writes `statement_locations`; calls `compare` on every Statement so the crawl itself raises findings; re-reads pages with OPEN findings first so a fix is verified on the next run |
+| `catalog_sync.sync_shopify` | name/price/description vs approved entity → `KbConflict`; availability overwritten | is a **canonical system source** for price, availability, variants — per Shopify Market where the store has markets (so availability gets its market dimension from the system, not from prose); disagreements become findings in the same queue |
+| *new* system readers (shipping settings, discount codes, inventory, Meta live creatives) | — (B4, B5, B6 were found by hand) | canonical Statements for `shipping.*`, `offer.*`, `availability`; ad text read as derived Statements (channel = ads) |
+| `email_harvest` (sent mail) | proposes claims from what the brand wrote | Statements with channel = email, authority = derived — what was PROMISED to customers is checked, never treated as truth |
+| `propose.py` (agent) / `kb_seed` / console add-claim (`web.py:4810`, `:5136`) / bulk import (`kb.py:3823`, `:4967`) | add claims, scope optional | must state subject + scope (or explicitly "brand-wide"); the console form gains scope pickers (entity/group, market, channel, dates); seeded subjects come from the §4.6 templates |
+| uploads (PDF spec sheets, licences, policies) | via `inbox_attachment` / KB upload | a document source; QA can declare it **canonical** for subjects ("this licence PDF is canonical for `licence.*` in GB") |
+
+**Checks — must call `truth.compare`, then their own rules:**
+
+| Check (today) | Today it verifies… | In the new shape it… |
+|---|---|---|
+| `compliance.scan` (live site, scheduled) | banned PHRASES only; legal pages skipped | becomes the **live-site truth scan**: every page's Statements through `compare` (findings with severity), THEN the ban list. Legal pages are INCLUDED in the truth scan (they are where binding values live — B1 is two legal pages disagreeing) and still excluded from the ban-phrase scan only |
+| `validator.check` / MCP `check` (drafts) | ban list, a citation exists, entity available | adds the **`contradicts_fact` gate**: each draft sentence that states a subject is compared at the draft's scope (product + market + channel); a contradiction or `banned_value` blocks, `unsupported` warns |
+| `triage._apply_guards` / `responder` / MCP `inbox_draft` (customer replies) | ban list, guards | same gate on replies — a reply promising a 30-day return when the binding policy says 7 is blocked before it is drafted |
+| `seo_guard.check` (before any live-site write) | ban list on prose fields | same gate on the NEW text, so a propagation edit or an SEO edit can never write a value that contradicts truth |
+| `claim_trace.annotate` (grounding reading) | marks sentences supported by approved claims | also marks sentences that **contradict** — the reading shows red, not just "unsupported" |
+| `kb.scope_conflicts` / `label_conflicts` (JSON only) | pairs at different depths / tags | feed `scope_error` findings into the queue (no separate JSON-only surface) |
+| `provenance.apply_fields` / `KbConflict` | per-row field disagreements | the findings table generalises it; existing conflicts migrate in |
+
+**Readers of truth — must read through `resolve`:**
+- `get_package` serves resolved values for the scope being written (plus every
+  binding value), not a flat claim list.
+- `get_claims` stays the statement register; a new `get_truth` (+ CSV) is the
+  truth sheet; `get_findings` (+ CSV) the queue — all through MCP for Claude.
+- `voice` keeps reading the website only and never legal pages (unchanged —
+  voice is not a fact).
+
+**What this changes in the code built today (2026-11-04):** the harvest's
+`is_legal_url` marking becomes the `binding` authority on the page's source;
+`kb.is_legal_claim` / `legal_claims` become `resolve(..., authority=binding)`;
+`get_claims`' `legal` column becomes `authority`. No rework of the crawl
+memory, legal-first ordering or CSV export — they carry over as they are.
+
 ## 5. Phases (each ends with a QA/owner check; nothing publishes without a tap)
 
 0. **QA identity** — per-user console logins and a `qa` role (today one shared
@@ -361,7 +427,21 @@ Seeded so QA starts with structure, not a blank page:
 Suggested first account: **Baci** (most verified conflicts, writable
 Shopify), then **Transak** (the matrix case), then the rest.
 
-## 6. Decisions for the owner before building
+## 6. Decisions
+
+Owner, 2026-11-04: *"I like your suggestions"* — taken as the defaults below.
+1 and 4 had no single suggestion, so the conservative reading is recorded;
+change them here if that is wrong.
+
+| # | Decision | Taken as |
+|---|---|---|
+| 1 | Who is QA | The owner for now; Phase 0 still builds per-user logins + a `qa` role so a QA hire slots in with an audit trail |
+| 2 | Default authority when nothing is canonical | legal page (binding) > system (Shopify settings, inventory, discounts) > owner-approved claim > marketing page / ad / email |
+| 3 | Markets | ISO country codes + named groups (EU, LATAM, "all supported") |
+| 4 | Live-site edits | Every live-site edit still needs the owner's tap; QA approves the *truth*, the owner approves the *publish* |
+| 5 | Pages we cannot write (Transak help centre/docs) | Manual task lists with exact URL, sentence and replacement; connect their CMS later |
+
+### The questions as originally asked
 
 1. **Who is QA?** A separate login with a `qa` role, or the owner for now?
 2. **Default authority when nothing is declared canonical:** legal page >
