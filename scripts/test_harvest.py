@@ -470,6 +470,9 @@ def main() -> int:
     print("\n— pages that cannot be read do not hold the front of the queue —")
     check_unreadable_pages_do_not_loop(ck, httpx)
 
+    print("\n— legal pages are read, first, and marked legal —")
+    check_legal_pages_are_harvested(ck, httpx)
+
     httpx.get = real
     print("\n— a thin queue must say WHY it is thin —")
     check_known_drops_are_counted(ck)
@@ -553,6 +556,73 @@ def check_unreadable_pages_do_not_loop(ck, httpx):
     got = harvest.harvest("baci", limit=1, apply=False)
     ck("discovery reaches every page of a 700-page source, not the first 500",
        got.get("pages_discovered") == len(many), str(got.get("pages_discovered")))
+
+
+def check_legal_pages_are_harvested(ck, httpx):
+    """Owner, 2026-11-04: "Do not skip those legal pages but note specifically
+    that those are legal pages so we know they are critical in terms of
+    importance and should never be contradicted."
+
+    Until then `/terms`, `/privacy`, `/legal`, `/disclaimer`, `/cookie` and
+    `/policies/` were dropped at discovery with the cart and the login, so a
+    licence, a regulated status or a refund term never reached the knowledge
+    base at all.
+    """
+    from app import harvest as hv
+
+    terms = "https://bacimilanousa.com/pages/terms-of-service"
+    refund = "https://bacimilanousa.com/policies/refund-policy"
+    story = [f"https://bacimilanousa.com/pages/chapter-{i}" for i in range(5)]
+    sitemap = ("<?xml version=\"1.0\"?><urlset>"
+               + "".join(f"<url><loc>{u}</loc></url>" for u in story + [terms, refund])
+               + "</urlset>")
+    legal_text = {
+        terms: "Baci Milano USA LLC is registered in the State of Florida under "
+               "document number L21000123456 as the importer of record.",
+        refund: "Returns are accepted within 30 days of delivery for unused items "
+                "in their original packaging, with a full refund to the card used.",
+    }
+
+    def _get(url, **kw):
+        if url.endswith("/sitemap.xml"):
+            return _Resp(sitemap)
+        if url in legal_text:
+            return _Resp(f"<html><body><main><h1>Legal</h1><p>{legal_text[url]}</p>"
+                         f"<p>{legal_text[url]} This applies to every order.</p>"
+                         f"</main></body></html>")
+        if "/pages/chapter-" in url:
+            n = url.rsplit("-", 1)[-1]
+            return _Resp(f"<html><body><main><h1>Chapter {n}</h1>"
+                         f"<p>Chapter {n} of the studio's story, written for the "
+                         f"people who collect our tableware every season.</p>"
+                         f"<p>Each chapter follows one collection from the first "
+                         f"sketch in Milan to a table in someone's home.</p>"
+                         f"</main></body></html>")
+        return _Resp("", 404)
+
+    httpx.get = _get
+    found, _how = compliance.discover_pages("bacimilanousa.com")
+    ck("the ban-list scan's discovery still leaves legal pages out",
+       terms not in {p["url"] for p in found} and refund not in {p["url"] for p in found})
+    found, _how = compliance.discover_pages("bacimilanousa.com", keep_legal=True)
+    ck("the harvest's discovery keeps them, Shopify's /policies/ included",
+       {terms, refund} <= {p["url"] for p in found})
+
+    hv.forget_pages("baci")
+    first = harvest.harvest("baci", limit=2, apply=True)
+    state = hv._page_state("baci")
+    ck("legal pages are read FIRST — before any page the site lists ahead of them",
+       terms in state and refund in state and not any(u in state for u in story),
+       f"read: {sorted(state)}")
+    filed = [c for c in kb.pending_claims("baci")
+             if "L21000123456" in c.claim or "30 days of delivery" in c.claim]
+    ck("what a legal page states is filed as a claim proposal, never routed away",
+       len(filed) >= 2, f"{[c.claim[:60] for c in filed]} / {first.get('dropped_by_reason')}")
+    ck("…and is recognisably legal from where it was read",
+       filed and all(kb.is_legal_claim(c) for c in filed))
+    ck("a claim off an ordinary page is not marked legal",
+       not kb.is_legal_claim(type("C", (), {"source": "stated on https://bacimilanousa.com/pages/chapter-1",
+                                           "also_seen": []})()))
 
 
 def check_known_drops_are_counted(ck):

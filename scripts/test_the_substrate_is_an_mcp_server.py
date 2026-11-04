@@ -305,6 +305,40 @@ def main() -> int:
         bad = rpc.call("get_claims", {"tenant": "nobody"})["structuredContent"]
         ck("get_claims refuses an unknown account by name", not bad["ok"] and "baci" in bad["known"])
 
+        # Legal: owner, 2026-11-04 — "critical in terms of importance and
+        # should never be contradicted".
+        LEGAL = "Orders are refunded in full within 30 days of delivery."
+        kb.add_claim(T, LEGAL, "30 days", [], origin="human",
+                     source="stated on https://bacimilanousa.com/policies/refund-policy")
+        got = rpc.call("get_claims", {"tenant": T})["structuredContent"]
+        ck("a claim off a legal page is marked legal and comes first",
+           got["claims"][0]["claim"] == LEGAL and got["claims"][0]["legal"] is True
+           and got["legal_in_account"] == 1
+           and all(c["legal"] is False for c in got["claims"][1:]), str(got["claims"][:2])[:300])
+        only = rpc.call("get_claims", {"tenant": T, "legal_only": True})["structuredContent"]
+        ck("legal_only returns only the legal claims",
+           [c["claim"] for c in only["claims"]] == [LEGAL])
+        import csv as _csv
+        import io as _io
+        out = rpc.call("get_claims", {"tenant": T, "format": "csv"})["structuredContent"]
+        rows = list(_csv.DictReader(_io.StringIO(out.get("csv", ""))))
+        ck("format=csv returns one parseable CSV, a header and one row per claim",
+           out["ok"] and "claims" not in out
+           and list(rows[0]) == list(mcp_server.CLAIM_CSV_COLUMNS)
+           and len(rows) == out["returned"] == 3, str(out)[:200])
+        ck("…with legal marked 'yes', review and evidence intact",
+           rows[0]["claim"] == LEGAL and rows[0]["legal"] == "yes"
+           and any(r["review"] == "proposed" and r["evidence"] == "3 steps" for r in rows),
+           str(rows[:2]))
+        bad = rpc.call("get_claims", {"tenant": T, "format": "xml"})["structuredContent"]
+        ck("an unknown format is refused", not bad["ok"] and "csv" in bad["known"])
+        pkg = _text(rpc.call("get_package", {"tenant": T, "system": "campaign_email"}))
+        ck("the brief lists approved legal statements as BINDING, ahead of the rest",
+           "Legal statements — BINDING" in pkg and LEGAL in pkg
+           and pkg.index("Legal statements — BINDING") < pkg.index(CLAIM), pkg[:400])
+        pkg_e = _text(rpc.call("get_package", {"tenant": "eien", "system": "campaign_email"}))
+        ck("…and never another account's", LEGAL not in pkg_e)
+
 
         print("— the inbox: the account's own, read and drafted, never sent —")
         from app import gmail_client, validator

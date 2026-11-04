@@ -356,6 +356,19 @@ def get_package(tenant: str, system: str = "campaign_email",
     out += missing or ["- nothing the platform knows to be missing"]
     out += ["", "## What this package holds", _inventory(got, html, notes), ""]
 
+    # LEGAL STATEMENTS — binding. Owner, 2026-11-04: what the brand's legal
+    # pages say is "critical in terms of importance and should never be
+    # contradicted". Listed ahead of everything a writer selects from, so no
+    # draft can be built without them in front of it.
+    from . import kb
+    legal = kb.legal_claims(tenant)
+    if legal:
+        out += ["## Legal statements — BINDING. Never contradict, soften or "
+                "paraphrase these; if a draft cannot agree with one, leave the "
+                "point out."]
+        out += [f"- {c.claim} [{c.id}] — {c.source}" for c in legal]
+        out += [""]
+
     out += lines
 
     if kind:
@@ -615,6 +628,11 @@ def get_results(tenant: str, dimension: str = "", days: int = 90) -> dict[str, A
 CLAIMS_MAX = 500
 #: The review states a claim can be in, plus "all".
 CLAIM_REVIEWS = ("all", "proposed", "approved", "rejected")
+#: get_claims' CSV columns, in order — every field a row carries.
+CLAIM_CSV_COLUMNS = ("id", "legal", "review", "claim", "evidence", "proof_type",
+                     "source", "host", "context", "proves", "attributed_to",
+                     "situations", "entity_key", "status", "origin", "strength",
+                     "verified_at", "expires_at")
 
 
 def _host(text: str) -> str:
@@ -626,8 +644,8 @@ def _host(text: str) -> str:
 
 @server.tool()
 def get_claims(tenant: str, review: str = "all", query: str = "",
-               source: str = "", offset: int = 0,
-               limit: int = 200) -> dict[str, Any]:
+               source: str = "", legal_only: bool = False, offset: int = 0,
+               limit: int = 200, format: str = "json") -> dict[str, Any]:
     """Every claim in one account's knowledge base, with its evidence — to read, sort and dig into.
 
     Owner, 2026-11-04: the claims a harvest captures must be exportable so a
@@ -644,11 +662,23 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
     `harvest` says how much of the account's own sites has been read, by
     host — the coverage behind the register. Read-only: nothing is approved,
     changed or filed here.
+
+    LEGAL claims — stated on a privacy, terms, cookie, legal, disclaimer or
+    policy page — carry `legal: true`, come FIRST, and are binding: never
+    contradict, soften or paraphrase them. `legal_only` returns just those.
+
+    `format="csv"` returns the same page of claims as one CSV text in `csv`
+    (a header row, one row per claim, situations joined with "|"), ready to
+    save as a file and clean in a spreadsheet or with AI. Page through with
+    `next_offset` exactly as for JSON.
     """
     from . import db, provenance as prov, tenants
     if tenants.get(tenant) is None:
         return {"ok": False, "why": f"unknown account {tenant!r}",
                 "known": sorted(t.key for t in tenants.all_tenants())}
+    fmt = (format or "json").strip().lower()
+    if fmt not in ("json", "csv"):
+        return {"ok": False, "why": f"unknown format {format!r}", "known": ["json", "csv"]}
     review = (review or "all").strip().lower()
     if review not in CLAIM_REVIEWS:
         return {"ok": False, "why": f"unknown review {review!r}",
@@ -658,6 +688,7 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
     words = [w for w in (query or "").lower().split() if w]
     want_src = (source or "").strip().lower()
 
+    from . import kb
     with db.SessionLocal() as s:
         rows = (s.query(db.KbClaim)
                 .filter(db.KbClaim.tenant == tenant)
@@ -673,8 +704,13 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
     counts = {"proposed": 0, "approved": 0, "rejected": 0}
     by_host: dict[str, int] = {}
     matched = []
+    legal_n = 0
+    # Legal claims first — stable within each group, so paging is stable.
+    rows = sorted(rows, key=lambda c: not kb.is_legal_claim(c))
     for c in rows:
         r = _review_of(c)
+        is_legal = kb.is_legal_claim(c)
+        legal_n += is_legal
         counts[r] = counts.get(r, 0) + 1
         h = _host(c.source or "") or "(no url)"
         by_host[h] = by_host.get(h, 0) + 1
@@ -685,13 +721,16 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
             continue
         if want_src and want_src not in (c.source or "").lower():
             continue
-        matched.append((c, r))
+        if legal_only and not is_legal:
+            continue
+        matched.append((c, r, is_legal))
 
     def _iso(v):
         return v.isoformat() if v else ""
 
     claims = [{
-        "id": c.id, "claim": c.claim or "", "evidence": c.evidence or "",
+        "id": c.id, "legal": is_legal, "claim": c.claim or "",
+        "evidence": c.evidence or "",
         "proof_type": c.proof_type or "", "source": c.source or "",
         "host": _host(c.source or ""), "attributed_to": c.attributed_to or "",
         "context": c.context or "", "proves": c.proves or "",
@@ -699,20 +738,34 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
         "review": r, "status": c.status or "", "origin": c.origin or "",
         "strength": c.strength or "", "verified_at": _iso(c.verified_at),
         "expires_at": _iso(c.expires_at),
-    } for c, r in matched[offset:offset + limit]]
+    } for c, r, is_legal in matched[offset:offset + limit]]
 
     pages_by_host: dict[str, int] = {}
     for p in pages:
         h = _host(p.url or "") or "(unknown)"
         pages_by_host[h] = pages_by_host.get(h, 0) + 1
     nxt = offset + limit
+    csv_text = ""
+    if fmt == "csv":
+        import csv as _csv
+        import io as _io
+        buf = _io.StringIO()
+        w = _csv.writer(buf)
+        cols = list(CLAIM_CSV_COLUMNS)
+        w.writerow(cols)
+        for row in claims:
+            w.writerow(["|".join(row[k]) if isinstance(row[k], list)
+                        else ("yes" if row[k] is True else "" if row[k] is False
+                              else row[k]) for k in cols])
+        csv_text = buf.getvalue()
     return {
-        "ok": True, "tenant": tenant, "review": review,
-        "total_in_account": len(rows), "by_review": counts,
+        "ok": True, "tenant": tenant, "review": review, "format": fmt,
+        "total_in_account": len(rows), "legal_in_account": legal_n,
+        "by_review": counts,
         "by_source_host": dict(sorted(by_host.items(), key=lambda kv: -kv[1])),
         "matched": len(matched), "offset": offset, "returned": len(claims),
         "next_offset": nxt if nxt < len(matched) else None,
-        "claims": claims,
+        **({"csv": csv_text} if fmt == "csv" else {"claims": claims}),
         "harvest": {
             "pages_read": len(pages),
             "pages_by_host": dict(sorted(pages_by_host.items(), key=lambda kv: -kv[1])),
