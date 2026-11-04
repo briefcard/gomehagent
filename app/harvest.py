@@ -428,6 +428,14 @@ def _known_after(tenant: str) -> dict:
             "failures": [r for r in got["results"] if r["severity"]][:10]}
 
 
+def _findings_after(tenant: str) -> dict:
+    from . import findings
+    try:
+        return findings.rebuild(tenant)
+    except Exception as exc:  # noqa: BLE001 — bookkeeping must not fail the read
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:120]}"}
+
+
 def harvest(tenant: str, limit: int = 25, apply: bool = False,
             use_model: bool | None = None, recrawl: bool = False) -> dict:
     """Read a client's site and propose what it finds. Writes nothing unless
@@ -924,6 +932,9 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # KNOWN ANSWERS (pipeline.checks): facts QA wrote down in advance,
         # tested against what this read recorded. A failure is P1.
         "known_answers": (_known_after(tenant) if apply else None),
+        # FINDINGS (app/findings.py): disagreements with the truth QA set, and
+        # subjects the site states several ways with no truth set yet.
+        "findings": (_findings_after(tenant) if apply else None),
         # Figures on the pages read that NO reader turned into a statement
         # and that are not a year, price, date or phone number — listed for a
         # reviewer (Review › Site facts), never dropped.

@@ -38,6 +38,11 @@ that said what was due, what was stuck or what had worked:
                   recall, legal/coverage pages read in full, open figures no
                   reader understood — a grade with its reasons. Read before
                   relying on get_statements. Read-only.
+    get_truth     the APPROVED answer per subject × scope (what QA decided is
+                  true, from which source, why, by whom) and the open
+                  findings: pages that disagree with it, subjects the site
+                  states several ways with no answer chosen. Draft from the
+                  approved answers; never from a disputed figure. Read-only.
     get_claims    the whole claims register — proposed, approved, rejected —
                   with evidence, source page and tags, filtered and paged,
                   plus how much of the account's sites the harvest has read.
@@ -112,7 +117,7 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
-         "get_claims", "get_statements", "get_trust",
+         "get_claims", "get_statements", "get_trust", "get_truth",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
@@ -725,6 +730,33 @@ def get_trust(tenant: str) -> dict[str, Any]:
         return {"ok": False, "why": f"unknown account {tenant!r}",
                 "known": sorted(t.key for t in tenants.all_tenants())}
     return {"ok": True, **checks.trust(tenant)}
+
+
+@server.tool()
+def get_truth(tenant: str, subject: str = "", include_closed: bool = False) -> dict[str, Any]:
+    """The approved truth for one account, and every open disagreement with it.
+
+    `answers`: one row per subject × scope QA approved — value, scope
+    (brand-wide, a product, a market), mode (pinned, or follows a source page
+    so it moves when that page changes), source, reason, who decided.
+    `findings`: open questions, P1 first — `unresolved` (the site states
+    several values, none chosen), `contradiction` (pages disagree with the
+    answer), `binding_conflict` (a LEGAL page disagrees — the answer itself is
+    suspect), `missing_known` (a known answer was not captured).
+    Use an answer as fact; treat a subject with an open finding as disputed.
+    Decisions are made by a person in the console, never here. Read-only."""
+    from . import findings, tenants, truth
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}",
+                "known": sorted(t.key for t in tenants.all_tenants())}
+    answers = [a for a in truth.table(tenant) if not subject or a["subject"] == subject]
+    fs = findings.listing(tenant, "all" if include_closed else "open")
+    fs = [f for f in fs if not subject or f["subject"] == subject]
+    return {"ok": True, "tenant": tenant, "answers": answers,
+            "findings": fs[:200], "findings_total": len(fs),
+            "p1_open": sum(1 for f in fs if f["severity"] == "P1" and f["status"] == "open"),
+            "sources": [{"url": x.ref, "governs": x.governs or [], "by": x.created_by}
+                        for x in truth.sources(tenant)]}
 
 
 #: Most claims one get_claims call returns. Page with `offset` past this.

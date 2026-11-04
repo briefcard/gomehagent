@@ -410,6 +410,136 @@ def check_console_controls_do_what_they_say():
        r.status_code in (200, 303) and queued == 1, f"{r.status_code} queued={queued}")
 
 
+def check_m6_the_agreement_rule():
+    """truth.agrees — the one judge — table-driven."""
+    from app import truth
+    cases = [  # stated, stated-qualifier, true, true-qualifier, agrees?
+        (162, "", 162, "", True), (75, "", 162, "", False),
+        (100, "at least", 162, "", True),        # "over 100" is true of 162
+        (200, "at least", 162, "", False),       # "200+" is an overclaim
+        (160, "at least", 160, "at least", True), (162, "at least", 160, "at least", False),
+        (19, "counted", 19, "", True), (18, "counted", 19, "", False),
+        (155, "about", 162, "", True), (120, "about", 162, "", False),
+        (200, "up to", 162, "", True), (100, "up to", 162, "", False),
+        (170, "", 160, "at least", True), (150, "", 160, "at least", False),
+    ]
+    bad = [c for c in cases if truth.agrees(c[0], c[1], c[2], c[3]) != c[4]]
+    ck("M6 the agreement rule holds on every case", not bad, str(bad))
+
+
+def check_m6_truth_findings_and_questions():
+    """M6 — QA sets the truth per subject × scope; disagreements are findings."""
+    from fastapi.testclient import TestClient
+    from app import admin_ui, findings, mcp_server, truth, web as _web
+    from app.pipeline import fetch, parse, reprocess
+    comp, cov = f"{BASE}/pages/compliance", f"{BASE}/pages/coverage"
+    ship, terms = f"{BASE}/policies/shipping-policy", f"{BASE}/policies/terms-of-service"
+    aqua = f"{BASE}/pages/aqua-availability"
+    pages = dict(PAGES)
+    pages[ship] = "<html><body><main><p>We ship orders to 3 regions.</p>" + FILLER + "</main></body></html>"
+    pages[terms] = "<html><body><main><p>Products are shipped to 2 regions only.</p>" + FILLER + "</main></body></html>"
+    pages[aqua] = "<html><body><main><p>Aqua is available in 40 countries.</p>" + FILLER + "</main></body></html>"
+    net(pages)
+    harvest.forget_pages("baci")
+    res = harvest.harvest("baci", limit=20, apply=True, recrawl=True)
+    ck("M6 the harvest rebuilds findings", isinstance(res.get("findings"), dict)
+       and res["findings"].get("open_now", 0) >= 2, str(res.get("findings")))
+    fs = findings.listing("baci")
+    countries = next((f for f in fs if f["subject"] == "coverage.countries"
+                      and f["kind"] == "unresolved"), None)
+    ck("M6 a subject the site states several ways is ONE plain question with every value",
+       countries is not None and countries["question"].startswith("How many countries")
+       and {"162+", "75", "145", "40"} <= {v["value"] for v in countries["detail"]["values"]},
+       str(countries and [v["value"] for v in countries["detail"]["values"]]))
+    ck("M6 a coverage disagreement is P2", countries and countries["severity"] == "P2")
+    # Baci B1 in numbers: the shipping policy and the terms disagree — both legal.
+    pol = next((f for f in fs if f["urls"] and set(f["urls"]) >= {ship, terms}), None)
+    ck("M6 two LEGAL pages disagreeing is a P1", pol is not None and pol["severity"] == "P1",
+       str(pol and (pol["subject"], pol["severity"], pol["urls"])))
+    # Decisions need a reason.
+    out = findings.decide("baci", countries["id"], "correct", "", value="162+")
+    ck("M6 a decision without a reason is refused", "error" in out)
+    out = findings.decide("baci", countries["id"], "correct", "The coverage API lists 162",
+                          by="qa-anna", value="162+")
+    ck("M6 'this is correct' sets the truth and recomputes", out.get("ok"), str(out))
+    t = truth.resolve("baci", "coverage.countries")
+    ck("M6 the truth is the chosen value, with who and why",
+       t and t["value"] == "162+" and t["decided_by"] == "qa-anna" and "API" in t["reason"], str(t))
+    fs = findings.listing("baci")
+    contra = {f["value"]: f for f in fs if f["subject"] == "coverage.countries"
+              and f["kind"] == "contradiction"}
+    ck("M6 every page stating otherwise is now a contradiction to fix (75, 145, 40)",
+       {"75", "145", "40"} <= set(contra) and "162+" not in contra, str(sorted(contra)))
+    ck("M6 the unresolved question closed itself, with its reason kept",
+       any(f["id"] == countries["id"] and f["status"] == "closed"
+           for f in findings.listing("baci", "all")))
+    # Both right: the Aqua page speaks for one product.
+    f40 = contra.get("40")
+    out = findings.decide("baci", f40["id"], "scope", "Aqua ships to fewer markets",
+                          by="qa-anna", url=aqua, entity="aqua") if f40 else {}
+    ck("M6 'both right — that page is about this product' closes it and scopes the truth",
+       out.get("ok") and not any(f["value"] == "40" and f["status"] == "open"
+                                 for f in findings.listing("baci") if f["subject"] == "coverage.countries")
+       and truth.resolve("baci", "coverage.countries", {"entity": "aqua"})["value"] == "40"
+       and truth.resolve("baci", "coverage.countries")["value"] == "162+", str(out))
+    # Source of truth: the licence page, and the truth FOLLOWS it.
+    lic_q = next((f for f in findings.listing("baci") if f["subject"] == "legal.licences"), None)
+    if lic_q is None:
+        # The licence figure agrees everywhere; make the compliance page the
+        # source through the decision path anyway, via a fresh finding.
+        truth.make_source("baci", comp, ["legal.licences"], by="qa-anna")
+        r = [x for x in __import__("app.statements", fromlist=["x"]).rows_for_url("baci", comp)
+             if x.subject == "legal.licences"][0]
+        truth.set_value("baci", "legal.licences", r.value, r.number, r.qualifier,
+                        mode="follows_source", source_url=comp, reason="the register", by="qa-anna")
+    else:
+        findings.decide("baci", lic_q["id"], "source", "the register is authoritative",
+                        by="qa-anna", url=comp)
+    ck("M6 the declared source is listed with what it governs",
+       any(x.ref == comp and "legal.licences" in (x.governs or []) for x in truth.sources("baci")))
+    fewer = PAGES[comp].replace("<tr><td>State 18</td><td>Money transmitter</td><td>MT-1018</td></tr>", "")
+    fetch.store("baci", comp, fewer, parse.parse(fewer)["text_hash"])
+    reprocess.reprocess("baci", apply=True)
+    ck("M6 a source-of-truth page that changes moves the truth with it (19 → 18)",
+       truth.resolve("baci", "legal.licences")["value"] == "18", str(truth.resolve("baci", "legal.licences")))
+    # A legal page disagreeing with the truth questions the truth itself.
+    legal_bad = f"{BASE}/policies/legal-notice"
+    html = "<html><body><main><p>We operate in 140 countries.</p>" + FILLER + "</main></body></html>"
+    pages[legal_bad] = html
+    net(pages)
+    harvest.harvest("baci", limit=20, apply=True, recrawl=True)
+    bc = [f for f in findings.listing("baci") if f["kind"] == "binding_conflict"]
+    ck("M6 a legal page disagreeing with the approved answer is a P1 binding conflict",
+       bc and bc[0]["severity"] == "P1" and legal_bad in bc[0]["urls"], str(bc[:1]))
+    out = findings.decide("baci", bc[0]["id"], "escalate", "legal to confirm 140 vs 162", by="qa-anna")
+    ck("M6 'needs legal review' holds it out of the open queue",
+       out.get("ok") and not any(f["id"] == bc[0]["id"] for f in findings.listing("baci"))
+       and any(f["id"] == bc[0]["id"] for f in findings.listing("baci", "escalated")))
+    # Console: the questions render, and answering one over HTTP works.
+    html = admin_ui.render_content("s3cret", tenant="baci", sub="truth")
+    ck("M6 the console asks plain questions with the four answers",
+       "Questions for QA" in html and "This is correct" in html
+       and "source of truth" in html and "Needs legal review" in html and "/admin/finding_decide" in html)
+    open_now = findings.listing("baci")
+    c = TestClient(_web.app)
+    target = next((f for f in open_now if f["kind"] == "contradiction"), None)
+    if target:
+        r = c.post("/admin/finding_decide?key=s3cret", data={
+            "tenant": "baci", "finding_id": target["id"], "decision": "escalate",
+            "reason": "ask the coverage team", "by": "qa-ben"}, follow_redirects=False)
+        with db.SessionLocal() as s:
+            row = s.get(db.Finding, target["id"])
+        ck("CONSOLE answering a question records the decision, reason and reviewer",
+           r.status_code in (200, 303) and row.status == "escalated" and row.decided_by == "qa-ben"
+           and row.reason == "ask the coverage team")
+    got = mcp_server.get_truth("baci")
+    ck("M6 get_truth gives a Claude session the answers and the open findings",
+       got.get("ok") and any(a["subject"] == "coverage.countries" and a["value"] == "162+"
+                             for a in got["answers"]) and "findings" in got)
+    ck("M6 truth and findings are this account's only",
+       not truth.values("eien") and not findings.listing("eien", "all") and not truth.sources("eien"))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -420,6 +550,8 @@ def main() -> int:
     check_m4_risk_tiers()
     check_m5_known_answers_audits_trust()
     check_console_controls_do_what_they_say()
+    check_m6_the_agreement_rule()
+    check_m6_truth_findings_and_questions()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

@@ -38,6 +38,58 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "an_overclaim_agrees_with_the_truth",
+        "file": "app/truth.py",
+        "find": "        return number <= t_number\n",
+        "replace": "        return True  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "'200+ countries' against a truth of 162 is passed as agreeing",
+    },
+    {
+        "name": "the_brand_truth_overrides_a_product_truth",
+        "file": "app/truth.py",
+        "find": "        if n > best_n:\n",
+        "replace": "        if best is None:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a product sold in 40 countries is held to the brand's 162, and "
+               "the correct page is flagged for a fix",
+    },
+    {
+        "name": "a_legal_page_conflict_is_not_p1",
+        "file": "app/truth.py",
+        "find": "    if binding:\n        return \"P1\"\n",
+        "replace": "    if False:  # SABOTAGE\n        return \"P1\"\n",
+        "suites": ["test_pipeline.py"],
+        "why": "two legal policies that disagree sit in the queue as a "
+               "low-priority wording issue",
+    },
+    {
+        "name": "a_fixed_page_keeps_its_finding_open",
+        "file": "app/findings.py",
+        "find": "            if fp not in now_found and row.status != \"closed\":\n",
+        "replace": "            if False:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a disagreement the site has fixed stays in the queue for ever, "
+               "and the queue stops being read",
+    },
+    {
+        "name": "a_decision_needs_no_reason",
+        "file": "app/findings.py",
+        "find": "    if not (reason or \"\").strip():\n",
+        "replace": "    if False:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "the truth changes with no recorded reason, and the audit trail "
+               "cannot say why a figure was chosen",
+    },
+    {
+        "name": "the_truth_reads_every_account",
+        "file": "app/truth.py",
+        "find": "        q = s.query(db.KbFactValue).filter(db.tenant_filter(db.KbFactValue, tenant))\n",
+        "replace": "        q = s.query(db.KbFactValue)  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "one client's approved answers are used to judge another client's pages",
+    },
+    {
         "name": "a_wrong_known_answer_passes",
         "file": "app/pipeline/checks.py",
         "find": "        elif rows:\n            result = \"different\"\n",

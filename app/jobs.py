@@ -85,6 +85,11 @@ KINDS: dict[str, dict] = {
         # RETRYABLE: reads stored statements and writes one result row.
         "retryable": True,
     },
+    "findings": {
+        "what": "disagreements recomputed against the truth QA set",
+        "target": "app.findings:job",
+        "retryable": True,
+    },
     "reprocess": {
         "what": "every stored page re-read with the current readers — no crawl",
         "target": "app.pipeline.reprocess:job",
@@ -569,6 +574,10 @@ def summarise(result) -> str:
         bits.append("tiers " + ", ".join(
             f"{t} {n}" + (f" ({cut[t]} partly read)" if cut.get(t) else "")
             for t, n in tiers.items()))
+    fd = result.get("findings")
+    if isinstance(fd, dict) and fd.get("open_now"):
+        bits.append(f"findings open {fd['open_now']} (+{fd.get('opened', 0)} new, "
+                    f"{fd.get('closed', 0)} closed)")
     ka = result.get("known_answers")
     if isinstance(ka, dict) and ka.get("failed"):
         bits.append(f"KNOWN ANSWERS FAILED: {ka['failed']} — the capture got a fact "

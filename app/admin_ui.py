@@ -6288,6 +6288,9 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                # How far the capture can be trusted: known answers, audits,
                # the trust grade (BUILD-MAP M5).
                ("checks", "Checks & trust"),
+               # The reconciliation queue: one plain question per subject the
+               # site disagrees on, decided by a person (BUILD-MAP M6).
+               ("truth", "Questions for QA"),
                # Renamed from "Catalogue" (step 4, spec §4): this is a
                # sync-and-flags panel, not the catalogue — the catalogue
                # itself is managed on Knowledge — and the old name collided
@@ -6422,6 +6425,119 @@ def _checks_card(tenant: str) -> str:
   <form class="f" method="post" action="/admin/audit_draw" style="display:inline">
     <input type="hidden" name="tenant" value="{_esc(tenant)}">
     <button class="sec">Draw 3 pages to audit</button></form>
+</div>"""
+
+
+_SEV = {"P1": "off", "P2": "nb", "P3": "on"}
+_KIND_SAYS = {
+    "unresolved": "The site gives different answers and no answer has been chosen.",
+    "contradiction": "These pages disagree with the approved answer.",
+    "binding_conflict": "A LEGAL page disagrees with the approved answer — check the answer first.",
+    "missing_known": "A fact you wrote down was not captured from the site.",
+}
+
+
+def _page_link(u: str) -> str:
+    return (f'<a href="{_esc(u)}" target="_blank" rel="noopener">'
+            f'{_esc(u.split("://", 1)[-1][:70])}</a>')
+
+
+def _question_card(f: dict, tenant: str) -> str:
+    """One finding as a plain question with its four answers."""
+    d = f["detail"]
+    label = FACT_LABELS.get(f["subject"], f["subject"])
+    body, values = "", []
+    if f["kind"] == "unresolved":
+        for v in d.get("values", []):
+            values.append(v["value"])
+            bind = ' <span class="chip off">legal page</span>' if v["binding"] else ""
+            pages = ", ".join(_page_link(u) for u in v["pages"][:5])
+            more = f' +{len(v["pages"]) - 5} more' if len(v["pages"]) > 5 else ""
+            body += (f'<li><b>{_esc(v["value"])}</b>{bind} <span class="mut">on '
+                     f'{len(v["pages"])} page{"" if len(v["pages"]) == 1 else "s"} · '
+                     f'{_esc(", ".join(v.get("fields", [])))}</span>'
+                     f'<div class="when">“{_esc(v["example"])}”</div>'
+                     f'<div class="mut">{pages}{more}</div></li>')
+        body = f"<ul>{body}</ul>"
+    elif f["kind"] in ("contradiction", "binding_conflict"):
+        values = [f["value"], d.get("true", "")]
+        src = (f' — following {_page_link(d["source_url"])}' if d.get("source_url") else "")
+        body = (f'<p>Approved answer: <b>{_esc(d.get("true", ""))}</b>{src}</p>'
+                f'<p>These pages say <b>{_esc(f["value"])}</b>:</p><ul>'
+                + "".join(f'<li>{_page_link(u)}</li>' for u in f["urls"][:10])
+                + "</ul>" + "".join(f'<div class="when">“{_esc(x)}”</div>'
+                                    for x in d.get("examples", [])[:2]))
+    else:
+        body = (f'<p>Expected <b>{_esc(f["value"])}</b>; captured '
+                f'<b>{_esc(", ".join(d.get("captured", [])) or "nothing")}</b> '
+                f'({_esc(d.get("result", "").replace("_", " "))}).</p>')
+    vopts = "".join(f'<option value="{_esc(v)}">{_esc(v)}</option>' for v in values if v)
+    uopts = "".join(f'<option value="{_esc(u)}">{_esc(u.split("://", 1)[-1][:70])}</option>'
+                    for u in f["urls"][:40])
+    form = ""
+    if f["kind"] != "missing_known":
+        form = f"""
+  <form class="f" method="post" action="/admin/finding_decide">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="finding_id" value="{_esc(f["id"])}">
+    <label>Reason (required — it is the audit trail)</label>
+    <input name="reason" size="60" placeholder="e.g. the licence register lists 19 states">
+    {_reviewer_field()}
+    <div class="row">
+      <select name="value">{vopts}</select><input name="value_other" placeholder="or the right value" size="10">
+      <button name="decision" value="correct">This is correct</button>
+    </div>
+    <div class="row">
+      <select name="url">{uopts}</select>
+      <button class="sec" name="decision" value="source">This page is the source of truth</button>
+    </div>
+    <div class="row">
+      <input name="entity" placeholder="product handle" size="14">
+      <input name="market" placeholder="or market, e.g. US" size="10">
+      <button class="sec" name="decision" value="scope">Both right — that page is about this product/market</button>
+    </div>
+    <div class="row"><button class="sec" name="decision" value="escalate">Needs legal review</button></div>
+  </form>"""
+    return f"""
+<div class="conn-site"><h3>{_esc(f["question"])} <span class="chip {_SEV.get(f["severity"], "nb")}">{_esc(f["severity"])}</span>
+  <span class="mut">{_esc(label)} · {_esc(f["scope_label"])}</span></h3>
+  <p class="mut">{_esc(_KIND_SAYS.get(f["kind"], ""))}</p>
+  {body}{form}
+</div>"""
+
+
+def _truth_card(tenant: str) -> str:
+    from . import findings, truth
+    open_f = findings.listing(tenant, "open")
+    held = findings.listing(tenant, "escalated")
+    cards = "".join(_question_card(f, tenant) for f in open_f[:40])
+    rows = "".join(
+        f'<li><b>{_esc(FACT_LABELS.get(v["subject"], v["subject"]))}</b> = '
+        f'{"<i>unknown — its source no longer states one value</i>" if v["unknown"] else _esc(v["value"])} '
+        f'<span class="mut">· {_esc(v["scope"])} · '
+        f'{"follows " + _page_link(v["source_url"]) if v["mode"] == "follows_source" else "pinned"}'
+        f' · {_esc(v["decided_by"])}: “{_esc(v["reason"][:120])}”</span></li>'
+        for v in truth.table(tenant))
+    srcs = "".join(f'<li>{_page_link(x.ref)} <span class="mut">governs '
+                   f'{_esc(", ".join(FACT_LABELS.get(g, g) for g in (x.governs or [])) or "everything it states")}'
+                   f'</span></li>' for x in truth.sources(tenant))
+    held_html = "".join(f'<li>{_esc(f["question"])} <span class="mut">— {_esc(f["decided_by"])}: '
+                        f'“{_esc(f["reason"][:120])}”</span></li>' for f in held)
+    return f"""
+<div class="card">
+  <div class="head"><h2>Questions for QA</h2>
+    <span class="chip {'off' if open_f else 'on'}">{len(open_f)} open</span></div>
+  <p class="mut">Where the site disagrees with itself, or with an answer you
+  approved. Most serious first. Each answer needs a reason and is recorded with
+  your name; nothing on the site changes until a fix is approved.</p>
+  {cards or '<p class="mut">Nothing to decide — every figure agrees with the approved answers.</p>'}
+</div>
+<div class="card">
+  <div class="head"><h2>Approved answers</h2></div>
+  <ul>{rows or '<li class="mut">None yet.</li>'}</ul>
+  <h3>Sources of truth</h3>
+  <ul>{srcs or '<li class="mut">None declared. Legal pages count as binding without being declared.</li>'}</ul>
+  {f'<h3>Waiting on legal review</h3><ul>{held_html}</ul>' if held_html else ''}
 </div>"""
 
 
@@ -9107,11 +9223,18 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
                            if k.last_result in ("different", "missing"))
     except Exception:  # noqa: BLE001
         n_check_fail = 0
+    try:
+        with db.SessionLocal() as _s:
+            n_findings = (_s.query(db.Finding)
+                          .filter(db.Finding.tenant == tenant, db.Finding.status == "open").count())
+    except Exception:  # noqa: BLE001
+        n_findings = 0
     counts = {"ship": total_ship,
               "claims": total_unfiltered, "pictures": len(waiting),
               "other": n_other, "plans": len(plans_wait),
               "conflicts": len(open_conflicts), "catalogue": len(flagged),
-              "facts": n_fact_conflicts, "checks": n_check_fail}
+              "facts": n_fact_conflicts, "checks": n_check_fail,
+              "truth": n_findings}
     sub = (sub or "").strip().lower()
     if sub not in dict(REVIEW_SUBS):
         # LAND ON THE WORK. With no section asked for, open the first one that
@@ -9183,6 +9306,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
 </div>""",
         "facts": _facts_card(fact_subjects, n_fact_conflicts, open_figs, tenant),
         "checks": (_checks_card(tenant) if sub == "checks" else ""),
+        "truth": (_truth_card(tenant) if sub == "truth" else ""),
         "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Store sync</h2>
@@ -9543,6 +9667,20 @@ _KB_DESCRIBED = [
     ("AuditSample", "audit_samples", "Pages a person checked against what was recorded",
      "Drawn at random, legal and coverage first; marked complete or with what was "
      "missed, and by whom. Their share complete is the capture's measured recall."),
+    ("KbSource", "kb_sources", "Pages declared the source of truth",
+     "Declared by a reviewer for some subjects; a truth that follows a source moves "
+     "when that page changes. Legal pages are binding without being declared."),
+    ("KbFactValue", "kb_fact_values", "The approved answer per subject and scope",
+     "Set only by a person, with a reason (Review › Questions for QA). The most "
+     "specific scope wins — a product's value over the brand's. Replaced values are "
+     "kept as retired history."),
+    ("KbPageScope", "kb_page_scopes", "Pages ruled to speak for one product or market",
+     "\"Both right — different products\": kept here because statements are rebuilt "
+     "on every read and the ruling must survive them."),
+    ("Finding", "findings", "Every disagreement and gap, by severity",
+     "Computed after every read and decision: unresolved subjects, pages contradicting "
+     "the approved answer, legal pages disagreeing with it, known answers missed. "
+     "One that no longer holds closes itself with its reason."),
 ]
 
 

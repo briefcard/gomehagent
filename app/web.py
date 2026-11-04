@@ -9172,6 +9172,8 @@ async def known_answer(request: Request, key: str = Depends(admin_key)):
     if out.get("error"):
         return _back_to_content(tenant, sub="checks", err=out["error"])
     got = checks.check_known(tenant, record=True)
+    from . import findings as _fd
+    _fd.rebuild(tenant)
     res = next((r for r in got["results"] if r["id"] == out["id"]), {})
     return _back_to_content(tenant, sub="checks",
                             msg=f"Known answer added — the capture {res.get('result', '?').replace('_', ' ')}")
@@ -9203,6 +9205,27 @@ async def audit_decide(request: Request, key: str = Depends(admin_key)):
     checks.decide_audit(tenant, str(form.get("audit_id", "")), complete, missed,
                         by=_qa_by(form, request))
     return _back_to_content(tenant, sub="checks", msg="Audit recorded")
+
+
+@app.post("/admin/finding_decide", response_class=HTMLResponse)
+async def finding_decide(request: Request, key: str = Depends(admin_key)):
+    """A reviewer answers a question card (findings.decide)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import findings
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    out = findings.decide(
+        tenant, str(form.get("finding_id", "")), str(form.get("decision", "")),
+        str(form.get("reason", "")), by=_qa_by(form, request),
+        value=str(form.get("value_other", "") or form.get("value", "")).strip(),
+        url=str(form.get("url", "")), entity=str(form.get("entity", "")).strip(),
+        market=str(form.get("market", "")).strip())
+    if out.get("error"):
+        return _back_to_content(tenant, sub="truth", err=out["error"])
+    return _back_to_content(tenant, sub="truth",
+                            msg=f"Recorded. {out.get('open_now', 0)} question(s) open "
+                                f"({out.get('closed', 0)} closed by this answer)")
 
 
 @app.post("/admin/claims_decide", response_class=HTMLResponse)

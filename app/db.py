@@ -2406,6 +2406,118 @@ class CheckResult(Base):
     run_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class KbSource(Base):
+    """A source QA declared the truth for some subjects (BUILD-MAP §3.2).
+
+    "Make this page the source of truth for licences." `authority` canonical
+    = QA's declaration; legal pages are binding by default without a row.
+    `governs` lists the subjects (empty = every subject the source states).
+    """
+
+    __tablename__ = "kb_sources"
+    __table_args__ = (UniqueConstraint("tenant", "kind", "ref", name="uq_kb_source"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    kind = Column(String, default="page")          # page | document | system | owner
+    ref = Column(Text, nullable=False)             # the URL, or a document name
+    label = Column(String, default="")
+    authority = Column(String, default="canonical")
+    governs = Column(JSON, default=list)
+    created_by = Column(String, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class KbFactValue(Base):
+    """THE TRUTH for one subject at one scope, set by QA — never by a machine.
+
+    Scope is entity (a product), market (a country/region code or group) and
+    channel; empty = brand-wide. The most specific approved value for a
+    statement's scope is what that statement is compared with (`truth.resolve`).
+
+    `mode` pinned = this value until QA changes it; follows_source = whatever
+    the named source page currently states, so a source of truth updated on
+    the site moves the truth with it — and every other page that disagrees
+    becomes a finding. Superseded values are kept as `retired` (history).
+    """
+
+    __tablename__ = "kb_fact_values"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    subject = Column(String, nullable=False, index=True)
+    value = Column(String, default="")
+    number = Column(Float)
+    qualifier = Column(String, default="")
+    scope_entity = Column(String, default="")
+    scope_market = Column(String, default="")
+    scope_channel = Column(String, default="")
+    status = Column(String, default="approved")    # approved | retired
+    mode = Column(String, default="pinned")        # pinned | follows_source
+    source_id = Column(String, default="")
+    source_url = Column(Text, default="")
+    reason = Column(Text, default="")
+    decided_by = Column(String, default="")
+    decided_at = Column(DateTime(timezone=True), default=utcnow)
+    retired_at = Column(DateTime(timezone=True))
+
+
+class KbPageScope(Base):
+    """QA's ruling that a page speaks for a narrower scope than the brand.
+
+    "Both right — different products": the page stating 40 countries is about
+    one product. Statements are replaced on every re-read; this ruling is not,
+    so it is kept here and applied when the page's statements are compared.
+    """
+
+    __tablename__ = "kb_page_scopes"
+    __table_args__ = (UniqueConstraint("tenant", "url", "subject", name="uq_kb_page_scope"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    subject = Column(String, default="")            # "" = every subject on the page
+    scope_entity = Column(String, default="")
+    scope_market = Column(String, default="")
+    decided_by = Column(String, default="")
+    reason = Column(Text, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class Finding(Base):
+    """A disagreement or gap, computed by code, decided by a person.
+
+    Kinds: `unresolved` (the site states several values and no truth is set),
+    `contradiction` (a page disagrees with the approved truth), `binding_conflict`
+    (the truth disagrees with a LEGAL page — the truth itself is suspect),
+    `missing_known` (a known answer was not captured). Severity P1 / P2 / P3.
+    Recomputed after every read and decision (`findings.rebuild`): one that
+    no longer holds closes itself, with the reason recorded.
+    """
+
+    __tablename__ = "findings"
+    __table_args__ = (UniqueConstraint("tenant", "fingerprint", name="uq_finding"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    fingerprint = Column(String, nullable=False)
+    kind = Column(String, nullable=False)
+    severity = Column(String, default="P2")
+    subject = Column(String, default="", index=True)
+    scope = Column(JSON, default=dict)
+    value = Column(String, default="")             # the disagreeing value, when one
+    urls = Column(JSON, default=list)
+    detail = Column(JSON, default=dict)
+    fact_value_id = Column(String, default="")
+    status = Column(String, default="open")        # open | escalated | closed
+    decision = Column(String, default="")
+    reason = Column(Text, default="")
+    decided_by = Column(String, default="")
+    decided_at = Column(DateTime(timezone=True))
+    first_seen = Column(DateTime(timezone=True), default=utcnow)
+    last_seen = Column(DateTime(timezone=True), default=utcnow)
+
+
 class PageSnapshot(Base):
     """A page as last fetched, stored ONCE, read by every reader.
 
