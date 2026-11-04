@@ -2518,6 +2518,63 @@ class Finding(Base):
     last_seen = Column(DateTime(timezone=True), default=utcnow)
 
 
+class ChangeRequest(Base):
+    """A changed truth, and the work of making every place agree (BUILD-MAP §4 CHANGE).
+
+    QA changes an answer ("free shipping is now $110", "we now hold 20
+    licences"). The truth changes at once; this row tracks the consequence:
+    every location that states the old figure becomes a `ChangeTask`, and the
+    change closes only when each task is verified — a page by a later read
+    that agrees, a by-hand task by a person saying it is done.
+    """
+
+    __tablename__ = "change_requests"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    subject = Column(String, nullable=False)
+    scope = Column(JSON, default=dict)
+    old_value = Column(String, default="")
+    new_value = Column(String, default="")
+    fact_value_id = Column(String, default="")
+    reason = Column(Text, default="")
+    requested_by = Column(String, default="")
+    status = Column(String, default="open")        # open | done
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    closed_at = Column(DateTime(timezone=True))
+
+
+class ChangeTask(Base):
+    """One place a change must reach, and where that stands.
+
+    `kind`: auto_edit (a page on a connected store whose old wording can be
+    replaced exactly, through an approval), manual (a page we can read but not
+    write: the exact sentence and its replacement), draft (a pending approval
+    still carrying the old figure), unmonitored (pages we could not read).
+    `status`: open → proposed (approval filed) → published → verified, or
+    done_by_hand / skipped (with a reason) / failed (with why).
+    """
+
+    __tablename__ = "change_tasks"
+    __table_args__ = (UniqueConstraint("tenant", "change_id", "location", "find",
+                                       name="uq_change_task"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    change_id = Column(String, nullable=False, index=True)
+    kind = Column(String, default="manual")
+    location = Column(Text, default="")            # a URL, or "approval:<id>"
+    find = Column(Text, default="")                # the old wording, exactly
+    replace = Column(Text, default="")             # what it becomes
+    sentence = Column(Text, default="")
+    approval_id = Column(String, default="")
+    status = Column(String, default="open")
+    note = Column(Text, default="")
+    done_by = Column(String, default="")
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+    verified_at = Column(DateTime(timezone=True))
+
+
 class PageSnapshot(Base):
     """A page as last fetched, stored ONCE, read by every reader.
 

@@ -6291,6 +6291,8 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                # The reconciliation queue: one plain question per subject the
                # site disagrees on, decided by a person (BUILD-MAP M6).
                ("truth", "Questions for QA"),
+               # A changed answer and every place it must reach (M8).
+               ("changes", "Changes"),
                # Renamed from "Catalogue" (step 4, spec §4): this is a
                # sync-and-flags panel, not the catalogue — the catalogue
                # itself is managed on Knowledge — and the old name collided
@@ -6516,7 +6518,14 @@ def _truth_card(tenant: str) -> str:
         f'{"<i>unknown — its source no longer states one value</i>" if v["unknown"] else _esc(v["value"])} '
         f'<span class="mut">· {_esc(v["scope"])} · '
         f'{"follows " + _page_link(v["source_url"]) if v["mode"] == "follows_source" else "pinned"}'
-        f' · {_esc(v["decided_by"])}: “{_esc(v["reason"][:120])}”</span></li>'
+        f' · {_esc(v["decided_by"])}: “{_esc(v["reason"][:120])}”</span>'
+        f'<form class="f" method="post" action="/admin/change_create" style="display:inline">'
+        f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+        f'<input type="hidden" name="subject" value="{_esc(v["subject"])}">'
+        f'<input type="hidden" name="fact_id" value="{_esc(v["id"])}">'
+        f'<input name="new_value" placeholder="new value" size="8">'
+        f'<input name="reason" placeholder="reason (required)" size="24">{_reviewer_field()}'
+        f'<button class="sec">Change this answer</button></form></li>'
         for v in truth.table(tenant))
     srcs = "".join(f'<li>{_page_link(x.ref)} <span class="mut">governs '
                    f'{_esc(", ".join(FACT_LABELS.get(g, g) for g in (x.governs or [])) or "everything it states")}'
@@ -6538,6 +6547,66 @@ def _truth_card(tenant: str) -> str:
   <h3>Sources of truth</h3>
   <ul>{srcs or '<li class="mut">None declared. Legal pages count as binding without being declared.</li>'}</ul>
   {f'<h3>Waiting on legal review</h3><ul>{held_html}</ul>' if held_html else ''}
+</div>"""
+
+
+_TASK_SAYS = {"auto_edit": "can be fixed on the store, on your approval",
+              "manual": "edit by hand", "draft": "a pending approval still says the old figure",
+              "unmonitored": "pages we could not read — check by hand"}
+
+
+def _changes_card(tenant: str) -> str:
+    from . import change
+    open_c = change.listing(tenant, "open")
+    done_c = change.listing(tenant, "done")[:10]
+    blocks = []
+    for c in open_c:
+        rows = []
+        for t in c["tasks"]:
+            chip = {"verified": "on", "skipped": "nb", "failed": "off"}.get(t["status"], "nb")
+            where = (_page_link(t["location"]) if t["location"].startswith("http")
+                     else _esc(t["location"]))
+            act = ""
+            if t["status"] not in ("verified", "skipped"):
+                prop = ('<button name="action" value="propose">Propose this fix</button>'
+                        if t["kind"] == "auto_edit" and t["status"] in ("open", "failed") else "")
+                act = f"""
+    <form class="f" method="post" action="/admin/change_task" style="display:inline">
+      <input type="hidden" name="tenant" value="{_esc(tenant)}">
+      <input type="hidden" name="task_id" value="{_esc(t["id"])}">
+      {prop}
+      <button class="sec" name="action" value="done">I fixed it</button>
+      <input name="note" placeholder="why skip?" size="14">
+      <button class="sec" name="action" value="skip">Skip</button>
+      {_reviewer_field()}
+    </form>"""
+            change_line = (f'<div>change “{_esc(t["find"][:160])}” → “{_esc(t["replace"][:160])}”</div>'
+                           if t["find"] else "")
+            rows.append(f"""
+<li>{where} <span class="chip {chip}">{_esc(t["status"].replace("_", " "))}</span>
+  <span class="mut">· {_esc(_TASK_SAYS.get(t["kind"], t["kind"]))}</span>
+  {change_line}
+  <div class="when">{_esc(t["sentence"][:220])}</div>
+  {('<div class="mut">' + _esc(t["note"]) + '</div>') if t["note"] else ''}{act}</li>""")
+        blocks.append(f"""
+<div class="conn-site"><h3>{_esc(c["question"])} {_esc(c["old_value"] or "—")} → <b>{_esc(c["new_value"])}</b>
+  <span class="chip nb">{_esc(c["progress"])} done</span></h3>
+  <p class="mut">{_esc(c["scope"])} · {_esc(c["requested_by"])}: “{_esc(c["reason"])}”.
+  A page task closes only when the page, read again, agrees.</p>
+  <ul>{"".join(rows) or '<li class="mut">Nothing on file states another figure.</li>'}</ul></div>""")
+    done_html = "".join(f'<li>{_esc(c["question"])} {_esc(c["old_value"] or "—")} → {_esc(c["new_value"])} '
+                        f'<span class="mut">· {_esc(c["requested_by"])}</span></li>' for c in done_c)
+    return f"""
+<div class="card">
+  <div class="head"><h2>Changes</h2>
+    <span class="chip {'nb' if open_c else 'on'}">{len(open_c)} open</span></div>
+  <p class="mut">A changed answer and every place that still states the old one.
+  Store pages can be fixed through an approval; everything else is listed
+  with the exact sentence to change.</p>
+  {"".join(blocks) or '<p class="mut">No open changes. Change an answer from Questions for QA.</p>'}
+  {f'<h3>Done</h3><ul>{done_html}</ul>' if done_html else ''}
+  <p><a href="/admin/qa_log.csv?tenant={_esc(tenant)}">Download the QA decision log (CSV)</a>
+  <span class="mut">— every answer, decision, change and audit: who, when, why</span></p>
 </div>"""
 
 
@@ -9229,12 +9298,19 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
                           .filter(db.Finding.tenant == tenant, db.Finding.status == "open").count())
     except Exception:  # noqa: BLE001
         n_findings = 0
+    try:
+        with db.SessionLocal() as _s:
+            n_changes = (_s.query(db.ChangeRequest)
+                         .filter(db.ChangeRequest.tenant == tenant,
+                                 db.ChangeRequest.status == "open").count())
+    except Exception:  # noqa: BLE001
+        n_changes = 0
     counts = {"ship": total_ship,
               "claims": total_unfiltered, "pictures": len(waiting),
               "other": n_other, "plans": len(plans_wait),
               "conflicts": len(open_conflicts), "catalogue": len(flagged),
               "facts": n_fact_conflicts, "checks": n_check_fail,
-              "truth": n_findings}
+              "truth": n_findings, "changes": n_changes}
     sub = (sub or "").strip().lower()
     if sub not in dict(REVIEW_SUBS):
         # LAND ON THE WORK. With no section asked for, open the first one that
@@ -9307,6 +9383,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         "facts": _facts_card(fact_subjects, n_fact_conflicts, open_figs, tenant),
         "checks": (_checks_card(tenant) if sub == "checks" else ""),
         "truth": (_truth_card(tenant) if sub == "truth" else ""),
+        "changes": (_changes_card(tenant) if sub == "changes" else ""),
         "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Store sync</h2>
@@ -9682,6 +9759,8 @@ _KB_DESCRIBED = [
      "the approved answer, legal pages disagreeing with it, known answers missed. "
      "One that no longer holds closes itself with its reason."),
 ]
+# (`change_requests` / `change_tasks` are OPERATIONS — a record of work done
+# to make the site agree with a changed answer — and appear on Review › Changes.)
 
 
 # How the KB tables find each other. Written down here rather than derived,

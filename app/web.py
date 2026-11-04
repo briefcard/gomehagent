@@ -9228,6 +9228,67 @@ async def finding_decide(request: Request, key: str = Depends(admin_key)):
                                 f"({out.get('closed', 0)} closed by this answer)")
 
 
+@app.post("/admin/change_create", response_class=HTMLResponse)
+async def change_create(request: Request, key: str = Depends(admin_key)):
+    """QA changes an approved answer; every place still stating the old one
+    becomes a task (app/change.py)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import change, db as _db
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    scope = {}
+    with _db.SessionLocal() as s:
+        v = s.get(_db.KbFactValue, str(form.get("fact_id", "")))
+        if v is not None and v.tenant == tenant:
+            scope = {"entity": v.scope_entity, "market": v.scope_market, "channel": v.scope_channel}
+    out = change.create(tenant, str(form.get("subject", "")), str(form.get("new_value", "")),
+                        str(form.get("reason", "")), by=_qa_by(form, request), scope=scope)
+    if out.get("error"):
+        return _back_to_content(tenant, sub="truth", err=out["error"])
+    return _back_to_content(tenant, sub="changes",
+                            msg=f"Answer changed to {out['new_value']}: {out['tasks']} place(s) to update")
+
+
+@app.post("/admin/change_task", response_class=HTMLResponse)
+async def change_task(request: Request, key: str = Depends(admin_key)):
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import change
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    tid, action = str(form.get("task_id", "")), str(form.get("action", ""))
+    by = _qa_by(form, request)
+    if action == "propose":
+        out = change.propose(tenant, tid, by=by)
+        msg = "Fix queued for your approval — nothing changes on the site until you approve"
+    else:
+        out = change.mark(tenant, tid, "done_by_hand" if action == "done" else "skipped",
+                          note=str(form.get("note", "")), by=by)
+        msg = ("Marked done — it is verified when the page, read again, agrees"
+               if action == "done" else "Skipped")
+    return _back_to_content(tenant, sub="changes", err=out.get("error", ""),
+                            msg="" if out.get("error") else msg)
+
+
+@app.get("/admin/qa_log.csv")
+def qa_log_csv(request: Request, key: str = Depends(admin_key), tenant: str = ""):
+    """Every QA decision for one account, as CSV: who, when, what, why."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    import csv as _csv
+    import io as _io
+    from fastapi.responses import Response
+    from . import change
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(["at", "who", "what", "subject", "detail", "why"])
+    for r in change.audit_log(tenant):
+        w.writerow([r["at"], r["who"], r["what"], r["subject"], r["detail"], r["why"]])
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="qa-log-{tenant}.csv"'})
+
+
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
 async def claims_decide(request: Request, key: str = Depends(admin_key)):
     """Decide many proposals in one submit.

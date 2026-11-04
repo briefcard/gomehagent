@@ -353,6 +353,62 @@ def update_seo(profile: dict, resource: str, resource_id, fields: dict) -> str:
     return f"{_store_url(store)}/{kind}/{res.get('handle')}"
 
 
+def replace_text(profile: dict, url: str, find: str, replace: str, check=None) -> dict:
+    """Replace ONE exact phrase in a product, page or collection body.
+
+    Called only by the approval executor for a `fact_fix` (app/change.py),
+    after the owner approved this exact before → after. Refuses — and writes
+    nothing — unless the phrase occurs EXACTLY ONCE in the full body: a phrase
+    found twice, or split by markup, is a by-hand edit, not a guess. `check`
+    is the gate (`validator.check`) run on the replacement before it is
+    written; a replacement that fails it is not written either.
+    """
+    err = _ok(profile)
+    if err:
+        return {"ok": False, "error": err}
+    store = _store(profile)
+    path = "/" + url.split("://", 1)[-1].split("/", 1)[-1].split("?", 1)[0].rstrip("/")
+    parts = path.strip("/").split("/")
+    if len(parts) < 2 or parts[-2] not in ("products", "pages", "collections"):
+        return {"ok": False, "error": f"{url} is not a product, page or collection"}
+    kind, handle = parts[-2], parts[-1]
+    found = None
+    if kind == "products":
+        items = _get(store, "products.json", {"handle": handle, "fields": "id,body_html"}).get("products", [])
+        found = ("products", "product", items[0]) if items else None
+    elif kind == "pages":
+        items = _get(store, "pages.json", {"handle": handle, "fields": "id,body_html"}).get("pages", [])
+        found = ("pages", "page", items[0]) if items else None
+    else:
+        for ep, key in (("custom_collections", "custom_collection"),
+                        ("smart_collections", "smart_collection")):
+            items = _get(store, f"{ep}.json", {"handle": handle, "fields": "id,body_html"}).get(ep, [])
+            if items:
+                found = (ep, key, items[0])
+                break
+    if not found:
+        return {"ok": False, "error": f"no {kind[:-1]} with handle {handle!r} on the store"}
+    ep, key, obj = found
+    body = obj.get("body_html") or ""
+    n = body.count(find)
+    if n != 1:
+        return {"ok": False, "error": (f"the wording {find!r} appears {n} times in the "
+                                       f"{key.replace('_', ' ')} body — edit it by hand")}
+    new_body = body.replace(find, replace, 1)
+    if check is not None:
+        # The gate judges WHAT THIS EDIT WRITES. Judging the whole body would
+        # let one still-wrong figure elsewhere on the page (its own task)
+        # block every other fix to that page.
+        verdict = check(replace)
+        hard = [f for f in verdict.get("failures", [])
+                if f["rule"] not in ("uncited", "no_ban_list")]
+        if hard:
+            return {"ok": False, "error": "the new text fails a gate: "
+                    + "; ".join(f"{f['rule']}: {f['detail']}" for f in hard)}
+    _send(store, "PUT", f"{ep}/{obj['id']}.json", {key: {"id": obj["id"], "body_html": new_body}})
+    return {"ok": True, "url": url, "resource": key, "id": obj["id"]}
+
+
 def create_collection(profile: dict, fields: dict, item_ids: list | None = None) -> str:
     from . import seo_guard
     if (refusal := seo_guard.check(profile, fields, what="new collection")):

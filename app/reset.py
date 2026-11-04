@@ -86,7 +86,7 @@ KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
 #: Tables that hold what the account DID. Conversations, outputs, mail,
 #: documents, logistics. Rebuildable only from the source systems, and some of
 #: it not at all.
-OPERATIONS = {"check_results", "conversations", "touches", "commitments", "outputs",
+OPERATIONS = {"check_results", "change_requests", "change_tasks", "conversations", "touches", "commitments", "outputs",
               "approvals", "email_log", "contacts", "deadlines", "shipments",
               "rfqs", "expenses", "doc_index", "systems", "system_runs",
               "memories", "lessons", "chat_messages", "usage", "wa_messages",

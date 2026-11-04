@@ -41,8 +41,10 @@ that said what was due, what was stuck or what had worked:
     get_truth     the APPROVED answer per subject × scope (what QA decided is
                   true, from which source, why, by whom) and the open
                   findings: pages that disagree with it, subjects the site
-                  states several ways with no answer chosen. Draft from the
-                  approved answers; never from a disputed figure. Read-only.
+                  states several ways with no answer chosen — and open
+                  CHANGES: a changed answer with every page, draft and
+                  unreadable page still to update. Draft from the approved
+                  answers; never from a disputed figure. Read-only.
     get_claims    the whole claims register — proposed, approved, rejected —
                   with evidence, source page and tags, filtered and paged,
                   plus how much of the account's sites the harvest has read.
@@ -764,7 +766,7 @@ def get_truth(tenant: str, subject: str = "", include_closed: bool = False) -> d
     suspect), `missing_known` (a known answer was not captured).
     Use an answer as fact; treat a subject with an open finding as disputed.
     Decisions are made by a person in the console, never here. Read-only."""
-    from . import findings, tenants, truth
+    from . import change, findings, tenants, truth
     if tenants.get(tenant) is None:
         return {"ok": False, "why": f"unknown account {tenant!r}",
                 "known": sorted(t.key for t in tenants.all_tenants())}
@@ -775,7 +777,10 @@ def get_truth(tenant: str, subject: str = "", include_closed: bool = False) -> d
             "findings": fs[:200], "findings_total": len(fs),
             "p1_open": sum(1 for f in fs if f["severity"] == "P1" and f["status"] == "open"),
             "sources": [{"url": x.ref, "governs": x.governs or [], "by": x.created_by}
-                        for x in truth.sources(tenant)]}
+                        for x in truth.sources(tenant)],
+            # Changed answers and every place still stating the old one.
+            "changes": [c for c in change.listing(tenant, "open")
+                        if not subject or c["subject"] == subject][:50]}
 
 
 #: Most claims one get_claims call returns. Page with `offset` past this.

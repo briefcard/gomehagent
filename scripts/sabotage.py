@@ -38,6 +38,39 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_change_task_closes_before_the_page_agrees",
+        "file": "app/change.py",
+        "find": "                    ok = not still\n",
+        "replace": "                    ok = True  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a change reads as done while the live page still states the old figure",
+    },
+    {
+        "name": "a_store_fix_writes_without_approval",
+        "file": "app/change.py",
+        "find": "        t.status, t.approval_id, t.done_by, t.updated_at = \"proposed\", ap_id, by, _now()\n",
+        "replace": "        t.status, t.approval_id, t.done_by, t.updated_at = \"proposed\", ap_id, by, _now()\n        execute_fix({\"tenant\": tenant, \"site\": prof.get(\"key\", \"\"), \"url\": t.location, \"find\": t.find, \"replace\": t.replace, \"task_id\": t.id})  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a fix is written to the live store before the owner approved it",
+    },
+    {
+        "name": "an_ambiguous_store_edit_guesses",
+        "file": "app/shopify_seo.py",
+        "find": "    if n != 1:\n        return {\"ok\": False, \"error\": (f\"the wording {find!r} appears {n} times in the \"\n",
+        "replace": "    if n == 0:  # SABOTAGE\n        return {\"ok\": False, \"error\": (f\"the wording {find!r} appears {n} times in the \"\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a phrase that appears twice on a page is replaced at a guess",
+    },
+    {
+        "name": "a_pending_draft_is_not_a_change_location",
+        "file": "app/change.py",
+        "find": "                    out.append({\"kind\": \"draft\", \"location\": f\"approval:{ap.id}\",\n",
+        "replace": "                    continue  # SABOTAGE\n                    out.append({\"kind\": \"draft\", \"location\": f\"approval:{ap.id}\",\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a queued newsletter still stating the old figure is approved and sent "
+               "after the answer changed",
+    },
+    {
         "name": "a_wrong_figure_ships",
         "file": "app/validator.py",
         "find": "        for f in _truth.check_text(tenant, body, entity_key=entity_key):\n",

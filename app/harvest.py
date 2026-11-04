@@ -429,9 +429,13 @@ def _known_after(tenant: str) -> dict:
 
 
 def _findings_after(tenant: str) -> dict:
-    from . import findings
+    from . import change, findings
     try:
-        return findings.rebuild(tenant)
+        out = findings.rebuild(tenant)
+        # CHANGE verification: a task closes only when the page, as just
+        # read, agrees with the answer.
+        out["changes_verified"] = change.verify(tenant)["verified"]
+        return out
     except Exception as exc:  # noqa: BLE001 — bookkeeping must not fail the read
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:120]}"}
 

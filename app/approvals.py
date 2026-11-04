@@ -528,7 +528,7 @@ def apply_decision(ap_id: str, decision: str) -> str:
                         "gbp_listing_fix",
                         "seo_new_collection", "seo_new_page",
                         "seo_new_article", "seo_article_revision",
-                        "shopify_theme_asset", "systems_update"}
+                        "shopify_theme_asset", "systems_update", "fact_fix"}
             if ap.kind in _HANDLED:
                 return f"Approved and executed: {ap.summary}"
             # The nightly sweep files kind="sweep"; nothing executes it, and
@@ -986,6 +986,15 @@ def _execute(ap: db.Approval) -> None:
         whatsapp.send_text(
             f"🔎 SEO updated ({p.get('site')}): {res}" if _published(res)
             else f"⛔ SEO NOT updated ({p.get('site')}): {res}")
+    elif ap.kind == "fact_fix":
+        # A changed truth reaching a live page (app/change.py): the exact
+        # before → after the owner approved, applied only if the old wording
+        # is there exactly once and the new body passes the gates.
+        from . import change, whatsapp
+        res = change.execute_fix(ap.payload)
+        whatsapp.send_text(
+            f"✅ Fixed on the site: {ap.payload.get('url')}" if res.get("ok")
+            else f"⛔ NOT fixed ({ap.payload.get('url')}): {str(res.get('error', ''))[:200]}")
     elif ap.kind == "seo_new_collection":
         from . import sites, whatsapp
         p = ap.payload

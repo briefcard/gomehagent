@@ -62,6 +62,8 @@ def net(pages):
         calls.append(url)
         if url.endswith("/sitemap.xml"):
             return _Resp(sitemap)
+        if url in pages and pages[url] is None:
+            return _Resp("", 404)            # listed on the site, unreadable
         return _Resp(pages[url]) if url in pages else _Resp("", 404)
     httpx.get = get
     return calls
@@ -576,6 +578,133 @@ def check_m7_the_fact_gate():
        "Approved figures" in pkg and "162+" in pkg and "Disputed figures" in pkg)
 
 
+def check_m8_changes_reach_every_place():
+    """M8 — a changed answer lists every place, fixes what it can on approval,
+    and closes only when the live pages agree."""
+    from fastapi.testclient import TestClient
+    from app import approvals, change, shopify_seo, truth, web as _web
+    cov, legal = f"{BASE}/pages/coverage", f"{BASE}/policies/legal-notice"
+    gone = f"{BASE}/pages/gone"
+    pages = dict(PAGES)
+    pages[legal] = "<html><body><main><p>We operate in 140 countries.</p>" + FILLER + "</main></body></html>"
+    pages[gone] = None
+    net(pages)
+    harvest.harvest("baci", limit=30, apply=True, recrawl=True)
+    approvals.request_approval("skill_output", "Newsletter: now in 75 countries",
+                               {"tenant": "baci", "body": "We now deliver to 75 countries."},
+                               notify=False)
+    c = TestClient(_web.app)
+    fid = truth.resolve("baci", "coverage.countries")["id"]
+    r = c.post("/admin/change_create?key=s3cret", data={
+        "tenant": "baci", "subject": "coverage.countries", "fact_id": fid,
+        "new_value": "165+", "reason": "", "by": "qa-anna"}, follow_redirects=False)
+    ck("M8 a change without a reason is refused", not change.listing("baci"))
+    r = c.post("/admin/change_create?key=s3cret", data={
+        "tenant": "baci", "subject": "coverage.countries", "fact_id": fid,
+        "new_value": "165+", "reason": "three new corridors live", "by": "qa-anna"},
+        follow_redirects=False)
+    chs = change.listing("baci")
+    ck("CONSOLE changing an answer opens a change with its tasks", r.status_code in (200, 303)
+       and len(chs) == 1 and chs[0]["new_value"] == "165+" and chs[0]["old_value"] == "162+",
+       str([(x["old_value"], x["new_value"]) for x in chs]))
+    ck("M8 the truth itself changed at once", truth.resolve("baci", "coverage.countries")["value"] == "165+")
+    tasks = chs[0]["tasks"] if chs else []
+    by = {(t["kind"], t["location"], t["find"]) for t in tasks}
+    ck("M8 every store page stating another figure is an auto-edit task with the exact swap",
+       ("auto_edit", cov, "75 countries") in by and ("auto_edit", cov, "145 countries") in by
+       and any(t["replace"] == "165+ countries" for t in tasks if t["find"] == "75 countries"),
+       str(sorted(by)))
+    ck("M8 a page on no connected store is a manual task carrying the sentence",
+       any(t["kind"] == "manual" and t["location"] == legal and "140" in t["sentence"] for t in tasks))
+    ck("M8 a pending draft still saying the old figure is a task",
+       any(t["kind"] == "draft" for t in tasks))
+    ck("M8 pages that could not be read are listed to check by hand",
+       any(t["kind"] == "unmonitored" and gone in t["sentence"] for t in tasks))
+    ck("M8 a figure that already agrees ('162+' is true of 165) is not a task",
+       not any(t["find"].startswith("162+") for t in tasks))
+    # Propose the store fix: an approval, nothing written yet.
+    store = {"body": "<p>Coverage</p><div>75 countries</div><p>Live in 145 countries</p>", "puts": []}
+    real = (shopify_seo._ok, shopify_seo._store, shopify_seo._get, shopify_seo._send)
+    shopify_seo._ok = lambda prof: None
+    shopify_seo._store = lambda prof: "bacimilanousa"
+    shopify_seo._get = lambda st, path, params=None: (
+        {"pages": [{"id": 77, "body_html": store["body"]}]} if path == "pages.json" else {})
+    shopify_seo._send = lambda st, method, path, body: (store["puts"].append((method, path, body)) or {})
+    try:
+        t75 = next(t for t in tasks if t["find"] == "75 countries")
+        r = c.post("/admin/change_task?key=s3cret", data={
+            "tenant": "baci", "task_id": t75["id"], "action": "propose", "by": "qa-anna"},
+            follow_redirects=False)
+        with db.SessionLocal() as s:
+            row = s.get(db.ChangeTask, t75["id"])
+            ap = s.get(db.Approval, row.approval_id) if row.approval_id else None
+        ck("CONSOLE proposing a fix files an APPROVAL and writes nothing",
+           row.status == "proposed" and ap is not None and ap.kind == "fact_fix"
+           and ap.payload["find"] == "75 countries" and not store["puts"], f"{row.status} {ap and ap.kind}")
+        approvals.apply_decision(ap.id, "approved")
+        ck("M8 on approval, exactly that wording is replaced on the store",
+           store["puts"] and "165+ countries" in store["puts"][-1][2]["page"]["body_html"]
+           and "75 countries" not in store["puts"][-1][2]["page"]["body_html"], str(store["puts"])[:200])
+        with db.SessionLocal() as s:
+            ck("M8 the task is 'published', not done — the page has not been read since",
+               s.get(db.ChangeTask, t75["id"]).status == "published")
+        # Refusals: twice on the page, or a gate failure, writes nothing.
+        store["puts"].clear()
+        store["body"] = "<p>75 countries</p><p>75 countries</p>"
+        out = shopify_seo.replace_text({"key": "baci"}, cov, "75 countries", "165+ countries")
+        ck("M8 wording found twice is refused — edit by hand", not out["ok"] and not store["puts"], str(out))
+        store["body"] = "<p>75 countries</p>"
+        from app import kb, validator
+        phrase = kb.banned_claims("baci")[0]
+        out = shopify_seo.replace_text({"key": "baci"}, cov, "75 countries", f"165+ countries, {phrase}",
+                                       check=lambda b: validator.check("baci", b, require_citation=False))
+        ck("M8 a replacement that fails a gate is not written", not out["ok"] and not store["puts"], str(out))
+    finally:
+        shopify_seo._ok, shopify_seo._store, shopify_seo._get, shopify_seo._send = real
+    # The site now shows the fix for the slide; the footer still says 145.
+    pages[cov] = PAGES[cov].replace("75 countries", "165+ countries")
+    net(pages)
+    harvest.harvest("baci", limit=30, apply=True, recrawl=True)
+    st = {t["find"]: t["status"] for t in change.listing("baci")[0]["tasks"] if t["kind"] == "auto_edit"}
+    ck("M8 each task verifies on its own wording: the fixed slide verifies, the footer (still 145) does not",
+       st.get("75 countries") == "verified" and st.get("145 countries") != "verified", str(st))
+    pages[cov] = pages[cov].replace("Live in 145 countries", "Live in 165+ countries")
+    net(pages)
+    harvest.harvest("baci", limit=30, apply=True, recrawl=True)
+    st = {t["find"]: t["status"] for t in change.listing("baci")[0]["tasks"] if t["kind"] == "auto_edit"}
+    ck("M8 once the page, read again, agrees, both of its tasks verify",
+       st.get("75 countries") == "verified" and st.get("145 countries") == "verified", str(st))
+    # Manual: marking done is not enough while the page still says 140.
+    tl = next(t for t in change.listing("baci")[0]["tasks"] if t["location"] == legal)
+    change.mark("baci", tl["id"], "done_by_hand", by="qa-anna")
+    st = next(t for t in change.listing("baci")[0]["tasks"] if t["id"] == tl["id"])["status"]
+    ck("M8 'I fixed it' on a page that still disagrees does not verify it", st == "done_by_hand", st)
+    out = change.mark("baci", next(t["id"] for t in change.listing("baci")[0]["tasks"]
+                                   if t["kind"] == "unmonitored"), "skipped", note="")
+    ck("M8 skipping needs a reason", "error" in out)
+    pages[legal] = pages[legal].replace("140 countries", "165+ countries")
+    net(pages)
+    harvest.harvest("baci", limit=30, apply=True, recrawl=True)
+    for t in change.listing("baci")[0]["tasks"]:
+        if t["kind"] == "manual" and t["find"].startswith("Supported countries"):
+            change.mark("baci", t["id"], "skipped", note="the list shows examples, not every country",
+                        by="qa-anna")
+        if t["kind"] == "unmonitored":
+            change.mark("baci", t["id"], "done_by_hand", by="qa-anna")
+        if t["kind"] == "draft":
+            approvals.apply_decision(t["location"].removeprefix("approval:"), "denied")
+    change.verify("baci")
+    ch = change.listing("baci", "all")[0]
+    ck("M8 the change closes when every place is verified",
+       ch["status"] == "done", str([(t["kind"], t["status"]) for t in ch["tasks"]]))
+    r = c.get("/admin/qa_log.csv?key=s3cret&tenant=baci")
+    ck("M8 the QA decision log exports every decision with who and why",
+       r.status_code == 200 and "change requested" in r.text and "three new corridors live" in r.text
+       and "qa-anna" in r.text and "answer set" in r.text, r.text[:200])
+    ck("M8 changes are this account's only", not change.listing("eien", "all")
+       and "change requested" not in "".join(x["what"] for x in change.audit_log("eien")))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -589,6 +718,7 @@ def main() -> int:
     check_m6_the_agreement_rule()
     check_m6_truth_findings_and_questions()
     check_m7_the_fact_gate()
+    check_m8_changes_reach_every_place()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 
