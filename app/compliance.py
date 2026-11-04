@@ -56,13 +56,22 @@ _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 # The additions past the first line are all things a real crawl brought back:
 # WordPress' default "Sample Page", tag and author archives that restate other
 # pages' copy, pagination, and error pages that a site serves with a 200.
-_SKIP = ("/cart", "/checkout", "/account", "/policies/", "/wp-json",
-         "/feed", ".xml", ".json", ".pdf", "/search",
-         "/sample-page", "/wp-admin", "/wp-content", "/wp-includes",
-         "/404", "/error", "/not-found", "/thank-you", "/thanks",
-         "/tag/", "/category/", "/author/", "/page/", "?s=", "?p=",
-         "/privacy", "/terms", "/cookie", "/legal", "/disclaimer",
-         "/login", "/register", "/cdn-cgi/")
+#: LEGAL PAGES — privacy, terms, cookies, legal notices, disclaimers. Skipped
+#: by the ban-list scan and the voice reader (a terms page is not how a brand
+#: speaks), but NOT by the harvest. Owner, 2026-11-04, adding Transak: "Do not
+#: skip those legal pages but note specifically that those are legal pages so
+#: we know they are critical in terms of importance and should never be
+#: contradicted." A licence, a regulated status or a refund term is a fact the
+#: copy must never contradict, and it lives on exactly these pages.
+LEGAL_PATHS = ("/privacy", "/terms", "/cookie", "/legal", "/disclaimer",
+               "/policies/")
+_SKIP_NOT_LEGAL = ("/cart", "/checkout", "/account", "/wp-json",
+                   "/feed", ".xml", ".json", ".pdf", "/search",
+                   "/sample-page", "/wp-admin", "/wp-content", "/wp-includes",
+                   "/404", "/error", "/not-found", "/thank-you", "/thanks",
+                   "/tag/", "/category/", "/author/", "/page/", "?s=", "?p=",
+                   "/login", "/register", "/cdn-cgi/")
+_SKIP = _SKIP_NOT_LEGAL + LEGAL_PATHS
 
 # A page whose title says it is an error, whatever status code it was served
 # with. Squarespace and plenty of WordPress themes return 200 on a missing page.
@@ -71,8 +80,16 @@ _DEAD_TITLE = re.compile(
     r"sample page|coming soon|under construction|untitled)\b", re.I)
 
 
-def skip_url(url: str) -> bool:
-    return any(s in (url or "").lower() for s in _SKIP)
+def skip_url(url: str, keep_legal: bool = False) -> bool:
+    """Not brand copy. `keep_legal` keeps legal pages (the harvest's case)."""
+    return any(s in (url or "").lower()
+               for s in (_SKIP_NOT_LEGAL if keep_legal else _SKIP))
+
+
+def is_legal_url(url: str) -> bool:
+    """A privacy, terms, cookie, legal or disclaimer page (`LEGAL_PATHS`)."""
+    low = (url or "").lower()
+    return any(s in low for s in LEGAL_PATHS)
 
 
 def page_title(html: str) -> str:
@@ -165,7 +182,8 @@ def _clean(html_text: str) -> str:
     return " ".join(text_blocks(html_text))
 
 
-def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:
+def _sitemap_urls(base: str, limit: int = 300,
+                  skip: tuple = _SKIP) -> list[dict]:
     """Every public URL, from sitemap.xml, following index files one level.
 
     Returns `lastmod` where the sitemap gives it, so a later run can check only
@@ -255,7 +273,7 @@ def _sitemap_urls(base: str, limit: int = 300) -> list[dict]:
         urls += more
     for u in urls:
         loc = u["url"]
-        if loc in seen or any(s in loc.lower() for s in _SKIP):
+        if loc in seen or any(s in loc.lower() for s in skip):
             continue
         seen.add(loc)
         out.append(u)
@@ -273,7 +291,8 @@ def _hosts(base: str) -> list[str]:
     return [base, base.split("://", 1)[0] + "://" + alt]
 
 
-def _wp_json_urls(base: str, limit: int = 300) -> list[dict]:
+def _wp_json_urls(base: str, limit: int = 300,
+                  skip: tuple = _SKIP) -> list[dict]:
     """Pages and posts from the WordPress REST API.
 
     WordPress exposes published content over wp-json without authentication, so
@@ -295,7 +314,7 @@ def _wp_json_urls(base: str, limit: int = 300) -> list[dict]:
                     continue
                 for item in r.json():
                     link = item.get("link") or ""
-                    if not link or any(s in link.lower() for s in _SKIP):
+                    if not link or any(s in link.lower() for s in skip):
                         continue
                     # Take the CONTENT here too. marketingthatworks.co answers
                     # the API with 200 and every HTML page with 403 — a WAF
@@ -319,7 +338,8 @@ def _wp_json_urls(base: str, limit: int = 300) -> list[dict]:
     return uniq[:limit]
 
 
-def _crawl_urls(base: str, limit: int = 60) -> list[dict]:
+def _crawl_urls(base: str, limit: int = 60,
+                skip: tuple = _SKIP) -> list[dict]:
     """Last resort: internal links from the homepage.
 
     Not a complete picture of a site and does not pretend to be — but "some of
@@ -342,7 +362,7 @@ def _crawl_urls(base: str, limit: int = 60) -> list[dict]:
                 continue
             url = (root + href if href.startswith("/")
                    else href if href.startswith(root) else "")
-            if not url or url in seen or any(s in url.lower() for s in _SKIP):
+            if not url or url in seen or any(s in url.lower() for s in skip):
                 continue
             seen.add(url)
             found.append({"url": url, "lastmod": ""})
@@ -353,7 +373,8 @@ def _crawl_urls(base: str, limit: int = 60) -> list[dict]:
     return []
 
 
-def _one_page(base: str, limit: int = 60) -> list[dict]:
+def _one_page(base: str, limit: int = 60,
+              skip: tuple = _SKIP) -> list[dict]:
     """A source that names ONE PAGE: that page, plus anything under it.
 
     `discover_pages` assumed every source is a SITE, because until landing
@@ -396,14 +417,15 @@ def _one_page(base: str, limit: int = 60) -> list[dict]:
         nxt = nxt.rstrip("/")
         if not nxt.startswith(landed + "/") or nxt in seen:
             continue
-        if any(sk in nxt.lower() for sk in _SKIP):
+        if any(sk in nxt.lower() for sk in skip):
             continue
         seen.add(nxt)
         out.append({"url": nxt, "lastmod": ""})
     return out
 
 
-def discover_pages(base: str, limit: int = 300) -> tuple[list[dict], str]:
+def discover_pages(base: str, limit: int = 300,
+                   keep_legal: bool = False) -> tuple[list[dict], str]:
     """Every public page, by whichever method this source supports.
 
     A source naming ONE PAGE is read as one page (see `_one_page`) — that
@@ -418,21 +440,22 @@ def discover_pages(base: str, limit: int = 300) -> tuple[list[dict], str]:
     confidence in a clean scan.
     """
     from . import tenants
+    skip = _SKIP_NOT_LEGAL if keep_legal else _SKIP
     if not tenants._is_bare_host(base):
-        pages = _one_page(base, limit=min(limit, 60))
+        pages = _one_page(base, limit=min(limit, 60), skip=skip)
         if pages:
             return pages, "landing page"
         discover_pages.last_problems = list(
             getattr(_one_page, "last_problems", []))
         return [], ""
-    pages = _sitemap_urls(base, limit=limit)
+    pages = _sitemap_urls(base, limit=limit, skip=skip)
     if pages:
         return pages, "sitemap"
     problems = list(getattr(_sitemap_urls, "last_problems", []))
-    pages = _wp_json_urls(base, limit=limit)
+    pages = _wp_json_urls(base, limit=limit, skip=skip)
     if pages:
         return pages, "wordpress api"
-    pages = _crawl_urls(base, limit=min(limit, 60))
+    pages = _crawl_urls(base, limit=min(limit, 60), skip=skip)
     if pages:
         return pages, "homepage crawl"
     discover_pages.last_problems = problems

@@ -2284,6 +2284,32 @@ def add_claim(tenant: str, claim: str, evidence: str, tags: list[str],
             + (f"\n{inferred}" if inferred else ""))
 
 
+def is_legal_claim(row) -> bool:
+    """True when a claim was stated on one of the brand's LEGAL pages.
+
+    Derived from where it was read — its source and every corroborating
+    source — rather than stored, so a claim filed before legal pages were
+    harvested, or first seen on a marketing page and then on the terms, is
+    marked the same way. Owner, 2026-11-04: legal statements are "critical in
+    terms of importance and should never be contradicted"."""
+    from . import compliance
+    refs = [getattr(row, "source", "") or ""]
+    refs += [str(e.get("ref") or "") for e in (getattr(row, "also_seen", None) or [])
+             if isinstance(e, dict)]
+    return any(compliance.is_legal_url(r) for r in refs if "://" in r)
+
+
+def legal_claims(tenant: str) -> list[db.KbClaim]:
+    """Approved, active claims read off a legal page — binding on every draft."""
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbClaim)
+                .filter(db.KbClaim.tenant == tenant,
+                        db.KbClaim.review == prov.APPROVED,
+                        db.KbClaim.status == "active").all())
+        s.expunge_all()
+    return [r for r in rows if is_legal_claim(r)]
+
+
 def pending_claims(tenant: str = "") -> list[db.KbClaim]:
     """Claims awaiting review — proposals from any source, not yet selectable."""
     with db.SessionLocal() as s:

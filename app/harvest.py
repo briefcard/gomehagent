@@ -447,7 +447,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     pages, src_report = [], []
     for src in srcs:
         found, how = compliance.discover_pages(src["url"],
-                                               limit=max(limit * 20, DISCOVERY_CAP))
+                                               limit=max(limit * 20, DISCOVERY_CAP),
+                                               keep_legal=True)
         for pg in found:
             # Which site this page was read off, carried on the page itself so
             # every finding downstream can name it without re-deriving.
@@ -533,10 +534,16 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     # alone. Discovery already drops them (`compliance._SKIP`); filtering here
     # as well, BEFORE the budget is cut, keeps a source that does not filter
     # from spending a run's slots on them or counting them as still to read.
-    readable = [p for p in pages if not compliance.skip_url(p["url"])]
+    readable = [p for p in pages
+                if not compliance.skip_url(p["url"], keep_legal=True)]
+    # LEGAL PAGES FIRST within each band: what they say is the one thing the
+    # copy must never contradict, so a site is not "covered" until they are.
+    def _legal_first(bucket: list[dict]) -> list[dict]:
+        return ([p for p in bucket if compliance.is_legal_url(p["url"])]
+                + [p for p in bucket if not compliance.is_legal_url(p["url"])])
     ordered_pages = (
-        _interleave([p for p in readable if p["url"] not in seen_pages])
-        + _interleave([p for p in readable if p["url"] in seen_pages]))
+        _legal_first(_interleave([p for p in readable if p["url"] not in seen_pages]))
+        + _legal_first(_interleave([p for p in readable if p["url"] in seen_pages])))
     unchanged = 0
     # Every page this run tried, read or not. A page that could not be read
     # still leaves the unread band (see `_tried` below), so `pages_remaining`
@@ -722,13 +729,19 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                 # corroboration in-band (already on file), and both looked
                 # identical to a successful write from here. A crawl could
                 # report 40 proposals and file none.
+                # A statement off a LEGAL page is never re-routed to
+                # background by the classifier: it goes to the claim queue,
+                # where it is shown as legal and a person decides. Owner,
+                # 2026-11-04: legal pages "should never be contradicted".
+                legal = compliance.is_legal_url(cand.get("url") or cand["source"])
                 said = kb.add_claim(
                     tenant, body, cand["evidence"], tags,
                     proof_type=cand["proof_type"],
                     source=cand["source"], status="pending", origin="crawl",
                     entity_key=cand.get("entity_key", ""),
                     proves=cand.get("proves", ""),
-                    context=cand.get("context", ""))
+                    context=cand.get("context", ""),
+                    assess=not legal)
                 if said.startswith("Unknown tags"):
                     write_refused.append({"text": body[:160], "why": said})
                 elif said.startswith("Already on file"):

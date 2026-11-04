@@ -38,6 +38,25 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "legal_pages_are_skipped_by_the_harvest",
+        "file": "app/harvest.py",
+        "find": "                                               keep_legal=True)\n",
+        "replace": "                                               keep_legal=False)  # SABOTAGE\n",
+        "suites": ["test_harvest.py"],
+        "why": "a licence, a regulated status or a refund term on the terms and "
+               "privacy pages never reaches the knowledge base, so nothing stops "
+               "a draft contradicting it",
+    },
+    {
+        "name": "legal_statements_are_not_in_the_brief",
+        "file": "app/mcp_server.py",
+        "find": "    legal = kb.legal_claims(tenant)\n",
+        "replace": "    legal = []  # SABOTAGE\n",
+        "suites": ["test_the_substrate_is_an_mcp_server.py"],
+        "why": "an approved legal statement is not in front of the writer as "
+               "binding, so a draft can contradict the brand's own terms",
+    },
+    {
         "name": "an_unreadable_page_holds_the_front_of_the_queue",
         "file": "app/harvest.py",
         "find": "        attempted.add(url)\n        if apply:\n            _record_page(tenant, url, content_hash, 0, False)\n",
@@ -7025,8 +7044,8 @@ SABOTAGES = [
     {
         "name": "the_cart_is_not_read_as_brand_copy",
         "file": "app/compliance.py",
-        "find": "_SKIP = (\"/cart\", \"/checkout\", \"/account\", \"/policies/\", \"/wp-json\",",
-        "replace": "_SKIP = (\"/never-a-real-path\",  # SABOTAGE",
+        "find": "_SKIP_NOT_LEGAL = (\"/cart\", \"/checkout\", \"/account\", \"/wp-json\",",
+        "replace": "_SKIP_NOT_LEGAL = (\"/never-a-real-path\",  # SABOTAGE",
         "suites": ["test_compliance.py"],
         "why": "the checkout page is scanned for banned phrases as if it were "
                "marketing copy, and every 'proceed to payment' is a finding",
