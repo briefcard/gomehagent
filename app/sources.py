@@ -71,6 +71,8 @@ def _website(tenant: str, apply: bool, budget: int) -> dict:
              "pages_read", "pages_skipped", "pages_unchanged",
              "pages_discovered", "pages_remaining",
              "statements_found", "statements_by_subject", "pages_from_page_data",
+             "statements_by_extractor", "unaccounted_figures", "pages_by_tier",
+             "partly_read_by_tier",
              "proposed_count", "faqs_found", "untagged_count",
              "situations_wanted", "situations_proposed", "error")}
 

@@ -32,7 +32,8 @@ import re
 
 from . import compliance, db, extract, kb, provenance as prov, statements, tenants
 from .pipeline import (account as pipeline_account, extractors as pipeline_extractors,
-                       fetch as pipeline_fetch, parse as pipeline_parse)
+                       fetch as pipeline_fetch, parse as pipeline_parse,
+                       policy as pipeline_policy)
 from .urls import url as _url
 
 _MIN, _MAX = 25, 240
@@ -544,9 +545,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                 if not compliance.skip_url(p["url"], keep_legal=True)]
     # LEGAL PAGES FIRST within each band: what they say is the one thing the
     # copy must never contradict, so a site is not "covered" until they are.
+    # And then by RISK TIER (pipeline.policy): legal, then coverage (where
+    # the brand operates, fees, limits), then everything else — a stable
+    # sort, so the round-robin across sources is kept inside each tier.
     def _legal_first(bucket: list[dict]) -> list[dict]:
-        return ([p for p in bucket if compliance.is_legal_url(p["url"])]
-                + [p for p in bucket if not compliance.is_legal_url(p["url"])])
+        return sorted(bucket, key=lambda p: pipeline_policy.rank(pipeline_policy.tier(p["url"])))
     ordered_pages = (
         _legal_first(_interleave([p for p in readable if p["url"] not in seen_pages]))
         + _legal_first(_interleave([p for p in readable if p["url"] in seen_pages])))
@@ -555,6 +558,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     fact_subjects: dict[str, int] = {}    # statements the sweep found, by subject
     by_reader: dict[str, int] = {}        # statements per extractor
     unaccounted_total = 0                 # figures no reader explained
+    tiers_seen: dict[str, int] = {}       # pages read, by risk tier
+    cut_by_tier: dict[str, int] = {}      # pages partly read, by risk tier
     terms = statements.terms(tenant)      # the account's taught vocabulary
     # Every page this run tried, read or not. A page that could not be read
     # still leaves the unread band (see `_tried` below), so `pages_remaining`
@@ -628,9 +633,12 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # ONE FETCH, MANY READERS: the page is kept as fetched, with its
         # Document, so a better extractor re-reads it and the ban-list scan
         # checks it without going back to the site. Apply only.
+        page_tier = pipeline_policy.tier(url, doc)
+        tiers_seen[page_tier] = tiers_seen.get(page_tier, 0) + 1
         if apply:
             pipeline_fetch.store(tenant, url, html, page_hash,
-                                 p.get("source_label", ""), document=doc)
+                                 p.get("source_label", ""), document=doc,
+                                 risk_tier=page_tier)
         # THE FACT SWEEP — before the unchanged and dead checks, on every page
         # fetched, because it is code (no model call) and a figure stated in
         # a footer or a stat tile is exactly what the claim reader misses.
@@ -672,7 +680,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         cands = [{**r, "entity_key": entity} for r in reviews]
         if model_on:
             # The model judges what is a claim; every guard below still runs.
-            res = extract.extract(tenant, url, blocks, entity_key=entity)
+            res = extract.extract(tenant, url, blocks, entity_key=entity,
+                                  max_chunks=pipeline_policy.max_chunks(page_tier))
             used_model = used_model or res["used"] == "model"
             # PARTLY READ = the reply was cut OR the page was longer than the
             # extractor's chunk ceiling. Both mean the page said more than was
@@ -681,6 +690,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                                   or (res.get("input") or {}).get("cut"))
             if page_truncated:
                 truncated_pages.append(url)
+                cut_by_tier[page_tier] = cut_by_tier.get(page_tier, 0) + 1
             if res["used"] == "model":
                 cands += res["claims"]
                 not_verbatim += res["rejected_not_verbatim"]
@@ -893,6 +903,13 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "statements_by_subject": dict(sorted(fact_subjects.items(),
                                              key=lambda kv: -kv[1])),
         "statements_by_extractor": by_reader,
+        # RISK TIERS (pipeline.policy): how many pages of each tier were read,
+        # and how many of each were only partly read. Legal and coverage
+        # pages have no ceiling, so a non-zero there means the model reply
+        # itself was cut — never the page.
+        "pages_by_tier": tiers_seen,
+        "partly_read_by_tier": cut_by_tier,
+        "tier_policy": pipeline_policy.table(),
         # Figures on the pages read that NO reader turned into a statement
         # and that are not a year, price, date or phone number — listed for a
         # reviewer (Review › Site facts), never dropped.

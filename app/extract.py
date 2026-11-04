@@ -432,7 +432,7 @@ def _cache_put(tenant: str, user: str, got: dict) -> None:
 
 
 def extract(tenant: str, url: str, blocks: list[str],
-            entity_key: str = "") -> dict:
+            entity_key: str = "", max_chunks: int | None = MAX_CHUNKS) -> dict:
     """Claims on one page, as verbatim spans.
 
     Returns `{"claims": [...], "rejected_not_verbatim": [...], "used": ...,
@@ -444,7 +444,9 @@ def extract(tenant: str, url: str, blocks: list[str],
     """
     blocks = merge_short(blocks)
     parts = chunks(blocks)
-    read = parts[:MAX_CHUNKS]
+    # The ceiling is the page's RISK TIER's (pipeline.policy): None for a
+    # legal or coverage page, which is read in full whatever its length.
+    read = parts if max_chunks is None else parts[:max_chunks]
     n_read = sum(len(c) for c in read)
     n_all = sum(len(c) for c in parts)
     coverage = {"blocks": n_all, "read": n_read, "chunks": len(read),

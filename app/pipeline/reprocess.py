@@ -9,7 +9,7 @@ and "what we have stored of it" are never confused).
 from __future__ import annotations
 
 from .. import compliance, statements
-from . import account, extractors, fetch, parse
+from . import account, extractors, fetch, parse, policy
 
 
 def reprocess(tenant: str, apply: bool = False) -> dict:
@@ -20,6 +20,9 @@ def reprocess(tenant: str, apply: bool = False) -> dict:
         doc = parse.document(tenant, row.url) if apply else parse.parse(fetch.html_of(row))
         if not doc:
             continue
+        if apply and not row.risk_tier:
+            policy_tier = policy.tier(row.url, doc)
+            fetch.set_tier(tenant, row.url, policy_tier)
         stmts, counts = extractors.run_all(doc, terms)
         figs, _c = account.unaccounted(doc, stmts)
         pages += 1
@@ -40,3 +43,10 @@ def reprocess(tenant: str, apply: bool = False) -> dict:
             "pages_fetched": 0, "statements": statements_n,
             "statements_by_extractor": by_extractor, "unaccounted_figures": unacc,
             "extractors": extractors.registry(), "parser_version": parse.VERSION}
+
+
+def job(tenant: str, progress=None) -> dict:
+    """The queued form (`jobs.KINDS["reprocess"]`): always applies."""
+    if progress:
+        progress("re-reading stored pages")
+    return reprocess(tenant, apply=True)

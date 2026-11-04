@@ -237,6 +237,59 @@ def check_m3_readers_accounting_and_reprocess():
        f"calls={len(calls_m)} r1={r1['input']} r2={r2['input']}")
 
 
+def check_m4_risk_tiers():
+    """M4 — tiers decide how hard a page is read; legal/coverage are never cut."""
+    from app import extract, jobs
+    from app.pipeline import fetch, policy
+    cases = {f"{BASE}/pages/compliance": "legal", f"{BASE}/pages/coverage": "coverage",
+             f"{BASE}/blogs/news/spring": "blog", f"{BASE}/products/aqua": "product",
+             "https://support.example.com/en/articles/1": "support", f"{BASE}/pages/about": "marketing"}
+    got = {u: policy.tier(u) for u in cases}
+    ck("M4 every page gets its tier from its URL", got == cases, str(got))
+    ck("M4 a page whose heading names coverage is a coverage page",
+       policy.tier(f"{BASE}/pages/about", {"headings": [{"level": 1, "text": "Supported countries"}]})
+       == "coverage")
+    ck("M4 legal and coverage pages have no ceiling",
+       policy.max_chunks("legal") is None and policy.max_chunks("coverage") is None
+       and policy.max_chunks("blog") is not None)
+    long_blocks = [f"Licence {i}: we are registered as a money transmitter in jurisdiction "
+                   f"number {i} under the applicable state statute and its rules." for i in range(1500)]
+    real_av, real_call = extract.available, extract._call
+    extract.available = lambda: True
+    extract._call = lambda system, user, tenant="": {"text": "[]", "truncated": False}
+    try:
+        legal = extract.extract("baci", f"{BASE}/pages/compliance", long_blocks,
+                                max_chunks=policy.max_chunks("legal"))
+        blog = extract.extract("baci", f"{BASE}/blogs/news/x", long_blocks,
+                               max_chunks=policy.max_chunks("blog"))
+    finally:
+        extract.available, extract._call = real_av, real_call
+    ck("M4 a very long legal page is read in full, every chunk",
+       not legal["input"]["cut"] and legal["input"]["read"] == legal["input"]["blocks"],
+       str(legal["input"]))
+    ck("M4 the same page as a blog post is cut at its tier's ceiling — and says so",
+       blog["input"]["cut"] and blog["input"]["chunks"] == policy.max_chunks("blog"), str(blog["input"]))
+    # Ordering: with a budget of one page, the legal page is read first even
+    # when the sitemap lists a marketing page ahead of it.
+    pages = {f"{BASE}/pages/about": "<html><body><main><p>We think colour belongs on the table, "
+                                    "every day, in every home that loves to cook and gather.</p>"
+                                    + FILLER + "</main></body></html>",
+             **PAGES}
+    net(pages)
+    harvest.forget_pages("baci")
+    res = harvest.harvest("baci", limit=1, apply=True, recrawl=True)
+    ck("M4 a budget of one page reads the legal page first",
+       res.get("pages_by_tier") == {"legal": 1}, str(res.get("pages_by_tier")))
+    res = harvest.harvest("baci", limit=10, apply=True, recrawl=True)
+    tiers = {r.url: r.risk_tier for r in fetch.snapshots("baci")}
+    ck("M4 the report and the stored page carry the tier",
+       res.get("pages_by_tier", {}).get("coverage") == 1
+       and tiers.get(f"{BASE}/pages/compliance") == "legal"
+       and tiers.get(f"{BASE}/pages/about") == "marketing", str(res.get("pages_by_tier")) + str(tiers))
+    ck("M4 re-reading stored pages is a queued job on the worker",
+       "reprocess" in jobs.KINDS and jobs.KINDS["reprocess"]["target"] == "app.pipeline.reprocess:job")
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -244,6 +297,7 @@ def main() -> int:
     check_m1_snapshots_and_documents()
     check_m2_scan_reads_the_store()
     check_m3_readers_accounting_and_reprocess()
+    check_m4_risk_tiers()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

@@ -9136,14 +9136,16 @@ async def reprocess_pages(request: Request, key: str = Depends(admin_key)):
     """Re-read every stored page with the current readers. No crawl."""
     if key != config.APPROVAL_SECRET:
         return _signin_first(request)
-    from .pipeline import reprocess
+    from . import jobs as _jobs
     form = await request.form()
     tenant = str(form.get("tenant", ""))
-    out = reprocess.reprocess(tenant, apply=True)
-    return _back_to_content(tenant, sub="facts",
-                            msg=f"Re-read {out['pages_read_from_store']} stored pages: "
-                                f"{out['statements']} facts, "
-                                f"{out['unaccounted_figures']} figures still open")
+    # On the worker's queue, not in this request: a site's stored pages can
+    # number thousands, and the web process answers requests.
+    put = _jobs.enqueue(tenant, "reprocess", label="re-read stored pages")
+    return _back_to_content(tenant, sub="facts", err=put.get("why", "") if not put.get("ok") else "",
+                            msg=("Already re-reading stored pages" if put.get("already")
+                                 else "Queued: re-reading every stored page with the "
+                                      "current readers — no crawl"))
 
 
 @app.post("/admin/claims_decide", response_class=HTMLResponse)

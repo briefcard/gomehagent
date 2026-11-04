@@ -42,7 +42,8 @@ def download(url: str) -> tuple[int, str, str]:
 
 def store(tenant: str, url: str, html: str, content_hash: str,
           source_label: str = "", http_status: int = 200,
-          rendered: bool = False, document: dict | None = None) -> bool:
+          rendered: bool = False, document: dict | None = None,
+          risk_tier: str = "") -> bool:
     """Keep this page as fetched. Returns True when its content changed."""
     raw = (html or "").encode("utf-8", "replace")
     with db.SessionLocal() as s:
@@ -66,6 +67,8 @@ def store(tenant: str, url: str, html: str, content_hash: str,
         row.rendered = 1 if rendered else 0
         row.source_label = source_label or row.source_label or ""
         row.fetched_at = _now()
+        if risk_tier:
+            row.risk_tier = risk_tier
         if document is not None:
             row.document = document
             row.parser_version = document.get("version", 0)
@@ -119,3 +122,13 @@ def get(tenant: str, url: str, max_age_hours: float = 0, store_it: bool = False,
         store(tenant, url, html, doc["text_hash"], source_label, status,
               document=doc)
     return {"status": status, "html": html, "error": err, "from_store": False}
+
+
+def set_tier(tenant: str, url: str, tier: str) -> None:
+    with db.SessionLocal() as s:
+        row = (s.query(db.PageSnapshot)
+               .filter(db.PageSnapshot.tenant == tenant,
+                       db.PageSnapshot.url == url).one_or_none())
+        if row is not None:
+            row.risk_tier = tier
+            s.commit()

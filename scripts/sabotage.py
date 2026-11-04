@@ -38,6 +38,24 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_legal_page_is_cut_like_a_blog_post",
+        "file": "app/pipeline/policy.py",
+        "find": "    \"legal\":     {\"rank\": 0, \"max_chunks\": None, \"days\": 7,\n",
+        "replace": "    \"legal\":     {\"rank\": 0, \"max_chunks\": 2, \"days\": 7,  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a long licence page is read two chunks deep, and the licences "
+               "past that point never reach the register",
+    },
+    {
+        "name": "the_budget_goes_to_marketing_pages_first",
+        "file": "app/harvest.py",
+        "find": "        return sorted(bucket, key=lambda p: pipeline_policy.rank(pipeline_policy.tier(p[\"url\"])))\n",
+        "replace": "        return list(bucket)  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a run's budget is spent on marketing pages while the legal and "
+               "coverage pages wait for a later run",
+    },
+    {
         "name": "only_the_number_reader_runs",
         "file": "app/pipeline/extractors/__init__.py",
         "find": "EXTRACTORS = [numbers, enumerations, structured]\n",
@@ -126,7 +144,7 @@ SABOTAGES = [
     {
         "name": "a_long_page_is_cut_at_sixty_blocks_again",
         "file": "app/extract.py",
-        "find": "    read = parts[:MAX_CHUNKS]\n",
+        "find": "    read = parts if max_chunks is None else parts[:max_chunks]\n",
         "replace": "    read = parts[:1]  # SABOTAGE\n",
         "suites": ["test_extract.py"],
         "why": "only the first chunk of a page is read — a 19-row licence table "

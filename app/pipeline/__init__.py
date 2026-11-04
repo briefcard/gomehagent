@@ -21,6 +21,8 @@ STAGES: dict[str, dict] = {
                 "writes": "kb_statements", "version": 1},
     "account": {"module": "app.pipeline.account", "reads": "document + statements",
                 "writes": "unaccounted_numbers", "version": 1},
+    "policy":  {"module": "app.pipeline.policy", "reads": "url + document",
+                "writes": "page_snapshots.risk_tier", "version": 1},
     "reprocess": {"module": "app.pipeline.reprocess", "reads": "page_snapshots",
                   "writes": "kb_statements + unaccounted_numbers", "version": 1},
 }

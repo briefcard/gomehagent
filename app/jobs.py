@@ -79,6 +79,13 @@ KINDS: dict[str, dict] = {
         # repeating it is a decision somebody made.
         "retryable": False,
     },
+    "reprocess": {
+        "what": "every stored page re-read with the current readers — no crawl",
+        "target": "app.pipeline.reprocess:job",
+        # RETRYABLE: it reads stored pages and REPLACES each page's statements
+        # and open figures, so a second run converges on the same rows.
+        "retryable": True,
+    },
     "hosting": {
         "what": "the hand-off of approved pictures to the client's site",
         "target": "app.hosting:publish_all",
@@ -539,7 +546,8 @@ def summarise(result) -> str:
     if result.get("error"):
         return f"error: {result['error']}"
     keep = ("proposed_count", "pages_read", "pages_unchanged", "pages_remaining",
-            "statements_found", "pages_from_page_data", "truncated_page_count",
+            "statements_found", "unaccounted_figures", "pages_from_page_data",
+            "truncated_page_count", "pages_read_from_store",
             "faqs_filed_as_objections", "claims_count", "objections_count",
             "threads_seen", "added", "updated", "violations", "extractor",
             "made", "clean")
@@ -549,6 +557,12 @@ def summarise(result) -> str:
              if isinstance(r, dict) and not r.get("pages_found")]
     if empty:
         bits.append("READ NOTHING: " + ", ".join(str(e) for e in empty[:4]))
+    tiers = result.get("pages_by_tier") or {}
+    if isinstance(tiers, dict) and tiers:
+        cut = result.get("partly_read_by_tier") or {}
+        bits.append("tiers " + ", ".join(
+            f"{t} {n}" + (f" ({cut[t]} partly read)" if cut.get(t) else "")
+            for t, n in tiers.items()))
     lost = _losses(result)
     if lost:
         bits.append("LOST: " + " · ".join(lost))
