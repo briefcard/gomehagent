@@ -40,7 +40,9 @@ from . import db
 KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
              "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs",
-             "kb_contexts", "kb_statements"}
+             "kb_contexts", "kb_statements", "page_snapshots"}
+# `page_snapshots` is KNOWLEDGE: the pages as last fetched, rebuilt by the
+# next harvest; kept past a reset they would re-feed the old site to readers.
 # `kb_statements` is KNOWLEDGE and goes with `harvested_pages`: it is what the
 # crawl read off the site, rebuilt by the next harvest. Leaving it behind on a
 # knowledge reset would show a cleared account's old site figures as current.

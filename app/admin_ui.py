@@ -9369,6 +9369,10 @@ _KB_DESCRIBED = [
      "page, binding or not — and replaced per page on every re-read. Never "
      "cited and never used in drafts: it is what the site SAYS, kept so two "
      "pages that disagree sit side by side (Review › Site facts)."),
+    ("PageSnapshot", "page_snapshots", "Each page as last fetched, with its parsed form",
+     "Kept so every reader — facts, claims, the ban-list scan — reads one copy "
+     "instead of fetching the site again, and so a better reader can re-read "
+     "the site without a crawl. Rebuilt by the next harvest."),
 ]
 
 

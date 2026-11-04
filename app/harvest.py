@@ -31,6 +31,7 @@ import json
 import re
 
 from . import compliance, db, extract, kb, provenance as prov, statements, tenants
+from .pipeline import fetch as pipeline_fetch, parse as pipeline_parse
 from .urls import url as _url
 
 _MIN, _MAX = 25, 240
@@ -44,7 +45,7 @@ DISCOVERY_CAP = 10_000
 
 #: Below this much body text a page is checked for embedded page data (a site
 #: drawn by JavaScript). Matches the dead-page floor `is_dead_page` uses.
-JS_THIN_CHARS = 200
+JS_THIN_CHARS = pipeline_parse.JS_THIN_CHARS
 
 # Boilerplate that appears on every page of every storefront. None of it is a
 # claim, and all of it would otherwise pass a "contains a number" filter.
@@ -580,16 +581,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         entity = handle if ("/products/" in url.lower() and handle in owned) else ""
         html = p.get("html", "")
         if not html:
-            try:
-                r = httpx.get(url, timeout=25, follow_redirects=True,
-                              headers=compliance.HEADERS)
-                if r.status_code != 200:
-                    skipped.append({"url": url, "why": f"HTTP {r.status_code}"})
-                    _tried(url)
-                    continue
-                html = r.text
-            except Exception as exc:  # noqa: BLE001
-                skipped.append({"url": url, "why": exc.__class__.__name__})
+            # FETCH stage (pipeline.fetch) — the one way a page is obtained.
+            status, html, err = pipeline_fetch.download(url)
+            if err:
+                skipped.append({"url": url, "why": err})
+                _tried(url)
+                continue
+            if status != 200:
+                skipped.append({"url": url, "why": f"HTTP {status}"})
                 _tried(url)
                 continue
         # One string per block, never one string for the page. Sentences are
@@ -609,20 +608,25 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
                            "kind": img_kind})
 
         page_truncated = False      # per page, never inherited from the last
-        blocks = compliance.text_blocks(html)
+        # PARSE stage (pipeline.parse): the page as a Document. `blocks` is
+        # what the claim reader has always read — the body minus furniture,
+        # or, for a page drawn by JavaScript whose HTML body is nearly empty,
+        # the strings in its embedded page data.
+        doc = pipeline_parse.parse(html)
+        blocks = doc["blocks"]
         text = " ".join(blocks)
-        # A page drawn by JavaScript ships its copy in embedded JSON and its
-        # HTML body is nearly empty — it read as "dead" and said nothing.
-        # When the page data holds more text than the body, read THAT.
-        if len(text) < JS_THIN_CHARS:
-            data_lines = statements.page_data_lines(html)
-            if len(" ".join(data_lines)) > len(text):
-                blocks, text = data_lines, " ".join(data_lines)
-                pages_from_data.append(url)
+        if doc["from_page_data"]:
+            pages_from_data.append(url)
         # Hash the extracted TEXT, not the markup: a changed analytics tag or
         # cache-buster is not a changed claim, and hashing the HTML would
         # re-read the whole site every time they touch their theme.
-        page_hash = prov.fingerprint(text[:20000])
+        page_hash = doc["text_hash"]
+        # ONE FETCH, MANY READERS: the page is kept as fetched, with its
+        # Document, so a better extractor re-reads it and the ban-list scan
+        # checks it without going back to the site. Apply only.
+        if apply:
+            pipeline_fetch.store(tenant, url, html, page_hash,
+                                 p.get("source_label", ""), document=doc)
         # THE FACT SWEEP — before the unchanged and dead checks, on every page
         # fetched, because it is code (no model call) and a figure stated in
         # a footer or a stat tile is exactly what the claim reader misses.

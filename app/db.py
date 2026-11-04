@@ -2262,6 +2262,48 @@ class KbStatement(Base):
     origin = Column(String, default="sweep")
     fingerprint = Column(String, nullable=False)
     observed_at = Column(DateTime(timezone=True), default=utcnow)
+    # Which reader produced it and at what version (BUILD-MAP §3.3): a bumped
+    # extractor re-runs over stored pages, and its old rows are replaced by
+    # extractor, never mixed with another reader's.
+    extractor = Column(String, default="numbers")
+    extractor_version = Column(Integer, default=1)
+    section = Column(Text, default="")                     # heading path on the page
+    locator = Column(String, default="")                   # table/list position
+
+
+class PageSnapshot(Base):
+    """A page as last fetched, stored ONCE, read by every reader.
+
+    BUILD-MAP-truth-pipeline.md §1.4 "one fetch, many readers": the harvest
+    and the ban-list scan each fetched the same site, and nothing kept what
+    either saw — so a figure could not be re-read with a better extractor
+    without fetching the whole site again, and a finding could not show the
+    page as it was when it was found. One row per page (latest), bytes
+    compressed; `prev_hash` and `changed_at` say when it last changed, which
+    is what a change verification (M8) needs.
+
+    `document` is the parsed page (`pipeline.parse`) at `parser_version`;
+    a newer parser re-parses lazily from the stored bytes, never refetches.
+    """
+
+    __tablename__ = "page_snapshots"
+    __table_args__ = (UniqueConstraint("tenant", "url", name="uq_page_snapshot_tenant_url"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    source_label = Column(String, default="")
+    http_status = Column(Integer, default=200)
+    content_hash = Column(String, default="")      # of the page TEXT, as harvest hashes it
+    prev_hash = Column(String, default="")
+    html_z = Column(LargeBinary)                    # zlib-compressed HTML
+    bytes_ = Column("bytes", Integer, default=0)
+    rendered = Column(Integer, default=0)           # 1 = drawn by a browser (M9)
+    risk_tier = Column(String, default="")         # pipeline.policy (M4)
+    parser_version = Column(Integer, default=0)
+    document = Column(JSON, default=dict)
+    fetched_at = Column(DateTime(timezone=True), default=utcnow)
+    changed_at = Column(DateTime(timezone=True), default=utcnow)
 
 
 class ConnectLink(Base):

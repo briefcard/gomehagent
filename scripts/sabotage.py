@@ -38,6 +38,32 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_fetched_page_is_not_kept",
+        "file": "app/harvest.py",
+        "find": "        if apply:\n            pipeline_fetch.store(tenant, url, html, page_hash,\n",
+        "replace": "        if False:  # SABOTAGE\n            pipeline_fetch.store(tenant, url, html, page_hash,\n",
+        "suites": ["test_pipeline.py"],
+        "why": "every reader fetches the site again and no figure can be re-read "
+               "with a better extractor without a full re-crawl",
+    },
+    {
+        "name": "a_table_is_flattened_again",
+        "file": "app/pipeline/parse.py",
+        "find": "                self.tables.append(t)\n",
+        "replace": "                pass  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a 19-row licence table is a run of short lines again, and the "
+               "count it states is never recorded",
+    },
+    {
+        "name": "snapshots_read_every_account",
+        "file": "app/pipeline/fetch.py",
+        "find": "                .filter(db.tenant_filter(db.PageSnapshot, tenant))\n",
+        "replace": "  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "one client's stored pages are read as another client's",
+    },
+    {
         "name": "a_stat_tile_is_dropped_as_noise",
         "file": "app/extract.py",
         "find": "        if len(b) <= SHORT_BLOCK:\n            run = f\"{run} {b}\".strip()\n            continue\n",
@@ -66,9 +92,9 @@ SABOTAGES = [
     },
     {
         "name": "a_javascript_page_reads_as_empty",
-        "file": "app/harvest.py",
-        "find": "            if len(\" \".join(data_lines)) > len(text):\n",
-        "replace": "            if False:  # SABOTAGE\n",
+        "file": "app/pipeline/parse.py",
+        "find": "    if len(text) < JS_THIN_CHARS and len(\" \".join(data_lines)) > len(text):\n",
+        "replace": "    if False:  # SABOTAGE\n",
         "suites": ["test_harvest.py"],
         "why": "a page drawn by JavaScript is skipped as dead and its copy never "
                "reaches the reader",
