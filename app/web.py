@@ -9288,7 +9288,11 @@ def harvest_route(key: str = Depends(admin_key), tenant: str = "",
     from . import harvest as hv
     from . import tenants as _tn
     who = [tenant] if tenant else [t.key for t in _tn.all_tenants()]
-    put = [_jobs.enqueue(t, "harvest", payload={"limit": limit, "apply": bool(apply)})
+    # `recrawl` was accepted here and never passed on, so "read it all again"
+    # (needed once after the reader changes, to sweep pages already read)
+    # silently did nothing. It rides the payload now.
+    put = [_jobs.enqueue(t, "harvest", payload={"limit": limit, "apply": bool(apply),
+                                                "recrawl": recrawl in ("1", "true")})
            for t in who]
     return _back_to_content(tenant, "harvest") if ui else {"queued": put}
 

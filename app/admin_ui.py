@@ -6281,11 +6281,75 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                ("pictures", "Pictures"), ("context", "Background"),
                ("other", "Everything else"), ("plans", "Plans"),
                ("conflicts", "Conflicts"),
+               # What the site STATES, by subject — the structured view the
+               # owner asked for on 2026-11-04 ("I still see the claims as
+               # text strings in the UI instead of the new structure").
+               ("facts", "Site facts"),
                # Renamed from "Catalogue" (step 4, spec §4): this is a
                # sync-and-flags panel, not the catalogue — the catalogue
                # itself is managed on Knowledge — and the old name collided
                # with that card. The KEY stays `catalogue`: URLs never break.
                ("catalogue", "Store sync"))
+
+
+#: How a statement subject reads in the console.
+FACT_LABELS = {
+    "coverage.countries": "Countries", "coverage.states": "U.S. states",
+    "coverage.crypto_assets": "Crypto assets", "coverage.blockchains": "Blockchains",
+    "coverage.fiat_currencies": "Fiat currencies", "coverage.payment_methods": "Payment methods",
+    "coverage.markets": "Regions / markets", "coverage.languages": "Languages",
+    "coverage.currencies": "Currencies", "legal.licences": "Licences & registrations",
+    "scale.users": "Users", "scale.apps": "Apps", "scale.partners": "Partners",
+}
+
+
+def _facts_card(subjects: list, n_conflicts: int) -> str:
+    """Site facts — every figure the site states, by subject, with its pages.
+
+    Structured, not sentences: one row per subject, one line per distinct
+    value, the pages that state it, where on the page (body, header/footer,
+    page data) and whether it came off a legal page (binding). Subjects whose
+    values disagree come first. Read-only for now: deciding which value is
+    true is the reconciliation step (INITIATIVE-claims-reconciliation.md)."""
+    if not subjects:
+        return """
+<div class="card">
+  <div class="head"><h2>Site facts</h2></div>
+  <p class="mut">Nothing recorded yet. The next harvest records every figure the
+  site states — countries, states, assets, licences, users — per page.</p>
+</div>"""
+    rows = []
+    for sub in subjects:
+        label = FACT_LABELS.get(sub["subject"], sub["subject"])
+        chip = ('<span class="chip off">disagrees</span>' if sub["conflict"]
+                else '<span class="chip on">consistent</span>')
+        lines = []
+        for v in sub["values"]:
+            pages = ", ".join(
+                f'<a href="{_esc(u)}" target="_blank" rel="noopener">'
+                f'{_esc(u.split("://", 1)[-1][:60])}</a>' for u in v["pages"][:6])
+            more = (f' <span class="mut">+{len(v["pages"]) - 6} more</span>'
+                    if len(v["pages"]) > 6 else "")
+            where = ", ".join(v["fields"])
+            bind = ' <span class="chip nb">legal · binding</span>' if v["binding"] else ""
+            lines.append(
+                f'<li><b>{_esc(v["value"])}</b>{bind} '
+                f'<span class="mut">on {v["page_count"]} page'
+                f'{"" if v["page_count"] == 1 else "s"} · {_esc(where)}</span>'
+                f'<div class="when">“{_esc(v["example"][:180])}”</div>'
+                f'<div class="mut">{pages}{more}</div></li>')
+        rows.append(f'<div class="conn-site"><h3>{_esc(label)} {chip}</h3>'
+                    f'<ul>{"".join(lines)}</ul></div>')
+    return f"""
+<div class="card">
+  <div class="head"><h2>Site facts</h2>
+    <span class="chip {'off' if n_conflicts else 'on'}">{n_conflicts} subject{'' if n_conflicts == 1 else 's'} disagree</span></div>
+  <p class="mut">Every figure the site states, read from every page by code —
+  the body, the header and footer, and data the page loads. One subject, every
+  value it is given, and where. A <b>legal · binding</b> value came off a legal
+  page and is where reconciliation starts. Nothing here is used in drafts.</p>
+  {"".join(rows)}
+</div>"""
 
 
 def _artifacts_for(rows: list) -> dict:
@@ -8884,10 +8948,17 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     # Counts come from the lists already built above, so the strip costs
     # nothing extra and can be trusted: a tab reading 0 is a tab with nothing
     # in it, not a tab whose count was estimated.
+    try:
+        from . import statements as _st
+        fact_subjects = _st.summary(tenant)
+    except Exception:  # noqa: BLE001 — a broken panel must not break the tab
+        fact_subjects = []
+    n_fact_conflicts = sum(1 for f in fact_subjects if f["conflict"])
     counts = {"ship": total_ship,
               "claims": total_unfiltered, "pictures": len(waiting),
               "other": n_other, "plans": len(plans_wait),
-              "conflicts": len(open_conflicts), "catalogue": len(flagged)}
+              "conflicts": len(open_conflicts), "catalogue": len(flagged),
+              "facts": n_fact_conflicts}
     sub = (sub or "").strip().lower()
     if sub not in dict(REVIEW_SUBS):
         # LAND ON THE WORK. With no section asked for, open the first one that
@@ -8957,6 +9028,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   overwritten. Pick one and the disagreement closes.</p>
   {conflicts_html}
 </div>""",
+        "facts": _facts_card(fact_subjects, n_fact_conflicts),
         "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Store sync</h2>
@@ -9292,6 +9364,11 @@ _KB_DESCRIBED = [
     ("KbConflict", "kb_conflicts", "Two sources disagree about an approved value",
      "Both values kept, neither applied. The row keeps what a human approved "
      "until someone settles it."),
+    ("KbStatement", "kb_statements", "Every figure the site states, as data",
+     "Recorded by code on every harvest — subject, value, page, where on the "
+     "page, binding or not — and replaced per page on every re-read. Never "
+     "cited and never used in drafts: it is what the site SAYS, kept so two "
+     "pages that disagree sit side by side (Review › Site facts)."),
 ]
 
 

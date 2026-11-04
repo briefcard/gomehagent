@@ -62,6 +62,18 @@ _MAX_BLOCKS = 60
 #: be verbatim, checkable, and wrong.
 CONTEXT_BLOCKS = 2
 _MAX_CHARS = 14000
+#: A block this short is a FRAGMENT, not noise: a stat tile renders "162+"
+#: and "Countries" as two elements, and a licence table renders the number in
+#: its own cell. They used to be dropped (`len(b) > 12`), which is how every
+#: headline coverage figure on Transak's pages never reached the model
+#: (owner, 2026-11-04: seven different country counts, none captured). Runs of
+#: fragments are now JOINED, to each other and to the block they label.
+SHORT_BLOCK = 12
+#: Most chunks one page is read in. `_MAX_BLOCKS` / `_MAX_CHARS` used to be a
+#: CUT — block 61 onward was never read and nothing said so (a 19-row licence
+#: table came back as 10). They are now the size of one chunk; a page longer
+#: than this many chunks is the only cut left, and it is REPORTED (`input`).
+MAX_CHUNKS = 8
 
 PROOF_TYPES = ("data", "case_study", "certification", "spec", "testimonial")
 
@@ -326,41 +338,107 @@ def available() -> bool:
     return bool(config.ANTHROPIC_API_KEY)
 
 
+def merge_short(blocks: list[str]) -> list[str]:
+    """Join fragments instead of dropping them.
+
+    Consecutive blocks of `SHORT_BLOCK` characters or fewer form one run
+    ("162+" "Countries" → "162+ Countries"). A run long enough to stand alone
+    becomes its own block; a run still too short is prefixed to the next real
+    block, which is what it labels. Nothing is discarded except empties."""
+    out: list[str] = []
+    run = ""
+    for b in blocks:
+        b = " ".join((b or "").split())
+        if not b:
+            continue
+        if len(b) <= SHORT_BLOCK:
+            run = f"{run} {b}".strip()
+            continue
+        if run:
+            if len(run) > SHORT_BLOCK:
+                out.append(run)
+            else:
+                b = f"{run} {b}"
+            run = ""
+        out.append(b)
+    if run:
+        out.append(run)
+    return out
+
+
+def chunks(blocks: list[str]) -> list[list[str]]:
+    """Blocks in reading order, cut into model-sized chunks — nothing dropped.
+
+    A single block longer than `_MAX_CHARS` is split into pieces so it is read
+    rather than skipped."""
+    pieces: list[str] = []
+    for b in blocks:
+        while len(b) > _MAX_CHARS:
+            pieces.append(b[:_MAX_CHARS])
+            b = b[_MAX_CHARS:]
+        pieces.append(b)
+    out: list[list[str]] = []
+    cur: list[str] = []
+    total = 0
+    for b in pieces:
+        if cur and (len(cur) >= _MAX_BLOCKS or total + len(b) > _MAX_CHARS):
+            out.append(cur)
+            cur, total = [], 0
+        cur.append(b)
+        total += len(b)
+    if cur:
+        out.append(cur)
+    return out
+
+
 def extract(tenant: str, url: str, blocks: list[str],
             entity_key: str = "") -> dict:
     """Claims on one page, as verbatim spans.
 
-    Returns `{"claims": [...], "rejected_not_verbatim": [...], "used": ...}`.
-    `used` names what actually did the work, so a run can never quietly report
-    a model's recall when it fell back to the regex floor.
+    Returns `{"claims": [...], "rejected_not_verbatim": [...], "used": ...,
+    "input": {...}}`. `used` names what actually did the work, so a run can
+    never quietly report a model's recall when it fell back to the regex
+    floor; `input` says how much of the page was READ — blocks on the page,
+    blocks read, chunks — and `cut` is true only when the page was longer than
+    `MAX_CHUNKS` chunks, the one ceiling left.
     """
-    blocks = [b for b in blocks if b and len(b) > 12][:_MAX_BLOCKS]
+    blocks = merge_short(blocks)
+    parts = chunks(blocks)
+    read = parts[:MAX_CHUNKS]
+    n_read = sum(len(c) for c in read)
+    n_all = sum(len(c) for c in parts)
+    coverage = {"blocks": n_all, "read": n_read, "chunks": len(read),
+                "cut": n_read < n_all}
     if not blocks:
-        return {"claims": [], "rejected_not_verbatim": [], "used": "none"}
+        return {"claims": [], "rejected_not_verbatim": [], "used": "none",
+                "input": coverage}
     if not available():
         return {"claims": [], "rejected_not_verbatim": [], "used": "unavailable",
+                "input": coverage,
                 "note": "ANTHROPIC_API_KEY is not set; harvest fell back to the "
                         "deterministic filter, which has known 0% recall on "
                         "qualitative claims."}
 
-    body, total = [], 0
-    for b in blocks:
-        if total + len(b) > _MAX_CHARS:
+    kept, rejected = [], []
+    truncated = False
+    for body in read:
+        user = (_context(tenant, url, entity_key) + "\n\nBLOCKS:\n"
+                + "\n".join(f"- {b}" for b in body))
+        try:
+            got = _call(_SYSTEM, user, tenant)
+        except Exception as exc:  # noqa: BLE001
+            if not kept:
+                return {"claims": [], "rejected_not_verbatim": [],
+                        "used": "error", "input": coverage,
+                        "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
+            coverage["cut"] = True
             break
-        body.append(b)
-        total += len(b)
-
-    user = (_context(tenant, url, entity_key) + "\n\nBLOCKS:\n"
-            + "\n".join(f"- {b}" for b in body))
-    try:
-        got = _call(_SYSTEM, user, tenant)
-    except Exception as exc:  # noqa: BLE001
-        return {"claims": [], "rejected_not_verbatim": [],
-                "used": "error", "error": f"{exc.__class__.__name__}: {str(exc)[:160]}"}
-
-    cands = [{**c, "_url": url} for c in _parse(got["text"])]
-    kept, rejected = _verify(cands, body, entity_key,
-                             valid_situations=set(kb.situations(tenant)))
+        truncated = truncated or got["truncated"]
+        cands = [{**c, "_url": url} for c in _parse(got["text"])]
+        k, r = _verify(cands, body, entity_key,
+                       valid_situations=set(kb.situations(tenant)))
+        kept += k
+        rejected += r
     # What the account's vocabulary could not name. Surfaced rather than
     # dropped: a tag the model reached for repeatedly is the strongest signal
     # available about what this brand's situation list is missing, and on an
@@ -372,7 +450,8 @@ def extract(tenant: str, url: str, blocks: list[str],
             # swallowed: a truncated reply used to lose the WHOLE page, and a
             # run that silently drops its richest pages is indistinguishable
             # from a site with nothing on it.
-            "truncated": got["truncated"]}
+            "truncated": truncated,
+            "input": coverage}
 
 _QA_SYSTEM = """You are reading one email exchange: a message a customer sent, and the reply the business sent back. You SELECT text; you never write it.
 

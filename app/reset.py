@@ -40,7 +40,10 @@ from . import db
 KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
              "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs",
-             "kb_contexts"}
+             "kb_contexts", "kb_statements"}
+# `kb_statements` is KNOWLEDGE and goes with `harvested_pages`: it is what the
+# crawl read off the site, rebuilt by the next harvest. Leaving it behind on a
+# knowledge reset would show a cleared account's old site figures as current.
 # `kb_contexts` is KNOWLEDGE for the plainest reason in this file: it is
 # something a person told us about the account. It is not proof and it is not
 # an instruction, but a knowledge reset that left it behind would leave the

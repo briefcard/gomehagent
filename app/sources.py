@@ -70,6 +70,7 @@ def _website(tenant: str, apply: bool, budget: int) -> dict:
             ("extractor", "extractor_note", "truncated_page_count",
              "pages_read", "pages_skipped", "pages_unchanged",
              "pages_discovered", "pages_remaining",
+             "statements_found", "statements_by_subject", "pages_from_page_data",
              "proposed_count", "faqs_found", "untagged_count",
              "situations_wanted", "situations_proposed", "error")}
 

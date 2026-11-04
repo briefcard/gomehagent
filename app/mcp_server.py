@@ -28,6 +28,11 @@ that said what was due, what was stuck or what had worked:
     get_results   what worked — ad outcomes by the data layer's dimensions
                   (`results.by`) and what became of every draft: shipped,
                   blocked, approved, denied, and the gates that caught it
+    get_statements every FIGURE the account's sites state — subject, value,
+                  page, where on the page, binding or not — grouped by
+                  subject with the subjects the site disagrees with itself on
+                  first; JSON or CSV. Owner, 2026-11-04: seven country counts
+                  across Transak's pages, none of them in the claims.
     get_claims    the whole claims register — proposed, approved, rejected —
                   with evidence, source page and tags, filtered and paged,
                   plus how much of the account's sites the harvest has read.
@@ -102,7 +107,7 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
-         "get_claims",
+         "get_claims", "get_statements",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
@@ -621,6 +626,68 @@ def get_results(tenant: str, dimension: str = "", days: int = 90) -> dict[str, A
                     tally[str(rule)] = tally.get(str(rule), 0) + 1
         return dict(sorted(tally.items(), key=lambda kv: -kv[1])[:LIST_MAX])
     _part(out, "caught", _caught)
+    return out
+
+
+#: get_statements' CSV columns, one row per statement.
+STATEMENT_CSV_COLUMNS = ("subject", "value", "number", "qualifier", "unit",
+                         "authority", "field", "url", "text", "entity_key",
+                         "market", "observed_at", "subject_conflict")
+
+
+@server.tool()
+def get_statements(tenant: str, subject: str = "", conflicts_only: bool = False,
+                   format: str = "json") -> dict[str, Any]:
+    """Every figure one account's sites state, by subject — where the site disagrees with itself.
+
+    A statement is a fact as DATA — subject (coverage.countries,
+    coverage.states, legal.licences, scale.users …), value as written
+    ("162+", "more than 90"), the page, where on it (body, furniture =
+    header/footer, page_data = loaded by JavaScript) and `authority`
+    (binding = a legal/compliance page). Recorded by code from every page on
+    every harvest, so it is a census, not a sample.
+
+    JSON: `subjects` — one entry per subject with every distinct value, the
+    pages for each, and `conflict` when the site states more than one value;
+    conflicting subjects first. `subject` narrows to one; `conflicts_only`
+    keeps the disagreements. `format="csv"`: one row per statement in `csv`,
+    with `subject_conflict` so it can be filtered in a sheet. Read-only.
+    """
+    from . import statements, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}",
+                "known": sorted(t.key for t in tenants.all_tenants())}
+    fmt = (format or "json").strip().lower()
+    if fmt not in ("json", "csv"):
+        return {"ok": False, "why": f"unknown format {format!r}", "known": ["json", "csv"]}
+    subjects = statements.summary(tenant, subject)
+    if conflicts_only:
+        subjects = [x for x in subjects if x["conflict"]]
+    out: dict[str, Any] = {
+        "ok": True, "tenant": tenant, "format": fmt,
+        "subjects_total": len(subjects),
+        "subjects_in_conflict": sum(1 for x in subjects if x["conflict"]),
+    }
+    if fmt == "json":
+        out["subjects"] = subjects
+        return out
+    import csv as _csv
+    import io as _io
+    conflict = {x["subject"]: x["conflict"] for x in subjects}
+    buf = _io.StringIO()
+    w = _csv.writer(buf)
+    w.writerow(STATEMENT_CSV_COLUMNS)
+    n = 0
+    for r in statements.rows(tenant, subject):
+        if r.subject not in conflict:
+            continue
+        w.writerow([r.subject, r.value, r.number, r.qualifier, r.unit, r.authority,
+                    r.field, r.url, r.text, r.entity_key, r.market,
+                    r.observed_at.isoformat() if r.observed_at else "",
+                    "yes" if conflict[r.subject] else ""])
+        n += 1
+    out["rows"] = n
+    out["csv"] = buf.getvalue()
     return out
 
 

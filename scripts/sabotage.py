@@ -38,6 +38,50 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_stat_tile_is_dropped_as_noise",
+        "file": "app/extract.py",
+        "find": "        if len(b) <= SHORT_BLOCK:\n            run = f\"{run} {b}\".strip()\n            continue\n",
+        "replace": "        if len(b) <= SHORT_BLOCK:\n            continue  # SABOTAGE\n",
+        "suites": ["test_extract.py", "test_harvest.py"],
+        "why": "a '162+' and 'Countries' tile is thrown away as two short blocks, "
+               "so every headline coverage figure is invisible to the reader",
+    },
+    {
+        "name": "a_long_page_is_cut_at_sixty_blocks_again",
+        "file": "app/extract.py",
+        "find": "    read = parts[:MAX_CHUNKS]\n",
+        "replace": "    read = parts[:1]  # SABOTAGE\n",
+        "suites": ["test_extract.py"],
+        "why": "only the first chunk of a page is read — a 19-row licence table "
+               "comes back as 10 and the report says nothing was cut",
+    },
+    {
+        "name": "the_fact_sweep_records_nothing",
+        "file": "app/harvest.py",
+        "find": "        if apply:\n            statements.record(tenant, url, facts,\n",
+        "replace": "        if False:  # SABOTAGE\n            statements.record(tenant, url, facts,\n",
+        "suites": ["test_harvest.py"],
+        "why": "the figures a site states are never recorded, so seven different "
+               "country counts on one site look like none",
+    },
+    {
+        "name": "a_javascript_page_reads_as_empty",
+        "file": "app/harvest.py",
+        "find": "            if len(\" \".join(data_lines)) > len(text):\n",
+        "replace": "            if False:  # SABOTAGE\n",
+        "suites": ["test_harvest.py"],
+        "why": "a page drawn by JavaScript is skipped as dead and its copy never "
+               "reaches the reader",
+    },
+    {
+        "name": "get_statements_reads_every_account",
+        "file": "app/statements.py",
+        "find": "        q = s.query(db.KbStatement).filter(db.KbStatement.tenant == tenant)\n",
+        "replace": "        q = s.query(db.KbStatement)  # SABOTAGE\n",
+        "suites": ["test_the_substrate_is_an_mcp_server.py", "test_harvest.py"],
+        "why": "one client's site facts list another client's figures",
+    },
+    {
         "name": "a_licensing_page_is_not_legal",
         "file": "app/compliance.py",
         "find": '               "/compliance", "/licens", "/regulat")\n',

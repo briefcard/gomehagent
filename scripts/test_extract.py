@@ -34,6 +34,7 @@ so it is testable without a model.
 """
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import sys
@@ -131,6 +132,44 @@ def main() -> int:
         blocks, entity_key="joke-plate")
     ck("a brand-level claim does not",
        unscoped and unscoped[0]["entity_key"] == "")
+
+    print("\n— nothing on the page is silently dropped (owner, 2026-11-04) —")
+    # Transak: seven different country counts across its pages, none captured.
+    # Stat tiles render "162+" and "Countries" as separate elements, and the
+    # reader dropped every block of 12 characters or fewer, then read only the
+    # first 60 blocks / 14,000 characters of a page and said nothing.
+    merged = extract.merge_short(["162+", "Countries", "Supported in 26 + regions worldwide today",
+                                  "19", "State money-transmitter licences on file"])
+    ck("a stat tile's number and label are joined, not dropped",
+       "162+ Countries" in merged, str(merged))
+    ck("a lone short fragment is joined to the block it labels",
+       any(m.startswith("19 State money-transmitter") for m in merged), str(merged))
+    long_page = [f"Licence row {i}: Transak USA LLC holds licence number MT-{i:05d}." for i in range(150)]
+    parts = extract.chunks(extract.merge_short(long_page))
+    ck("a 150-block page is read in chunks, every block in one of them",
+       sum(len(c) for c in parts) == 150 and len(parts) >= 3, str([len(c) for c in parts]))
+    calls = []
+    real_call, real_avail = extract._call, extract.available
+    extract.available = lambda: True
+    def _fake(system, user, tenant=""):
+        calls.append(user)
+        hit = [ln[2:] for ln in user.splitlines() if ln.startswith("- Licence row 149")]
+        return {"text": json.dumps([{"text": hit[0], "proof_type": "certification"}]) if hit else "[]",
+                "truncated": False}
+    extract._call = _fake
+    try:
+        res = extract.extract("baci", "https://x/compliance", long_page)
+    finally:
+        extract._call, extract.available = real_call, real_avail
+    ck("the LAST row of a long page reaches the model and is kept",
+       any("MT-00149" in c["text"] for c in res["claims"]), str(res.get("input")))
+    ck("the result says how much of the page was read, and that none was cut",
+       res["input"] == {"blocks": 150, "read": 150, "chunks": len(calls), "cut": False},
+       str(res["input"]))
+    huge = [f"Row {i} of a very long table with enough words to count as prose here." for i in range(3000)]
+    cover = extract.extract("baci", "https://x/huge", huge)["input"]
+    ck("past the chunk ceiling the cut is REPORTED, not silent",
+       cover["cut"] and cover["read"] < cover["blocks"], str(cover))
 
     print("\n— behaviour with no key —")
     if not extract.available():

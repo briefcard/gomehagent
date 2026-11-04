@@ -473,6 +473,9 @@ def main() -> int:
     print("\n— legal pages are read, first, and marked legal —")
     check_legal_pages_are_harvested(ck, httpx)
 
+    print("\n— the fact sweep: every figure, every page, as structured statements —")
+    check_statements_are_swept(ck, httpx)
+
     httpx.get = real
     print("\n— a thin queue must say WHY it is thin —")
     check_known_drops_are_counted(ck)
@@ -628,6 +631,79 @@ def check_legal_pages_are_harvested(ck, httpx):
     ck("a claim off an ordinary page is not marked legal",
        not kb.is_legal_claim(type("C", (), {"source": "stated on https://bacimilanousa.com/pages/chapter-1",
                                            "also_seen": []})()))
+
+
+def check_statements_are_swept(ck, httpx):
+    """Owner, 2026-11-04: "Transak's own pages give seven different country
+    counts (26, 60+, 64+, 75, 90, 145, 162). The compliance page shows 19 state
+    licences; the coverage page shows 45 states served." The harvest captured
+    none of it. Stat tiles were dropped as short blocks, footers stripped as
+    furniture, a JavaScript page read as empty, and the claim reader is a
+    model choosing sentences — not a census of figures.
+    """
+    from app import harvest as hv, statements as st
+
+    base = "https://bacimilanousa.com"
+    pages = {
+        f"{base}/pages/coverage": (
+            "<html><body><header>Available in 162+ countries</header><main>"
+            "<div>45</div><div>States</div>"
+            "<p>We serve customers across 45 U.S. states with local payment methods.</p>"
+            "<div>75</div><div>Countries</div></main>"
+            "<footer>Live in 145 countries</footer></body></html>"),
+        f"{base}/pages/compliance": (
+            "<html><body><main><h1>Compliance</h1>"
+            "<p>We hold money transmitter licences in 19 U.S. states, listed below.</p>"
+            "</main></body></html>"),
+        f"{base}/pages/app": (
+            "<html><body><div id='root'></div>"
+            "<script id='__NEXT_DATA__' type='application/json'>"
+            "{\"props\":{\"hero\":\"Buy crypto in 64+ countries with 7 payment methods\","
+            "\"sub\":\"Trusted by partners in more than 90 countries around the world today.\","
+            "\"body\":\"Our checkout settles in local currency, verifies identity once, and works "
+            "inside the partner's own app so customers never leave the page they started on.\"}}"
+            "</script></body></html>"),
+    }
+    sitemap = ("<?xml version=\"1.0\"?><urlset>"
+               + "".join(f"<url><loc>{u}</loc></url>" for u in pages) + "</urlset>")
+    httpx.get = lambda url, **kw: (_Resp(sitemap) if url.endswith("/sitemap.xml")
+                                   else _Resp(pages[url]) if url in pages
+                                   else _Resp("", 404))
+    hv.forget_pages("baci")
+    harvest.harvest("baci", limit=10, apply=False)
+    ck("a rehearsal records no statements", not st.rows("baci"))
+    res = harvest.harvest("baci", limit=10, apply=True)
+    got = {(r.subject, r.value, r.field) for r in st.rows("baci")}
+    countries = sorted(r.value for r in st.rows("baci", "coverage.countries"))
+    ck("every country figure on every page is captured — header, tile, footer, page data",
+       set(countries) >= {"162+", "75", "145", "64+", "more than 90"}, str(countries))
+    ck("stat tiles are read: '45' + 'States' becomes a states figure",
+       any(s == "coverage.states" and v == "45" for s, v, _f in got), str(got))
+    ck("the compliance page's licence figure is BINDING (a legal page)",
+       any(r.subject == "coverage.states" and r.value == "19" and r.authority == "binding"
+           for r in st.rows("baci")), str([(r.subject, r.value, r.authority) for r in st.rows("baci")]))
+    ck("each statement says where it sat: header/footer = furniture, JSON = page_data",
+       ("coverage.countries", "162+", "furniture") in got
+       and ("coverage.countries", "145", "furniture") in got
+       and ("coverage.countries", "64+", "page_data") in got, str(got))
+    summ = {x["subject"]: x for x in st.summary("baci")}
+    ck("the site disagreeing with itself is flagged: countries and states conflict",
+       summ["coverage.countries"]["conflict"] and summ["coverage.states"]["conflict"]
+       and summ["coverage.states"]["binding_values"] == ["19"], str(summ.get("coverage.states")))
+    ck("the run reports what the sweep found and which pages were read from page data",
+       res["statements_found"] >= 8 and res["pages_from_page_data"] == 1,
+       str({k: res.get(k) for k in ("statements_found", "pages_from_page_data",
+                                    "statements_by_subject")}))
+    ck("a JavaScript page is no longer read as dead — its copy reaches the reader",
+       f"{base}/pages/app" not in {s["url"] for s in res["skipped_examples"]},
+       str(res["skipped_examples"]))
+    pages[f"{base}/pages/coverage"] = "<html><body><main><p>Now live in 150 countries.</p></main></body></html>"
+    harvest.harvest("baci", limit=10, apply=True, recrawl=True)
+    now = sorted(r.value for r in st.rows("baci", "coverage.countries")
+                 if r.url == f"{base}/pages/coverage")
+    ck("a re-read REPLACES the page's statements — the table is the site as last read",
+       now == ["150"], str(now))
+    ck("statements are this account's only", not st.rows("eien"))
 
 
 def check_known_drops_are_counted(ck):

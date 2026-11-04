@@ -30,7 +30,7 @@ import html as html_lib
 import json
 import re
 
-from . import compliance, db, extract, kb, provenance as prov, tenants
+from . import compliance, db, extract, kb, provenance as prov, statements, tenants
 from .urls import url as _url
 
 _MIN, _MAX = 25, 240
@@ -41,6 +41,10 @@ _MIN, _MAX = 25, 240
 #: of runs could reach, because discovery returns a stable order and the cut
 #: always fell in the same place (owner, 2026-11-04, on Transak's subdomains).
 DISCOVERY_CAP = 10_000
+
+#: Below this much body text a page is checked for embedded page data (a site
+#: drawn by JavaScript). Matches the dead-page floor `is_dead_page` uses.
+JS_THIN_CHARS = 200
 
 # Boilerplate that appears on every page of every storefront. None of it is a
 # claim, and all of it would otherwise pass a "contains a number" filter.
@@ -545,6 +549,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         _legal_first(_interleave([p for p in readable if p["url"] not in seen_pages]))
         + _legal_first(_interleave([p for p in readable if p["url"] in seen_pages])))
     unchanged = 0
+    pages_from_data: list[str] = []       # read from embedded page data (JS sites)
+    fact_subjects: dict[str, int] = {}    # statements the sweep found, by subject
     # Every page this run tried, read or not. A page that could not be read
     # still leaves the unread band (see `_tried` below), so `pages_remaining`
     # is what has never been TRIED — and reaches zero when the site is done.
@@ -605,10 +611,30 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         page_truncated = False      # per page, never inherited from the last
         blocks = compliance.text_blocks(html)
         text = " ".join(blocks)
+        # A page drawn by JavaScript ships its copy in embedded JSON and its
+        # HTML body is nearly empty — it read as "dead" and said nothing.
+        # When the page data holds more text than the body, read THAT.
+        if len(text) < JS_THIN_CHARS:
+            data_lines = statements.page_data_lines(html)
+            if len(" ".join(data_lines)) > len(text):
+                blocks, text = data_lines, " ".join(data_lines)
+                pages_from_data.append(url)
         # Hash the extracted TEXT, not the markup: a changed analytics tag or
         # cache-buster is not a changed claim, and hashing the HTML would
         # re-read the whole site every time they touch their theme.
         page_hash = prov.fingerprint(text[:20000])
+        # THE FACT SWEEP — before the unchanged and dead checks, on every page
+        # fetched, because it is code (no model call) and a figure stated in
+        # a footer or a stat tile is exactly what the claim reader misses.
+        # Recorded on apply only; a rehearsal consumes nothing.
+        facts = statements.sweep(html, blocks)
+        for f in facts:
+            fact_subjects[f["subject"]] = fact_subjects.get(f["subject"], 0) + 1
+        if apply:
+            statements.record(tenant, url, facts,
+                              authority=("binding" if compliance.is_legal_url(url)
+                                         else "derived"),
+                              entity_key=entity)
         if not recrawl and seen_pages.get(url) == page_hash:
             unchanged += 1
             attempted.add(url)
@@ -632,7 +658,11 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
             # The model judges what is a claim; every guard below still runs.
             res = extract.extract(tenant, url, blocks, entity_key=entity)
             used_model = used_model or res["used"] == "model"
-            page_truncated = bool(res.get("truncated"))
+            # PARTLY READ = the reply was cut OR the page was longer than the
+            # extractor's chunk ceiling. Both mean the page said more than was
+            # read, and both are recorded on the page and in the report.
+            page_truncated = bool(res.get("truncated")
+                                  or (res.get("input") or {}).get("cut"))
             if page_truncated:
                 truncated_pages.append(url)
             if res["used"] == "model":
@@ -842,6 +872,14 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "pages_remaining": sum(1 for p in readable
                                if p["url"] not in seen_pages
                                and p["url"] not in attempted),
+        # Statements — what the pages STATE, as subject + value (`statements`).
+        "statements_found": sum(fact_subjects.values()),
+        "statements_by_subject": dict(sorted(fact_subjects.items(),
+                                             key=lambda kv: -kv[1])),
+        # Pages whose body was nearly empty and whose copy was read from the
+        # page's embedded data instead.
+        "pages_from_page_data": len(pages_from_data),
+        "pages_from_page_data_examples": pages_from_data[:10],
         "truncated_pages": truncated_pages[:10],
         "truncated_page_count": len(truncated_pages),
         "situations_wanted": wanted,

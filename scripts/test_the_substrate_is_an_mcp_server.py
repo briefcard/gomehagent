@@ -332,6 +332,38 @@ def main() -> int:
            str(rows[:2]))
         bad = rpc.call("get_claims", {"tenant": T, "format": "xml"})["structuredContent"]
         ck("an unknown format is refused", not bad["ok"] and "csv" in bad["known"])
+
+        print("— get_statements: figures as data, the site's disagreements first —")
+        from app import admin_ui, statements as st
+        st.record(T, "https://bacimilanousa.com/pages/coverage",
+                  st.find("Live in 162+ countries and 45 U.S. states"))
+        st.record(T, "https://bacimilanousa.com/pages/compliance",
+                  st.find("Licensed in 19 U.S. states"), authority="binding")
+        st.record(T, "https://bacimilanousa.com/pages/about",
+                  st.find("Customers in 162+ countries"))
+        st.record("eien", "https://eienhealth.com/a", st.find("Sold in 3 countries"))
+        got = rpc.call("get_statements", {"tenant": T})["structuredContent"]
+        subj = {x["subject"]: x for x in got.get("subjects", [])}
+        ck("get_statements groups by subject; the disagreeing subject comes first",
+           got["ok"] and got["subjects"][0]["subject"] == "coverage.states"
+           and subj["coverage.states"]["conflict"] and not subj["coverage.countries"]["conflict"]
+           and subj["coverage.states"]["binding_values"] == ["19"], str(got)[:300])
+        ck("…every value carries its pages",
+           subj["coverage.countries"]["values"][0]["page_count"] == 2, str(subj["coverage.countries"]))
+        ck("…and never another account's", "eienhealth" not in str(got))
+        only = rpc.call("get_statements", {"tenant": T, "conflicts_only": True})["structuredContent"]
+        ck("conflicts_only keeps only the disagreements",
+           [x["subject"] for x in only["subjects"]] == ["coverage.states"])
+        out = rpc.call("get_statements", {"tenant": T, "format": "csv"})["structuredContent"]
+        rows = list(_csv.DictReader(_io.StringIO(out.get("csv", ""))))
+        ck("format=csv: one row per statement with the conflict flag",
+           list(rows[0]) == list(mcp_server.STATEMENT_CSV_COLUMNS) and len(rows) == out["rows"] == 4
+           and any(r["subject"] == "coverage.states" and r["subject_conflict"] == "yes"
+                   and r["authority"] == "binding" for r in rows), str(rows[:2]))
+        html = admin_ui.render_content("s3cret", tenant=T, sub="facts")
+        ck("the console shows the structure: subjects, values, binding, disagreement",
+           "Site facts" in html and "U.S. states" in html and "legal · binding" in html
+           and "disagrees" in html and "162+" in html, html[html.find("Site facts"):][:300])
         pkg = _text(rpc.call("get_package", {"tenant": T, "system": "campaign_email"}))
         ck("the brief lists approved legal statements as BINDING, ahead of the rest",
            "Legal statements — BINDING" in pkg and LEGAL in pkg

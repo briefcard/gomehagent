@@ -2224,6 +2224,46 @@ class HarvestedPage(Base):
     truncated = Column(String, default="")   # "yes" when the reply hit the cap
 
 
+class KbStatement(Base):
+    """One FACT a page states, as data: subject, value, where — not a sentence.
+
+    Owner, 2026-11-04: Transak's own pages give seven different country counts
+    and two different state counts, and the claims register — sentences the
+    model chose to keep — showed none of it; the structure designed in
+    INITIATIVE-claims-reconciliation.md was still "text strings in the UI".
+    This is the first piece of that structure: the `Statement` record (§4.8),
+    produced by a deterministic sweep (`statements.sweep`) over the WHOLE page
+    — footer, header and embedded page data included — so a coverage figure
+    is captured every time it is stated, on every page, and two pages that
+    disagree sit side by side under one subject.
+
+    A statement is not a claim and is never cited: it is what the site SAYS,
+    recorded so it can be compared. Replaced per page on every re-read, so the
+    table is the site as last read.
+    """
+
+    __tablename__ = "kb_statements"
+    __table_args__ = (UniqueConstraint("tenant", "url", "fingerprint",
+                                       name="uq_kb_statement_tenant_url_fp"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    subject = Column(String, nullable=False, index=True)   # coverage.countries …
+    value = Column(String, nullable=False)                 # "162+" as written
+    number = Column(Float)                                 # 162.0
+    qualifier = Column(String, default="")                 # "at least" | "about" | ""
+    unit = Column(String, default="")                      # the word on the page
+    text = Column(Text, default="")                        # the sentence it sits in
+    url = Column(Text, nullable=False)
+    field = Column(String, default="body")                 # body | furniture | page_data
+    authority = Column(String, default="derived")          # binding | derived
+    entity_key = Column(String, default="")                # scope, when known
+    market = Column(String, default="")                    # scope, when known
+    origin = Column(String, default="sweep")
+    fingerprint = Column(String, nullable=False)
+    observed_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class ConnectLink(Base):
     """A scoped, expiring link that lets a CLIENT connect their own accounts.
 
