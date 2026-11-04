@@ -38,6 +38,16 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_licensing_page_is_not_legal",
+        "file": "app/compliance.py",
+        "find": '               "/compliance", "/licens", "/regulat")\n',
+        "replace": '               )  # SABOTAGE\n',
+        "suites": ["test_harvest.py"],
+        "why": "a regulated brand's licence numbers and regulators are filed as "
+               "ordinary marketing claims, never binding, so a draft can "
+               "contradict them",
+    },
+    {
         "name": "legal_pages_are_skipped_by_the_harvest",
         "file": "app/harvest.py",
         "find": "                                               keep_legal=True)\n",

@@ -64,7 +64,12 @@ _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.S | re.I)
 #: contradicted." A licence, a regulated status or a refund term is a fact the
 #: copy must never contradict, and it lives on exactly these pages.
 LEGAL_PATHS = ("/privacy", "/terms", "/cookie", "/legal", "/disclaimer",
-               "/policies/")
+               "/policies/",
+               # A regulated business publishes its licences, registrations
+               # and regulators on a compliance page — Transak's
+               # /compliance lists state money-transmitter licence numbers and
+               # its FCA registration (owner, 2026-11-04: "yes do that").
+               "/compliance", "/licens", "/regulat")
 _SKIP_NOT_LEGAL = ("/cart", "/checkout", "/account", "/wp-json",
                    "/feed", ".xml", ".json", ".pdf", "/search",
                    "/sample-page", "/wp-admin", "/wp-content", "/wp-includes",

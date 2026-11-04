@@ -420,7 +420,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`check_page`**(tenant, url, html?, pictures?) → `dict`  ·  from `test_the_ban_list_reaches_the_fields.py`, `test_the_brands_own_pictures_are_the_references.py`
 - **`discover_pages`**(base, limit?, keep_legal?) → `tuple[list[dict], str]`  ·  from `harvest.py`, `test_brand_sources.py`, `test_harvest.py`, `voice.py`
 - **`is_dead_page`**(html, text?, min_chars?) → `str`  ·  from `harvest.py`, `test_harvest.py`, `voice.py`
-- **`is_legal_url`**(url) → `bool`  ·  from `harvest.py`, `kb.py`
+- **`is_legal_url`**(url) → `bool`  ·  from `harvest.py`, `kb.py`, `test_harvest.py`
 - **`last_scan`**(tenant) → `dict`  ·  from `admin_ui.py`, `correlate.py`, `test_the_brands_own_pictures_are_the_references.py`, `worker.py`
 - **`named_fields`**(html_text) → `list[tuple[str, str]]`  ·  **from nothing**
 - **`page_title`**(html) → `str`  ·  **from nothing**

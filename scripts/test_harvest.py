@@ -620,6 +620,11 @@ def check_legal_pages_are_harvested(ck, httpx):
        len(filed) >= 2, f"{[c.claim[:60] for c in filed]} / {first.get('dropped_by_reason')}")
     ck("…and is recognisably legal from where it was read",
        filed and all(kb.is_legal_claim(c) for c in filed))
+    ck("a compliance / licensing / regulatory page is a legal page",
+       all(compliance.is_legal_url(u) for u in (
+           "https://transak.com/compliance",
+           "https://example.com/licenses",
+           "https://example.com/regulatory-information")))
     ck("a claim off an ordinary page is not marked legal",
        not kb.is_legal_claim(type("C", (), {"source": "stated on https://bacimilanousa.com/pages/chapter-1",
                                            "also_seen": []})()))
