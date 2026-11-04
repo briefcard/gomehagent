@@ -38,6 +38,32 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_wrong_known_answer_passes",
+        "file": "app/pipeline/checks.py",
+        "find": "        elif rows:\n            result = \"different\"\n",
+        "replace": "        elif rows:\n            result = \"found\"  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a harvest that captures 10 of 19 licences reports the fact QA "
+               "knew as found, and trust stays green",
+    },
+    {
+        "name": "trust_ignores_failing_known_answers",
+        "file": "app/pipeline/checks.py",
+        "find": "    if ka[\"failed\"]:\n        grade = \"red\"\n",
+        "replace": "    if False:  # SABOTAGE\n        grade = \"red\"\n",
+        "suites": ["test_pipeline.py"],
+        "why": "the trust panel reads fine while the capture is getting known "
+               "facts wrong",
+    },
+    {
+        "name": "known_answers_read_every_account",
+        "file": "app/pipeline/checks.py",
+        "find": "        rows = (s.query(db.KnownAnswer).filter(db.tenant_filter(db.KnownAnswer, tenant))\n",
+        "replace": "        rows = (s.query(db.KnownAnswer)  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "one client's known answers test another client's capture",
+    },
+    {
         "name": "a_legal_page_is_cut_like_a_blog_post",
         "file": "app/pipeline/policy.py",
         "find": "    \"legal\":     {\"rank\": 0, \"max_chunks\": None, \"days\": 7,\n",

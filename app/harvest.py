@@ -417,6 +417,17 @@ def _images(html: str, page_url: str) -> list[tuple[str, str]]:
     return out
 
 
+def _known_after(tenant: str) -> dict:
+    from .pipeline import checks
+    try:
+        got = checks.check_known(tenant, record=True)
+    except Exception as exc:  # noqa: BLE001 — a check must not fail the read
+        return {"error": f"{exc.__class__.__name__}: {str(exc)[:120]}"}
+    return {"passed": got["passed"], "failed": got["failed"],
+            "not_read": got["not_read"],
+            "failures": [r for r in got["results"] if r["severity"]][:10]}
+
+
 def harvest(tenant: str, limit: int = 25, apply: bool = False,
             use_model: bool | None = None, recrawl: bool = False) -> dict:
     """Read a client's site and propose what it finds. Writes nothing unless
@@ -910,6 +921,9 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "pages_by_tier": tiers_seen,
         "partly_read_by_tier": cut_by_tier,
         "tier_policy": pipeline_policy.table(),
+        # KNOWN ANSWERS (pipeline.checks): facts QA wrote down in advance,
+        # tested against what this read recorded. A failure is P1.
+        "known_answers": (_known_after(tenant) if apply else None),
         # Figures on the pages read that NO reader turned into a statement
         # and that are not a year, price, date or phone number — listed for a
         # reviewer (Review › Site facts), never dropped.

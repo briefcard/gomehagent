@@ -39,7 +39,13 @@ def reprocess(tenant: str, apply: bool = False) -> dict:
                               authority=("binding" if compliance.is_legal_url(row.url)
                                          else "derived"), entity_key=entity)
             account.record(tenant, row.url, figs)
-    return {"tenant": tenant, "applied": apply, "pages_read_from_store": pages,
+    ka = None
+    if apply:
+        from . import checks
+        got = checks.check_known(tenant, record=True)
+        ka = {"passed": got["passed"], "failed": got["failed"],
+              "failures": [r for r in got["results"] if r["severity"]][:10]}
+    return {"tenant": tenant, "applied": apply, "known_answers": ka, "pages_read_from_store": pages,
             "pages_fetched": 0, "statements": statements_n,
             "statements_by_extractor": by_extractor, "unaccounted_figures": unacc,
             "extractors": extractors.registry(), "parser_version": parse.VERSION}

@@ -9148,6 +9148,63 @@ async def reprocess_pages(request: Request, key: str = Depends(admin_key)):
                                       "current readers — no crawl"))
 
 
+def _qa_by(form, request) -> str:
+    """The reviewer named on a QA decision (form field, else 'owner')."""
+    import re as _re
+    by = str(form.get("by", "") or request.cookies.get("reviewer", "") or "owner")
+    return _re.sub(r"[^\w .@-]", "", by)[:60] or "owner"
+
+
+@app.post("/admin/known_answer", response_class=HTMLResponse)
+async def known_answer(request: Request, key: str = Depends(admin_key)):
+    """Add or remove a known answer; the capture is re-tested at once."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from .pipeline import checks
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    if str(form.get("action", "")) == "remove":
+        checks.remove_known(tenant, str(form.get("ka_id", "")))
+        return _back_to_content(tenant, sub="checks", msg="Known answer removed")
+    out = checks.add_known(tenant, str(form.get("new_subject", "") or form.get("subject", "")),
+                           str(form.get("expected", "")), str(form.get("where_url", "")).strip(),
+                           by=_qa_by(form, request))
+    if out.get("error"):
+        return _back_to_content(tenant, sub="checks", err=out["error"])
+    got = checks.check_known(tenant, record=True)
+    res = next((r for r in got["results"] if r["id"] == out["id"]), {})
+    return _back_to_content(tenant, sub="checks",
+                            msg=f"Known answer added — the capture {res.get('result', '?').replace('_', ' ')}")
+
+
+@app.post("/admin/audit_draw", response_class=HTMLResponse)
+async def audit_draw(request: Request, key: str = Depends(admin_key)):
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from .pipeline import checks
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    checks.draw_sample(tenant, n=3)
+    return _back_to_content(tenant, sub="checks", msg="Pages drawn for audit")
+
+
+@app.post("/admin/audit_decide", response_class=HTMLResponse)
+async def audit_decide(request: Request, key: str = Depends(admin_key)):
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from .pipeline import checks
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    complete = str(form.get("action", "")) == "complete"
+    missed = str(form.get("missed", ""))
+    if not complete and not missed.strip():
+        return _back_to_content(tenant, sub="checks",
+                                err="Say what was missed, so it can be fixed")
+    checks.decide_audit(tenant, str(form.get("audit_id", "")), complete, missed,
+                        by=_qa_by(form, request))
+    return _back_to_content(tenant, sub="checks", msg="Audit recorded")
+
+
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
 async def claims_decide(request: Request, key: str = Depends(admin_key)):
     """Decide many proposals in one submit.

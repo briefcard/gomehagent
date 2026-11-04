@@ -1714,7 +1714,7 @@ class User(Base):
     name = Column(String)
     email = Column(String)
     telegram_chat_id = Column(String, index=True)  # how the ops channel knows them
-    role = Column(String, default="client")        # owner | client | freelancer
+    role = Column(String, default="client")        # owner | qa | client | freelancer
     tenant_key = Column(String)                    # null for owner = all tenants
     active_tenant = Column(String)                 # current context, per user
     status = Column(String, default="active")   # active | revoked
@@ -2337,6 +2337,73 @@ class ExtractCache(Base):
     text = Column(Text, default="")
     truncated = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class KnownAnswer(Base):
+    """A fact QA already knows, used to test the capture (BUILD-MAP §7.4).
+
+    "The compliance page lists 19 state licences." If a harvest reads that
+    page and does not record 19 licences, the capture is wrong — and the only
+    way to know that without re-reading the site by hand is to have written
+    the answer down first. A failing known answer is a P1: it means every
+    other figure the capture reports is suspect too.
+    """
+
+    __tablename__ = "known_answers"
+    __table_args__ = (UniqueConstraint("tenant", "subject", "where_url",
+                                       name="uq_known_answer"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    subject = Column(String, nullable=False)        # legal.licences
+    expected = Column(String, nullable=False)       # "19" as QA wrote it
+    number = Column(Float)
+    where_url = Column(Text, default="")            # "" = anywhere on the site
+    note = Column(Text, default="")
+    set_by = Column(String, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    last_result = Column(String, default="")        # found | different | missing | not_read
+    last_checked = Column(DateTime(timezone=True))
+
+
+class AuditSample(Base):
+    """A page drawn at random for a person to check what the capture missed.
+
+    Known answers test what QA already knows; an audit tests what nobody has
+    written down. A reviewer reads the page beside what was recorded from it
+    and says "complete" or names what was missed. The share marked complete is
+    the capture's measured recall — a number, not a hope.
+    """
+
+    __tablename__ = "audit_samples"
+    __table_args__ = (UniqueConstraint("tenant", "url", "content_hash",
+                                       name="uq_audit_sample"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    url = Column(Text, nullable=False)
+    content_hash = Column(String, default="")
+    risk_tier = Column(String, default="")
+    statements_n = Column(Integer, default=0)
+    status = Column(String, default="open")        # open | complete | missed
+    missed_note = Column(Text, default="")
+    decided_by = Column(String, default="")
+    sampled_at = Column(DateTime(timezone=True), default=utcnow)
+    decided_at = Column(DateTime(timezone=True))
+
+
+class CheckResult(Base):
+    """One run of one capture check, kept so trust has a history."""
+
+    __tablename__ = "check_results"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    check = Column(String, nullable=False)          # known_answers | audit | trust
+    passed = Column(Integer, default=0)
+    failed = Column(Integer, default=0)
+    details = Column(JSON, default=dict)
+    run_at = Column(DateTime(timezone=True), default=utcnow)
 
 
 class PageSnapshot(Base):

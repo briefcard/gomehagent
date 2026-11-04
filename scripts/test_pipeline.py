@@ -290,6 +290,126 @@ def check_m4_risk_tiers():
        "reprocess" in jobs.KINDS and jobs.KINDS["reprocess"]["target"] == "app.pipeline.reprocess:job")
 
 
+def check_m5_known_answers_audits_trust():
+    """M5 — QA tests the capture: known answers, audits, a trust grade."""
+    from app import admin_ui, mcp_server
+    from app.pipeline import checks
+    comp = f"{BASE}/pages/compliance"
+    net(PAGES)
+    harvest.harvest("baci", limit=10, apply=True, recrawl=True)
+    out = checks.add_known("baci", "legal.licences", "19", comp, by="qa-anna")
+    ck("M5 QA can write down a fact they know", "id" in out, str(out))
+    got = {r["subject"]: r for r in checks.check_known("baci")["results"]}
+    ck("M5 the capture is tested against it: 19 licences found",
+       got["legal.licences"]["result"] == "found", str(got.get("legal.licences")))
+    checks.add_known("baci", "coverage.countries", "75", f"{BASE}/pages/never-read")
+    checks.add_known("baci", "coverage.blockchains", "12", comp)
+    got = {r["subject"]: r for r in checks.check_known("baci")["results"]}
+    ck("M5 a known answer on a page never read is 'not read', not a failure",
+       got["coverage.countries"]["result"] == "not_read" and not got["coverage.countries"]["severity"])
+    ck("M5 a figure the page was read for and not captured is 'missing' — P1",
+       got["coverage.blockchains"]["result"] == "missing"
+       and got["coverage.blockchains"]["severity"] == "P1")
+    checks.remove_known("baci", got["coverage.blockchains"]["id"])
+    checks.remove_known("baci", got["coverage.countries"]["id"])
+    # The licence table loses rows: the next read says so, as a P1.
+    short = dict(PAGES)
+    short[comp] = PAGES[comp].replace("".join(
+        f"<tr><td>State {i}</td><td>Money transmitter</td><td>MT-{1000 + i}</td></tr>"
+        for i in range(10, 19)), "")
+    net(short)
+    res = harvest.harvest("baci", limit=10, apply=True, recrawl=True)
+    ka = res.get("known_answers") or {}
+    ck("M5 a harvest that captures 10 of 19 licences reports a P1 known-answer failure",
+       ka.get("failed") == 1 and ka["failures"][0]["result"] == "different"
+       and ka["failures"][0]["captured"] == ["10"], str(ka))
+    tr = checks.trust("baci")
+    ck("M5 trust is RED while a known answer fails, and says why",
+       tr["grade"] == "red" and any("known answer" in r for r in tr["reasons"]), str(tr["reasons"]))
+    net(PAGES)
+    harvest.harvest("baci", limit=10, apply=True, recrawl=True)
+    # Audits: legal and coverage pages first, decisions carry who made them.
+    drawn = checks.draw_sample("baci", n=2, seed=1)
+    ck("M5 an audit draws the highest-risk pages first",
+       [a["tier"] for a in drawn] == ["legal", "coverage"], str([a["tier"] for a in drawn]))
+    ck("M5 each audit shows what was recorded from the page",
+       any(x["subject"] == "legal.licences" for x in drawn[0]["recorded"]))
+    checks.decide_audit("baci", drawn[0]["id"], True, by="qa-anna")
+    checks.decide_audit("baci", drawn[1]["id"], False, "the 75 countries slide", by="qa-anna")
+    rec = checks.audit_recall("baci")
+    ck("M5 audit recall is measured, and a miss is kept with its note and reviewer",
+       rec["audited"] == 2 and rec["recall"] == 0.5
+       and rec["missed"][0]["note"] == "the 75 countries slide" and rec["missed"][0]["by"] == "qa-anna",
+       str(rec))
+    tr = checks.trust("baci")
+    ck("M5 trust is amber, not green, until enough audits are done",
+       tr["grade"] == "amber" and any("audit" in r for r in tr["reasons"]), str(tr))
+    html = admin_ui.render_content("s3cret", tenant="baci", sub="checks")
+    ck("M5 the console shows trust, known answers and audit forms",
+       "Can the capture be trusted?" in html and "/admin/known_answer" in html
+       and "/admin/audit_draw" in html and 'name="by"' in html)
+    mt = mcp_server.get_trust("baci")
+    ck("M5 get_trust gives the grade and its reasons to a Claude session",
+       mt.get("ok") and mt.get("grade") in ("green", "amber", "red") and mt.get("reasons"))
+    ck("M5 known answers and audits are this account's only",
+       not checks.known_answers("eien") and not checks.open_audits("eien")
+       and checks.audit_recall("eien")["audited"] == 0)
+
+
+def check_console_controls_do_what_they_say():
+    """Every QA control on the console, PRESSED over HTTP, and its effect read
+    back from the data — not inferred from the redirect."""
+    from fastapi.testclient import TestClient
+    from app import jobs, web as _web
+    from app.pipeline import account, checks
+    c = TestClient(_web.app)
+    comp = f"{BASE}/pages/compliance"
+    r = c.post("/admin/known_answer?key=s3cret", data={
+        "tenant": "baci", "action": "add", "subject": "legal.licences", "expected": "19",
+        "where_url": comp, "by": "qa-ben"}, follow_redirects=False)
+    ka = [k for k in checks.known_answers("baci") if k.subject == "legal.licences"]
+    ck("CONSOLE adding a known answer records it with the reviewer, and tests it at once",
+       r.status_code in (200, 303) and ka and ka[0].set_by == "qa-ben" and ka[0].last_result == "found",
+       f"{r.status_code} {[(k.set_by, k.last_result) for k in ka]}")
+    r = c.post("/admin/audit_draw?key=s3cret", data={"tenant": "baci"}, follow_redirects=False)
+    opened = checks.open_audits("baci")
+    ck("CONSOLE drawing an audit opens pages to check", r.status_code in (200, 303) and opened,
+       str(r.status_code))
+    if opened:
+        r = c.post("/admin/audit_decide?key=s3cret", data={
+            "tenant": "baci", "audit_id": opened[0]["id"], "action": "missed", "missed": ""},
+            follow_redirects=False)
+        ck("CONSOLE 'something was missed' with no note is refused — a miss must say what",
+           any(a["id"] == opened[0]["id"] for a in checks.open_audits("baci")))
+        c.post("/admin/audit_decide?key=s3cret", data={
+            "tenant": "baci", "audit_id": opened[0]["id"], "action": "complete", "by": "qa-ben"},
+            follow_redirects=False)
+        with db.SessionLocal() as s:
+            row = s.get(db.AuditSample, opened[0]["id"])
+        ck("CONSOLE 'complete' closes the audit with the reviewer's name",
+           row.status == "complete" and row.decided_by == "qa-ben", f"{row.status} {row.decided_by}")
+    # A figure: mark one not-a-fact, from the console.
+    page = f"{BASE}/pages/coverage"
+    from app.pipeline import fetch, parse
+    html = PAGES[page].replace("</main>", "<p>Our team answered 812 questions last week.</p></main>")
+    fetch.store("baci", page, html, parse.parse(html)["text_hash"])
+    from app.pipeline import reprocess as _rp
+    _rp.reprocess("baci", apply=True)
+    fig = next((g for g in account.open_figures("baci") if g["number"] == "812"), None)
+    ck("CONSOLE a fresh unexplained figure is listed", fig is not None)
+    if fig:
+        c.post("/admin/figure_decide?key=s3cret", data={
+            "tenant": "baci", "figure_id": fig["id"], "action": "ignore"}, follow_redirects=False)
+        ck("CONSOLE 'Not a fact' closes it",
+           not any(g["number"] == "812" for g in account.open_figures("baci")))
+    r = c.post("/admin/reprocess?key=s3cret", data={"tenant": "baci"}, follow_redirects=False)
+    with db.SessionLocal() as s:
+        queued = (s.query(db.JobQueue)
+                  .filter(db.JobQueue.tenant == "baci", db.JobQueue.kind == "reprocess").count())
+    ck("CONSOLE 'Re-read stored pages' queues a reprocess job on the worker",
+       r.status_code in (200, 303) and queued == 1, f"{r.status_code} queued={queued}")
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -298,6 +418,8 @@ def main() -> int:
     check_m2_scan_reads_the_store()
     check_m3_readers_accounting_and_reprocess()
     check_m4_risk_tiers()
+    check_m5_known_answers_audits_trust()
+    check_console_controls_do_what_they_say()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

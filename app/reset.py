@@ -41,7 +41,11 @@ KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
              "kb_situations", "kb_entities", "kb_unknowns", "kb_conflicts",
              "kb_embeddings", "harvested_pages", "kb_assets", "media_blobs",
              "kb_contexts", "kb_statements", "page_snapshots",
-             "kb_statement_terms", "unaccounted_numbers", "extract_cache"}
+             "kb_statement_terms", "unaccounted_numbers", "extract_cache",
+             "known_answers", "audit_samples"}
+# `known_answers` and `audit_samples` are QA's knowledge OF the site's
+# content (what it should say, what a person found missing) — they go with
+# the knowledge they test.
 # `kb_statement_terms` (words a reviewer taught), `unaccounted_numbers`
 # (figures no reader explained) and `extract_cache` (paid model readings of
 # page text) are all derived from the site or about it, and go with it.
@@ -78,7 +82,7 @@ KNOWLEDGE = {"kb_brand", "kb_claims", "kb_audiences", "kb_objections",
 #: Tables that hold what the account DID. Conversations, outputs, mail,
 #: documents, logistics. Rebuildable only from the source systems, and some of
 #: it not at all.
-OPERATIONS = {"conversations", "touches", "commitments", "outputs",
+OPERATIONS = {"check_results", "conversations", "touches", "commitments", "outputs",
               "approvals", "email_log", "contacts", "deadlines", "shipments",
               "rfqs", "expenses", "doc_index", "systems", "system_runs",
               "memories", "lessons", "chat_messages", "usage", "wa_messages",

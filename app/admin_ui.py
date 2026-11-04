@@ -6285,6 +6285,9 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                # owner asked for on 2026-11-04 ("I still see the claims as
                # text strings in the UI instead of the new structure").
                ("facts", "Site facts"),
+               # How far the capture can be trusted: known answers, audits,
+               # the trust grade (BUILD-MAP M5).
+               ("checks", "Checks & trust"),
                # Renamed from "Catalogue" (step 4, spec §4): this is a
                # sync-and-flags panel, not the catalogue — the catalogue
                # itself is managed on Knowledge — and the old name collided
@@ -6331,6 +6334,95 @@ def _figures_block(figs: list, tenant: str) -> str:
     <button name="action" value="label">Record it</button>
   </form></li>""")
     return f'<ul>{"".join(items)}</ul>'
+
+
+def _reviewer_field(reviewer: str = "owner") -> str:
+    """Who is deciding. Recorded on every QA decision (BUILD-MAP §7.7)."""
+    return (f'<input name="by" value="{_esc(reviewer or "owner")}" size="10" '
+            f'title="who is deciding — recorded with the decision">')
+
+
+_GRADE = {"green": "on", "amber": "nb", "red": "off"}
+
+
+def _checks_card(tenant: str) -> str:
+    """Checks & trust — known answers, audit samples and the trust grade."""
+    from .pipeline import checks
+    tr = checks.trust(tenant)
+    ka = tr["known_answers"]
+    reasons = "".join(f"<li>{_esc(r)}</li>" for r in tr["reasons"])
+    tiers = ", ".join(f"{_esc(k)} {v}" for k, v in sorted(tr["pages_by_tier"].items())) or "none"
+    rec = tr["audit"]
+    recall = "—" if rec["recall"] is None else f"{int(rec['recall'] * 100)}%"
+    rows = []
+    for r in ka["results"]:
+        chip = {"found": "on", "not_read": "nb"}.get(r["result"], "off")
+        where = _esc(r["where_url"].split("://", 1)[-1]) if r["where_url"] else "anywhere on the site"
+        got = ", ".join(_esc(v) for v in r["captured"]) or "nothing"
+        rows.append(f"""
+<li><b>{_esc(FACT_LABELS.get(r["subject"], r["subject"]))}</b> = {_esc(r["expected"])}
+  <span class="mut">· {where}</span>
+  <span class="chip {chip}">{_esc(r["result"].replace("_", " "))}{" · " + r["severity"] if r["severity"] else ""}</span>
+  <div class="when">captured: {got}</div>
+  <form class="f" method="post" action="/admin/known_answer" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="ka_id" value="{_esc(r["id"])}">
+    <button class="sec" name="action" value="remove">Remove</button></form></li>""")
+    opts = "".join(f'<option value="{_esc(k)}">{_esc(v)}</option>' for k, v in FACT_LABELS.items())
+    audits = []
+    for a in checks.open_audits(tenant):
+        got = "".join(f'<li>{_esc(FACT_LABELS.get(x["subject"], x["subject"]))}: <b>{_esc(x["value"])}</b> '
+                      f'<span class="mut">({_esc(x["field"])})</span></li>' for x in a["recorded"]) \
+            or '<li class="mut">nothing recorded from this page</li>'
+        audits.append(f"""
+<div class="conn-site"><h3><a href="{_esc(a["url"])}" target="_blank" rel="noopener">{_esc(a["url"].split("://", 1)[-1][:80])}</a>
+  <span class="chip nb">{_esc(a["tier"])}</span></h3>
+  <p class="mut">Open the page. Is every figure it states listed below?</p>
+  <ul>{got}</ul>
+  <form class="f" method="post" action="/admin/audit_decide">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="audit_id" value="{_esc(a["id"])}">
+    <button name="action" value="complete">Complete — nothing missed</button>
+    <input name="missed" placeholder="or what was missed, e.g. '75 countries in the hero'" size="40">
+    <button class="sec" name="action" value="missed">Something was missed</button>
+    {_reviewer_field()}
+  </form></div>""")
+    return f"""
+<div class="card">
+  <div class="head"><h2>Can the capture be trusted?</h2>
+    <span class="chip {_GRADE.get(tr["grade"], "nb")}">{_esc(tr["grade"])}</span></div>
+  <ul>{reasons}</ul>
+  <p class="mut">{tr["pages_stored"]} pages stored ({tiers}) · {tr["high_risk_pages"]} legal/coverage
+  pages, {len(tr["high_risk_partly_read"])} partly read · known answers {ka["passed"]}/{len(ka["results"])} ·
+  audit recall {recall} over {rec["audited"]} page(s) · {tr["unaccounted_open"]} figure(s) not understood</p>
+</div>
+<div class="card">
+  <div class="head"><h2>Known answers</h2>
+    <span class="chip {'off' if ka["failed"] else 'on'}">{ka["failed"]} failing</span></div>
+  <p class="mut">Facts you already know, written down so every read is tested
+  against them. If the capture does not record one, everything else it reports
+  is suspect — that is a P1.</p>
+  <ul>{"".join(rows) or '<li class="mut">None yet. Add one you are sure of, e.g. licences = 19 on the compliance page.</li>'}</ul>
+  <form class="f" method="post" action="/admin/known_answer">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <select name="subject">{opts}</select>
+    <input name="new_subject" placeholder="or another subject" size="18">
+    <input name="expected" placeholder="value, e.g. 19 or 160+" size="12">
+    <input name="where_url" placeholder="on page (optional URL)" size="30">
+    {_reviewer_field()}
+    <button name="action" value="add">Add known answer</button>
+  </form>
+</div>
+<div class="card">
+  <div class="head"><h2>Audit a few pages</h2>
+    <span class="chip nb">recall {recall}</span></div>
+  <p class="mut">Pages drawn at random — legal and coverage pages first — shown
+  beside what was recorded from them. Your answer is the capture's measured recall.</p>
+  {"".join(audits) or '<p class="mut">No pages waiting.</p>'}
+  <form class="f" method="post" action="/admin/audit_draw" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <button class="sec">Draw 3 pages to audit</button></form>
+</div>"""
 
 
 def _facts_card(subjects: list, n_conflicts: int, figs: list | None = None,
@@ -9009,11 +9101,17 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
     except Exception:  # noqa: BLE001
         open_figs = []
     n_fact_conflicts = sum(1 for f in fact_subjects if f["conflict"])
+    try:
+        from .pipeline import checks as _chk
+        n_check_fail = sum(1 for k in _chk.known_answers(tenant)
+                           if k.last_result in ("different", "missing"))
+    except Exception:  # noqa: BLE001
+        n_check_fail = 0
     counts = {"ship": total_ship,
               "claims": total_unfiltered, "pictures": len(waiting),
               "other": n_other, "plans": len(plans_wait),
               "conflicts": len(open_conflicts), "catalogue": len(flagged),
-              "facts": n_fact_conflicts}
+              "facts": n_fact_conflicts, "checks": n_check_fail}
     sub = (sub or "").strip().lower()
     if sub not in dict(REVIEW_SUBS):
         # LAND ON THE WORK. With no section asked for, open the first one that
@@ -9084,6 +9182,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   {conflicts_html}
 </div>""",
         "facts": _facts_card(fact_subjects, n_fact_conflicts, open_figs, tenant),
+        "checks": (_checks_card(tenant) if sub == "checks" else ""),
         "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Store sync</h2>
@@ -9438,6 +9537,12 @@ _KB_DESCRIBED = [
     ("ExtractCache", "extract_cache", "Model readings already paid for",
      "One model reading per exact chunk of page text, so an unchanged chunk is "
      "never paid for twice. Derived; safe to clear."),
+    ("KnownAnswer", "known_answers", "Facts QA knows, used to test the capture",
+     "Written by a reviewer (\"19 licences on the compliance page\") and tested "
+     "after every read. A failure is a P1 and turns trust red (Review › Checks & trust)."),
+    ("AuditSample", "audit_samples", "Pages a person checked against what was recorded",
+     "Drawn at random, legal and coverage first; marked complete or with what was "
+     "missed, and by whom. Their share complete is the capture's measured recall."),
 ]
 
 

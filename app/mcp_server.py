@@ -33,6 +33,11 @@ that said what was due, what was stuck or what had worked:
                   subject with the subjects the site disagrees with itself on
                   first; JSON or CSV. Owner, 2026-11-04: seven country counts
                   across Transak's pages, none of them in the claims.
+    get_trust     how far the capture can be trusted for one account: known
+                  answers (facts QA wrote down) passing or failing, audit
+                  recall, legal/coverage pages read in full, open figures no
+                  reader understood — a grade with its reasons. Read before
+                  relying on get_statements. Read-only.
     get_claims    the whole claims register — proposed, approved, rejected —
                   with evidence, source page and tags, filtered and paged,
                   plus how much of the account's sites the harvest has read.
@@ -107,7 +112,7 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
-         "get_claims", "get_statements",
+         "get_claims", "get_statements", "get_trust",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
@@ -701,6 +706,25 @@ def get_statements(tenant: str, subject: str = "", conflicts_only: bool = False,
     out["rows"] = n
     out["csv"] = buf.getvalue()
     return out
+
+
+@server.tool()
+def get_trust(tenant: str) -> dict[str, Any]:
+    """How far one account's captured site facts can be trusted, and why.
+
+    `grade` is green / amber / red with `reasons`. Red means a known answer
+    (a fact QA wrote down in advance, e.g. "19 licences on /compliance") was
+    not captured correctly, or a legal/coverage page was only partly read —
+    do not rely on `get_statements` for that account until it is fixed.
+    Includes each known answer's result, audit recall (pages a person checked
+    against what was recorded) and the count of figures no reader understood.
+    Read-only."""
+    from . import tenants
+    from .pipeline import checks
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}",
+                "known": sorted(t.key for t in tenants.all_tenants())}
+    return {"ok": True, **checks.trust(tenant)}
 
 
 #: Most claims one get_claims call returns. Page with `offset` past this.
