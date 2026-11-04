@@ -104,9 +104,55 @@ destinations, origin, set size, discount %, availability, licence) with a
 which date). The fix is a model of subjects and scoped values, not more rules
 about sentences.
 
-## 3. What already exists (anchors)
+## 3. What already exists (anchors) — and what it cannot do
 
-_Filled from the codebase map — see below._
+**Reuse, do not rebuild:**
+- **Provenance + per-field conflicts** — `provenance.may_write` / `apply_fields`
+  (`provenance.py:169-203`, `:308-340`): "approved is final"; a machine
+  source that disagrees records a `KbConflict` (`db.py:2314`) per row × field,
+  shown as **Review › Conflicts / "Sources disagree"** (`admin_ui.py:6283`,
+  `:8417-8455`), resolved Keep ours / Take theirs (`web.py:9096`).
+  Precedence is by origin KIND only; `store_sync` owns price + availability.
+- **Scope hierarchy** — `KbEntity.parent_keys` groups + `kb.ancestors()`
+  (`kb.py:2684`); `claims()` ranks exact > group > brand (`scope_depth`,
+  `kb.py:2708`). `kb.scope_conflicts()` (`kb.py:2800`) already pairs claims at
+  different depths sharing a tag — computed, JSON-only
+  (`/admin/scope_conflicts`), no UI. `kb.scope_unconfirmed()` (`:4460`) flags
+  machine rows whose scope was never decided.
+- **The one live-vs-approved comparison** — `catalog_sync.py:305-330`: a
+  Shopify product's name/price/description against the approved entity,
+  disagreements become `KbConflict`. The pattern §4 generalises.
+- **Legal = binding** — `kb.is_legal_claim` / `legal_claims`, injected into
+  `get_package` (built 2026-11-04). Advisory in the prompt, not enforced.
+- **Write-back executors** — `seo_update` (`approvals.py:980` → Shopify
+  `body_html` + SEO meta, WordPress `content` + excerpt), `seo_article_revision`,
+  `gbp_listing_fix`; guarded by `seo_guard` (ban list) before any live write.
+- **Near-duplicates** — `provenance.near_duplicates` (0.65 Jaccard) shows
+  "1200 vs 1250 orders" side by side, proposals only.
+
+**The gaps the examples fall into:**
+- No market / region / jurisdiction / channel / date on any KB row;
+  `KbEntity.availability` and `price` are single global values.
+- `KbConflict` is one row × one field — it cannot hold "page A vs page B" or
+  rank sources; claims bypass `apply_fields`, so claim-vs-claim disagreement is
+  never recorded. `status="conflicted"` exists and nothing sets it.
+- Nothing compares a live page or a draft against approved facts for a
+  different VALUE: `compliance.scan` = banned phrases; `validator.check` =
+  citation present + bans + entity available; `claim_trace` = support, not
+  contradiction.
+- No per-URL authority (`HarvestedPage` = url, hash, count).
+- No index from a fact to the pages/fields that state it, so nothing can turn a
+  resolution into `seo_update` approvals.
+- **No QA identity**: `User.role` is owner|client|freelancer; the console has
+  ONE credential (`APPROVAL_SECRET`), `approved_by` is mostly blank and
+  `KbConflict` has no `resolved_by`. An auditable QA role needs per-user
+  console logins first.
+
+Docs that already set the rules this must keep: BUILD-STATE.md:2855
+("Conflicts are flagged, never resolved" by code), DEFECTS.md:2593 (brand vs
+product scope, the GLP-1 non-sequitur), DEFECTS.md:815 (blank `entity_key`
+ambiguous), WALKTHROUGH-PROMPT.md:170 ("Generators propose; they never
+populate"), RUNBOOK.md:318.
 
 ## 4. Architecture
 
@@ -260,6 +306,20 @@ Seeded so QA starts with structure, not a blank page:
 
 ### 4.7 Where it plugs into what exists
 
+- **Scope** reuses `KbEntity` + `parent_keys` groups and `ancestors()` for the
+  entity dimension; market / channel / audience / dates are the new
+  dimensions. Specificity = the existing `scope_depth` extended.
+- **Findings** generalise `KbConflict`: add `kind`, `subject`, `scope`,
+  `severity`, the competing statements (source + authority) and `resolved_by`;
+  the existing Review › Conflicts cards become the findings queue rather than a
+  second queue. `scope_conflicts()` output becomes `scope_error` findings.
+- **Systems as sources** follow `catalog_sync`'s pattern (compare, never
+  overwrite approved, record the disagreement).
+- **Propagation** files `seo_update` / `seo_article_revision` /
+  `gbp_listing_fix` approvals — no new executor; `seo_guard` still runs.
+- **QA identity** needs per-user console logins (Phase 0 below) so every
+  decision has a `resolved_by`.
+
 - Drafting: `get_package` serves the resolved truth for the scope being
   written about (product + market + channel), plus every `binding` value —
   instead of a flat claim list. `check` gains a deterministic
@@ -275,6 +335,8 @@ Seeded so QA starts with structure, not a blank page:
 
 ## 5. Phases (each ends with a QA/owner check; nothing publishes without a tap)
 
+0. **QA identity** — per-user console logins and a `qa` role (today one shared
+   `APPROVAL_SECRET`); `approved_by` / `resolved_by` filled from the session.
 1. **Truth model** — `kb_facts`, `kb_fact_values` with scope + specificity
    resolution, source authority; subject templates per business model;
    tenant-scoped like every table (`tenant` column, per-tenant uniques,
