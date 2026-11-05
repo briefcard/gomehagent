@@ -20,7 +20,7 @@ from . import fetch as _fetch
 
 #: Bump when the Document changes shape or content; stored documents at an
 #: older version are re-parsed from the stored bytes, never refetched.
-VERSION = 3
+VERSION = 4
 #: Body text below this many characters means the page is drawn by JavaScript
 #: and its copy is in the embedded data (same floor as harvest.JS_THIN_CHARS).
 JS_THIN_CHARS = 200
@@ -156,7 +156,9 @@ class _Walker(HTMLParser):
 
 def parse(html: str) -> dict:
     """The Document for one page. Pure: same HTML, same Document."""
-    html = html or ""
+    # Postgres refuses a string holding NUL, and refuses it at the write, so
+    # one such byte in one source ended a whole harvest.
+    html = (html or "").replace("\x00", "")
     blocks = compliance.text_blocks(html)
     text = " ".join(blocks)
     data_lines = statements.page_data_lines(html)
@@ -221,7 +223,7 @@ def parse_text(text: str) -> dict:
     """A Document for plain text — a PDF's extracted text, an API's strings.
     One block per line; no furniture, tables or links (the source has none
     we can see)."""
-    lines = [" ".join(ln.split()) for ln in (text or "").splitlines()]
+    lines = [" ".join(ln.split()) for ln in (text or "").replace("\x00", "").splitlines()]
     lines = statements._join_fragments([ln for ln in lines if ln])
     return {"version": VERSION, "text_hash": _fetch.text_hash(" ".join(lines)),
             "blocks": lines, "body_blocks": lines, "lines": lines, "page_data": [],

@@ -657,7 +657,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`block_types`**() → `tuple`  ·  **from nothing**
 - **`brief`**(structure) → `str`  ·  from `skill_pack.py`, `test_digest.py`, `test_funnel.py`, `test_the_email_is_for_its_reader.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`can_hero`**(tenant) → `bool`  ·  **from nothing**
-- **`delete`**(structure_id) → `str`  ·  from `compliance.py`, `digest.py`, `email_harvest.py`, `embed.py`, `harvest.py`, `hosting.py`, `kb.py`, `media.py`, `ops_jobs.py`, `pipeline/account.py`, `pipeline/checks.py`, `pipeline/retention.py`, `reset.py`, `shopify_webhooks.py`, `statements.py`, `tenants.py`, `test_can_the_engines_read_us.py`, `test_canva.py`, `test_gbp_post.py`, `test_job_lease.py`, `test_keyword_progress.py`, `test_klaviyo.py`, `test_plan_mix.py`, `test_publish_gap.py`, `test_tenant_scope.py`, `test_toolcalls.py`, `web.py`
+- **`delete`**(structure_id) → `str`  ·  from `compliance.py`, `digest.py`, `email_harvest.py`, `embed.py`, `harvest.py`, `hosting.py`, `kb.py`, `media.py`, `ops_jobs.py`, `pipeline/account.py`, `pipeline/checks.py`, `pipeline/retention.py`, `reset.py`, `shopify_webhooks.py`, `statements.py`, `tenants.py`, `test_can_the_engines_read_us.py`, `test_canva.py`, `test_gbp_post.py`, `test_harvest.py`, `test_job_lease.py`, `test_keyword_progress.py`, `test_klaviyo.py`, `test_plan_mix.py`, `test_publish_gap.py`, `test_tenant_scope.py`, `test_toolcalls.py`, `web.py`
 - **`delete_all`**() → `dict`  ·  from `web.py`
 - **`design_work_in_flight`**() → `str`  ·  from `test_the_designs_shelf.py`, `web.py`
 - **`designate`**(tenant, structure_id?) → `str`  ·  from `test_the_designs_shelf.py`, `test_the_model_makes_the_email.py`, `web.py`
@@ -1454,7 +1454,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`document`**(tenant, url) → `dict`  ·  from `mcp_server.py`, `pipeline/reprocess.py`, `test_pipeline.py`
 - **`parse`**(html) → `dict`  ·  from `answer_engines.py`, `bundle.py`, `dividers.py`, `harvest.py`, `mcp_server.py`, `pipeline/reprocess.py`, `recreate.py`, `register.py`, `skill_pack.py`, `test_a_claim_knows_what_it_is_about.py`, `test_ad_arrives_whole.py`, `test_ad_craft.py`, `test_artifact_identity.py`, `test_assertions_can_fail.py`, `test_ban_list.py`, `test_can_this_account_illustrate.py`, `test_catalog_vocabulary.py`, `test_context.py`, `test_control_piping.py`, `test_creative_seam.py`, `test_heavy_work_goes_to_the_worker.py`, `test_pipeline.py`, `test_pointers.py`, `test_register.py`, `test_sabotage_anchors.py`, `test_semrush_asked_once.py`, `test_skill_conformance.py`, `test_spend_complete.py`, `test_the_page_says_what_it_answers.py`, `test_the_render_is_read.py`, `test_the_route_sends_what_the_callee_takes.py`, `test_written_is_not_published.py`
-- **`parse_text`**(text) → `dict`  ·  from `pipeline/documents.py`
+- **`parse_text`**(text) → `dict`  ·  from `pipeline/documents.py`, `test_pipeline.py`
 
 ### `pipeline/policy.py`
 

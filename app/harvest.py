@@ -312,6 +312,13 @@ def _page_state(tenant: str) -> dict[str, str]:
                 .filter(db.HarvestedPage.tenant == tenant).all()}
 
 
+def _kept_pages(tenant: str) -> set[str]:
+    """Every page of this site with a copy kept."""
+    with db.SessionLocal() as s:
+        return {u for (u,) in s.query(db.PageSnapshot.url)
+                .filter(db.PageSnapshot.tenant == tenant).all()}
+
+
 def _record_page(tenant: str, url: str, content_hash: str,
                  claims_found: int, truncated: bool) -> None:
     with db.SessionLocal() as s:
@@ -496,6 +503,13 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     source = next((r["page_source"] for r in src_report
                    if r["role"] == "website"), "")
     seen_pages = {} if recrawl else _page_state(tenant)
+    # Remembered with a hash but with no copy kept: an older run read it and
+    # the copy has gone. That is not read. Left in the seen band it was never
+    # reached (each run starts that band again at the top, and transak.com's
+    # homepage sat below 390 higher-risk pages) while pages_remaining said 0.
+    # A page that could not be read has no hash and stays passed over.
+    kept = _kept_pages(tenant)
+    seen_pages = {u: h for u, h in seen_pages.items() if not h or u in kept}
     if not pages:
         # One source failing is a line in the report. ALL of them failing is
         # the run failing — and it names each one, because "could not

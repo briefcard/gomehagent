@@ -548,6 +548,23 @@ def check_unreadable_pages_do_not_loop(ck, httpx):
     ck("a rehearsal still consumes nothing, dead pages included",
        not hv._page_state("baci"))
 
+    # Remembered, but no copy kept: an older run's page. Not read, so it counts
+    # as remaining and is read ahead of what is already held.
+    for _ in range(4):
+        harvest.harvest("baci", limit=4, apply=True)
+    lost = good[0]
+    with db.SessionLocal() as s:
+        s.query(db.PageSnapshot).filter(db.PageSnapshot.tenant == "baci",
+                                        db.PageSnapshot.url == lost).delete()
+        s.commit()
+    ck("a page with no copy kept is still to read, whatever the memory says",
+       harvest.harvest("baci", limit=0, apply=False)["pages_remaining"] == 1)
+    harvest.harvest("baci", limit=1, apply=True)
+    ck("and the next run reads it first",
+       lost in hv._kept_pages("baci"))
+    ck("a dead page has no copy and is not brought back",
+       harvest.harvest("baci", limit=0, apply=False)["pages_remaining"] == 0)
+
     # The other way a crawl never finishes: discovery capped at 500 pages per
     # source, in a stable order, so a help centre of 700 articles had 200 that
     # no number of runs could ever reach.

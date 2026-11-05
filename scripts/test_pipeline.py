@@ -252,6 +252,22 @@ def check_m3_what_the_readers_must_not_count():
        of(yes, "availability.guam") == ["available"])
     ck("READ a buy page must name the place twice",
        not availability.run(parse.parse(page("<h1>How to Buy Crypto in the 1inch Wallet</h1>"))))
+    for said in ("It is not available in Chrome, Firefox, or on non-Apple devices.",
+                 "If Transak is not available in your area or for your wallet, use an exchange.",
+                 "Apple Pay is not available in Chrome, Firefox or Edge."):
+        ck("READ a sentence after 'not available in' is not a place",
+           not availability.run(parse.parse(page(f"<p>{said}</p>"))), said)
+    ck("READ a long clause is not a place either",
+       not availability.run(parse.parse(page(
+           "<p>This is not available in Some Very Long Named Part Of Town.</p>"))))
+    ck("READ an accented place keeps its letters",
+       of(page("<h1>We're not available in Réunion yet</h1>"), "availability.reunion")
+       == ["not available"])
+    import json as _json
+    ck("READ a NUL byte in a page never reaches the database",
+       "\\u0000" not in _json.dumps(parse.parse("<html><body><p>Fees\x00 apply</p></body></html>")))
+    ck("READ a NUL byte in a PDF's text never reaches the database",
+       "\\u0000" not in _json.dumps(parse.parse_text("Fees\x00 apply")))
 
 
 def check_generated_families_are_read_by_one_page_per_place():
