@@ -71,7 +71,7 @@ LEGAL_PATHS = ("/privacy", "/terms", "/cookie", "/legal", "/disclaimer",
                # its FCA registration (owner, 2026-11-04: "yes do that").
                "/compliance", "/licens", "/regulat")
 _SKIP_NOT_LEGAL = ("/cart", "/checkout", "/account", "/wp-json",
-                   "/feed", ".xml", ".json", ".pdf", "/search",
+                   "/feed", ".xml", ".json", ".pdf", ".css", "/search",
                    "/sample-page", "/wp-admin", "/wp-content", "/wp-includes",
                    "/404", "/error", "/not-found", "/thank-you", "/thanks",
                    "/tag/", "/category/", "/author/", "/page/", "?s=", "?p=",

@@ -4,7 +4,7 @@ from __future__ import annotations
 from ... import statements
 
 NAME = "numbers"
-VERSION = 1
+VERSION = 2
 USES_MODEL = False
 
 

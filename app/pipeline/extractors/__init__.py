@@ -11,9 +11,9 @@ off (`DISABLED`) without stopping the others.
 """
 from __future__ import annotations
 
-from . import enumerations, numbers, structured
+from . import availability, enumerations, numbers, structured
 
-EXTRACTORS = [numbers, enumerations, structured]
+EXTRACTORS = [numbers, enumerations, structured, availability]
 #: Kill switch per reader (BUILD-MAP §10): names listed here do not run.
 DISABLED: set[str] = set()
 

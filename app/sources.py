@@ -69,7 +69,7 @@ def _website(tenant: str, apply: bool, budget: int) -> dict:
     return {k: r.get(k) for k in
             ("extractor", "extractor_note", "truncated_page_count",
              "pages_read", "pages_skipped", "pages_unchanged",
-             "pages_discovered", "pages_remaining",
+             "pages_discovered", "pages_remaining", "template_pages_skipped",
              "statements_found", "statements_by_subject", "pages_from_page_data",
              "statements_by_extractor", "unaccounted_figures", "pages_by_tier",
              "partly_read_by_tier",

@@ -66,6 +66,46 @@ def tier(url: str, doc: dict | None = None) -> str:
     return "marketing"
 
 
+#: A two-level path family this large is generated, not written.
+FAMILY_MIN = 500
+
+
+def thin_families(pages: list[dict]) -> tuple[list[dict], list[dict]]:
+    """(pages to read, a report of what was left out).
+
+    transak.com/buy/<coin>/<place> is 5,651 pages: 100 coins by 63 places,
+    the same boilerplate with one sentence that differs per PLACE. Reading all
+    of them is 22 hours of crawl for 63 answers, so a family keeps one page per
+    last segment, always on its commonest middle segment so the answers are
+    like for like. One-level paths are never touched (/blog/*, /products/*)
+    and neither is a legal page. The report goes on the run card: a left-out
+    page is a decision on record, never a silent loss."""
+    fams: dict[tuple, list[dict]] = {}
+    for p in pages:
+        u = p["url"].split("://", 1)[-1].split("?", 1)[0].rstrip("/")
+        parts = u.split("/")
+        if len(parts) == 4 and not compliance.is_legal_url(p["url"]):
+            fams.setdefault((parts[0], parts[1]), []).append(p)
+    drop, report = set(), []
+    for (host, top), members in sorted(fams.items()):
+        if len(members) < FAMILY_MIN:
+            continue
+        seg = [m["url"].split("?", 1)[0].rstrip("/").split("/")[-2:] for m in members]
+        common: dict[str, int] = {}
+        for mid, _last in seg:
+            common[mid] = common.get(mid, 0) + 1
+        best: dict[str, tuple] = {}
+        for m, (mid, last) in zip(members, seg):
+            rank_ = (-common[mid], mid)
+            if last not in best or rank_ < best[last][0]:
+                best[last] = (rank_, m["url"])
+        keep = {v[1] for v in best.values()}
+        drop |= {m["url"] for m in members if m["url"] not in keep}
+        report.append({"family": f"{host}/{top}/*/*", "pages": len(members),
+                       "kept": len(keep)})
+    return [p for p in pages if p["url"] not in drop], report
+
+
 def max_chunks(t: str):
     return TIERS.get(t, TIERS["marketing"])["max_chunks"]
 

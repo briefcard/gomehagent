@@ -567,6 +567,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     # from spending a run's slots on them or counting them as still to read.
     readable = [p for p in pages
                 if not compliance.skip_url(p["url"], keep_legal=True)]
+    readable, template_families = pipeline_policy.thin_families(readable)
     # LEGAL PAGES FIRST within each band: what they say is the one thing the
     # copy must never contradict, so a site is not "covered" until they are.
     # And then by RISK TIER (pipeline.policy): legal, then coverage (where
@@ -940,6 +941,10 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         "pages_unchanged": unchanged,
         "pages_known": len(seen_pages),
         "pages_discovered": len(pages),
+        # Generated page families read by one page per last segment
+        # (`policy.thin_families`). Left out on purpose, and said so here.
+        "template_pages_skipped": sum(f["pages"] - f["kept"] for f in template_families),
+        "template_families": template_families,
         # Readable pages never yet tried — neither in the memory this run
         # started from nor tried by this run. Zero means every page the site
         # lists has been read or found unreadable at least once.

@@ -562,6 +562,7 @@ def summarise(result) -> str:
     if result.get("error"):
         return f"error: {result['error']}"
     keep = ("proposed_count", "pages_read", "pages_unchanged", "pages_remaining",
+            "template_pages_skipped",
             "statements_found", "unaccounted_figures", "pages_from_page_data",
             "truncated_page_count", "pages_read_from_store",
             "faqs_filed_as_objections", "claims_count", "objections_count",

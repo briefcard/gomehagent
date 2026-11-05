@@ -69,6 +69,8 @@ _MULT = {"k": 1e3, "thousand": 1e3, "m": 1e6, "million": 1e6,
 #: is rare enough to keep — QA sees the sentence).
 _NOT_FILLER = re.compile(r"\b(per|each|every|percent|years?|days?|months?|hours?|minutes?)\b", re.I)
 
+_SINGULAR = {"country", "license", "licence"}
+
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 _STYLE = re.compile(r"<style\b[^>]*>.*?</style>", re.I | re.S)
 _TAGS = re.compile(r"<[^>]+>")
@@ -174,6 +176,10 @@ def find(text: str, extra: tuple[tuple[str, str], ...] = ()) -> list[dict]:
             continue
         if scale:
             n *= _MULT.get(scale.lower(), 1)
+        # A count takes the plural. "45123 Country Code" and "Alpha-2 country
+        # codes" are a number beside a word, not a figure about countries.
+        if unit.lower() in _SINGULAR and n != 1:
+            continue
         if subj != "scale.users" and 1900 <= n <= 2100 and not (plus1 or plus2):
             continue            # a year, not a count
         q = (qual or "").lower()
@@ -251,7 +257,10 @@ def record(tenant: str, url: str, facts: list[dict], authority: str = "derived",
                 tenant=tenant, url=url, subject=f["subject"], value=f["value"],
                 number=f["number"], qualifier=f["qualifier"], unit=f["unit"],
                 text=f["text"], field=f.get("field", "body"),
-                authority=authority, entity_key=entity_key, fingerprint=fp,
+                # A legal page's own text binds; the site footer around it
+                # does not become law by being printed there.
+                authority=("derived" if f.get("field") == "furniture" else authority),
+                entity_key=entity_key, fingerprint=fp,
                 origin=f.get("extractor", "sweep"),
                 extractor=f.get("extractor", "numbers"),
                 extractor_version=f.get("extractor_version", 1),

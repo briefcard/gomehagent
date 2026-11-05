@@ -179,6 +179,117 @@ def check_m3_one_sentence_punctuated_twice_is_one_figure():
        n == 1 and rows == 1, f"record={n} rows={rows}")
 
 
+def check_m3_what_the_readers_must_not_count():
+    """Each shape is from Transak's own pages (2026-11-04): the first full read
+    filed footer menus as licences and a privacy notice as a state count, so
+    five P1 questions were about noise and real drafts were blocked on them."""
+    from app import statements as st
+    from app.pipeline import extractors, parse
+    from app.pipeline.extractors import availability, enumerations
+
+    def read(html):
+        return extractors.run_all(parse.parse(html), ())[0]
+
+    def of(html, subject):
+        return [s["value"] for s in read(html) if s["subject"] == subject]
+
+    def page(body):
+        return f"<html><body><main>{body}</main></body></html>"
+
+    links = "".join(f"<li><a href='/{x}'>{x}</a></li>" for x in ("Pressroom", "Blog", "News", "Careers"))
+    plain = "".join(f"<li>{x}</li>" for x in ("France", "Spain", "Italy"))
+    ck("READ a list under a parent heading is not that parent's count",
+       of(page(f"<h1>Supported Countries</h1><h5>Company</h5><ul>{plain}</ul>"),
+          "coverage.countries") == [])
+    ck("READ a list of the page's own links is a menu",
+       of(page(f"<h1>Get Countries</h1><ul>{links}</ul>"), "coverage.countries") == [])
+    ck("READ a plain list under its own label still counts",
+       of(page(f"<h2>Supported countries</h2><ul>{plain}</ul>"), "coverage.countries") == ["3"])
+    ck("READ a sentence with a figure in it does not label a table",
+       enumerations._is_label("Supported countries")
+       and not enumerations._is_label("Transak supports 136 cryptocurrencies")
+       and not enumerations._is_label("Why Web3 Companies Need The US Money Transmitter License"))
+    tbl = "".join(f"<tr><td>Row {i}</td><td>x</td></tr>" for i in range(4))
+    ck("READ a table under a sentence is not counted as what the sentence names",
+       not any(s.get("field") == "table" for s in read(page(
+           f"<h5>We support 136 cryptocurrencies in 25 countries</h5><table>{tbl}</table>"))))
+    ck("READ 'State' in a heading is an adjective",
+       of(page(f"<h2>U.S. State Privacy Notice</h2><table>{tbl}</table>"), "coverage.states") == [])
+    ck("READ 'State' as a column header still names the column",
+       of(page(f"<table><tr><th>State</th><th>Fee</th></tr>{tbl}</table>"), "coverage.states") == ["4"])
+    names = ["Alabama", "Arizona", "Arkansas", "California", "Colorado", "Connecticut",
+             "Delaware", "Florida", "Georgia", "Hawaii", "Idaho"]
+    rows = "".join(f"<tr><td>{n}</td><td>USD</td></tr>" for n in
+                   names + ["District of Columbia", "Puerto Rico", "Georgia"])
+    got = read(page("<h5>We support 136 cryptocurrencies in 25 countries</h5>"
+                    f"<table><tr><th>KYC Country</th><th>Fiat</th></tr>{rows}</table>"))
+    ck("READ a table of US states counts states only, once each, DC and PR out",
+       [s["value"] for s in got if s["subject"] == "coverage.states"] == ["11"]
+       and not any(s.get("field") == "table" and s["subject"] != "coverage.states" for s in got),
+       str([(s["subject"], s["value"]) for s in got]))
+    sect = "".join(f"<h3>{p}, USA</h3><h4>Money Transmitter License</h4>" for p in ("Iowa", "Ohio", "Utah"))
+    ck("READ licences stated as repeated sections are counted",
+       of(page(sect), "legal.licences") == ["3"])
+    ck("READ one licence heading is not a count",
+       of(page("<h4>Money Transmitter License</h4>"), "legal.licences") == [])
+    ck("READ a number beside a singular word is not a count",
+       not st.find("45123 Country Code") and not st.find("Only Alpha-2 country codes")
+       and st.find("Live in 1 country") and st.find("Live in 25 countries"))
+    t_ = "tenant_authority_fixture"
+    st.record(t_, "https://x.test/legal", [
+        {"subject": "scale.apps", "value": "600+", "number": 600, "qualifier": "",
+         "unit": "apps", "text": "Used by 600 apps", "field": "furniture"},
+        {"subject": "legal.licences", "value": "3", "number": 3, "qualifier": "",
+         "unit": "licences", "text": "3 licences", "field": "body"}], authority="binding")
+    got_a = {r.subject: r.authority for r in st.rows(t_)}
+    ck("READ a footer on a legal page does not bind; the page's text does",
+       got_a == {"scale.apps": "derived", "legal.licences": "binding"}, str(got_a))
+    no = page("<h1>We're not available in Norway yet</h1>")
+    yes = page("<h1>How to Buy Sei (SEI) in Guam</h1><p>Payment Methods Supported in Guam</p>")
+    ck("READ a page saying it is not available records that place",
+       of(no, "availability.norway") == ["not available"])
+    ck("READ a working buy page records that place",
+       of(yes, "availability.guam") == ["available"])
+    ck("READ a buy page must name the place twice",
+       not availability.run(parse.parse(page("<h1>How to Buy Crypto in the 1inch Wallet</h1>"))))
+
+
+def check_generated_families_are_read_by_one_page_per_place():
+    """A family keeps one page per last segment, says what it left out, and
+    leaves a one-level path and a legal page alone."""
+    from app.pipeline import policy
+    coins = [f"coin{i}" for i in range(30)]
+    places = [f"place{i}" for i in range(20)]
+    fam = [{"url": f"https://a.test/buy/{c}/{p}"} for c in coins for p in places]
+    blog = [{"url": f"https://a.test/blog/post-{i}"} for i in range(700)]
+    kept, rep = policy.thin_families(fam + blog)
+    ck("FAMILY one page per place, all on the same coin",
+       len([k for k in kept if "/buy/" in k["url"]]) == 20
+       and len({k["url"].split("/")[-2] for k in kept if "/buy/" in k["url"]}) == 1,
+       str(rep))
+    ck("FAMILY a one-level path is never thinned",
+       len([k for k in kept if "/blog/" in k["url"]]) == 700)
+    ck("FAMILY the report says how many were left out",
+       rep == [{"family": "a.test/buy/*/*", "pages": 600, "kept": 20}], str(rep))
+    small = fam[:policy.FAMILY_MIN - 1]
+    ck("FAMILY below the floor nothing is thinned",
+       policy.thin_families(small) == (small, []))
+    legal = [{"url": f"https://a.test/legal/v{i}/terms-of-service"} for i in range(600)]
+    ck("FAMILY a legal page is never left out",
+       len(policy.thin_families(legal)[0]) == 600)
+    pages = {f"{BASE}/buy/{c}/{p}": PAGES[f"{BASE}/pages/coverage"]
+             for c in coins for p in places}
+    net(pages)
+    out = harvest.harvest("baci", limit=2, apply=False)
+    ck("FAMILY the harvest thins, and the run card says so",
+       out.get("template_pages_skipped") == 580
+       and out.get("pages_remaining", 9999) <= 20, str({k: out.get(k) for k in (
+           "template_pages_skipped", "pages_remaining", "pages_discovered")}))
+    from app import compliance
+    ck("FAMILY a stylesheet is not a page",
+       compliance.skip_url("https://x.test/assets/index-abc.css", keep_legal=True))
+
+
 def check_m3_readers_accounting_and_reprocess():
     """M3 — pluggable readers, counted tables, unaccounted figures, re-reads."""
     from app import extract, statements as st
@@ -911,6 +1022,8 @@ def main() -> int:
     check_m2_scan_reads_the_store()
     check_m3_readers_accounting_and_reprocess()
     check_m3_one_sentence_punctuated_twice_is_one_figure()
+    check_m3_what_the_readers_must_not_count()
+    check_generated_families_are_read_by_one_page_per_place()
     check_m4_risk_tiers()
     check_m5_known_answers_audits_trust()
     check_console_controls_do_what_they_say()
