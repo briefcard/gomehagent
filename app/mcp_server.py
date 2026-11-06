@@ -859,16 +859,22 @@ def get_pages(tenant: str, url: str = "", query: str = "", tier: str = "",
             continue
         if since and (not r.changed_at or r.changed_at.date().isoformat() < since):
             continue
-        d = r.document if (r.document and r.parser_version == parse.VERSION) else parse.document(tenant, r.url)
-        heads = [h["text"] for h in d.get("headings", [])]
-        if q and q not in r.url.lower() and not any(q in h.lower() for h in heads) \
-                and q not in " ".join(d.get("blocks", [])).lower():
-            continue
-        rows.append({"url": r.url, "tier": r.risk_tier, "title": heads[0] if heads else "",
-                     "headings": heads[:6],
-                     "words": len(" ".join(d.get("blocks", [])).split()),
-                     "links": len(d.get("links", [])), "tables": len(d.get("tables", [])),
-                     "lists": len(d.get("lists", [])), "has_jsonld": bool(d.get("jsonld")),
+        # The page's stored summary — no Document opened to list it. An older
+        # row without one gets it now, once; a text search beyond the title
+        # and headings reads that one page's blocks.
+        sm = r.summary or {}
+        if not sm or sm.get("version") != parse.VERSION:
+            sm = fetch.summarise(parse.document(tenant, r.url))
+            fetch.set_summary(r.id, sm)
+        heads = sm.get("headings", [])
+        if q and q not in r.url.lower() and not any(q in h.lower() for h in heads):
+            d, _ver = fetch.document_of(r.id)
+            if q not in " ".join(d.get("blocks", [])).lower():
+                continue
+        rows.append({"url": r.url, "tier": r.risk_tier, "title": sm.get("title", ""),
+                     "headings": heads[:6], "words": sm.get("words", 0),
+                     "links": sm.get("links", 0), "tables": sm.get("tables", 0),
+                     "lists": sm.get("lists", 0), "has_jsonld": bool(sm.get("has_jsonld")),
                      "fetched_at": _when(r.fetched_at), "changed_at": _when(r.changed_at),
                      "rendered": r.rendered or 0, "source": r.source_label})
     with db.SessionLocal() as s:

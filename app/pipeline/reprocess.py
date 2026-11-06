@@ -20,6 +20,10 @@ def reprocess(tenant: str, apply: bool = False) -> dict:
         doc = parse.document(tenant, row.url) if apply else parse.parse(fetch.html_of(row))
         if not doc:
             continue
+        if apply and not (row.summary or {}).get("version") == parse.VERSION:
+            # The listing's small view of the page (MCP get_pages), filled for
+            # pages stored before it existed.
+            fetch.set_summary(row.id, fetch.summarise(doc))
         if apply and not row.risk_tier:
             policy_tier = policy.tier(row.url, doc)
             fetch.set_tier(tenant, row.url, policy_tier)

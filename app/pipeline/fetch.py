@@ -99,14 +99,21 @@ def store(tenant: str, url: str, html: str, content_hash: str,
         if document is not None:
             row.document = document
             row.parser_version = document.get("version", 0)
+            row.summary = summarise(document)
         s.commit()
     return changed
 
 
 def html_of(row) -> str:
-    if row is None or not row.html_z:
+    """The page's stored HTML. A light row (from `snapshots`) carries no bytes:
+    they are read here, for that one page only."""
+    z = getattr(row, "html_z", None)
+    if z is None and getattr(row, "id", None) and not isinstance(row, (db.PageSnapshot, db.PageVersion)):
+        with db.SessionLocal() as s:
+            z = s.query(db.PageSnapshot.html_z).filter(db.PageSnapshot.id == row.id).scalar()
+    if not z:
         return ""
-    return zlib.decompress(row.html_z).decode("utf-8", "replace")
+    return zlib.decompress(z).decode("utf-8", "replace")
 
 
 def latest(tenant: str, url: str):
@@ -119,13 +126,50 @@ def latest(tenant: str, url: str):
         return row
 
 
+#: The columns a LISTING needs. Never the stored HTML or the parsed Document:
+#: Transak's 879 pages loaded whole are hundreds of MB, and the web service
+#: has 512 MB — loading them to list or count pages took production down
+#: (2026-11-06). A full page is read one at a time (`latest`, `html_of`).
+_LIGHT = ("id", "tenant", "url", "source_label", "http_status", "content_hash",
+          "prev_hash", "bytes_", "rendered", "risk_tier", "parser_version",
+          "fetched_at", "changed_at", "summary")
+
+
 def snapshots(tenant: str) -> list:
+    """Every stored page of one account, WITHOUT its bytes or Document."""
+    from types import SimpleNamespace
+    cols = [getattr(db.PageSnapshot, c) for c in _LIGHT]
     with db.SessionLocal() as s:
-        rows = (s.query(db.PageSnapshot)
+        rows = (s.query(*cols)
                 .filter(db.tenant_filter(db.PageSnapshot, tenant))
                 .order_by(db.PageSnapshot.url).all())
-        s.expunge_all()
-        return rows
+    return [SimpleNamespace(**dict(zip(_LIGHT, r))) for r in rows]
+
+
+def summarise(doc: dict) -> dict:
+    """The listing's view of one page: small, and enough to search by title."""
+    heads = [h.get("text", "") for h in (doc or {}).get("headings", [])]
+    return {"title": heads[0] if heads else "", "headings": heads[:6],
+            "words": len(" ".join((doc or {}).get("blocks", [])).split()),
+            "links": len((doc or {}).get("links", [])), "tables": len((doc or {}).get("tables", [])),
+            "lists": len((doc or {}).get("lists", [])), "has_jsonld": bool((doc or {}).get("jsonld")),
+            "version": (doc or {}).get("version", 0)}
+
+
+def set_summary(row_id: str, summary: dict) -> None:
+    with db.SessionLocal() as s:
+        r = s.get(db.PageSnapshot, row_id)
+        if r is not None:
+            r.summary = summary
+            s.commit()
+
+
+def document_of(row_id: str):
+    """One stored page's (Document, parser_version) — read alone."""
+    with db.SessionLocal() as s:
+        got = (s.query(db.PageSnapshot.document, db.PageSnapshot.parser_version)
+               .filter(db.PageSnapshot.id == row_id).one_or_none())
+    return (got[0] or {}, got[1] or 0) if got else ({}, 0)
 
 
 def get(tenant: str, url: str, max_age_hours: float = 0, store_it: bool = False,

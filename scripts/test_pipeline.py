@@ -1110,6 +1110,38 @@ def check_s1_figure_kinds():
        "contradicts_fact" not in rules("Free shipping on orders over $110."))
 
 
+def check_listings_never_load_whole_pages():
+    """Production went down 2026-11-06: listing Transak's 879 stored pages
+    loaded every page's HTML and Document into a 512 MB web process. A listing
+    reads small columns; a full page is read one at a time."""
+    from app.pipeline import account, checks, fetch, parse
+    rows = fetch.snapshots("baci")
+    ck("MEMORY a page listing carries no stored HTML and no Document",
+       rows and all(getattr(r, "html_z", None) is None and getattr(r, "document", None) is None
+                    for r in rows), str(len(rows)))
+    one = rows[0]
+    ck("MEMORY a page's HTML is still readable, one page at a time",
+       fetch.html_of(one) == fetch.html_of(fetch.latest("baci", one.url)) and fetch.html_of(one))
+    d, ver = fetch.document_of(one.id)
+    ck("MEMORY a page's Document is read alone", isinstance(d, dict) and ver >= 0)
+    # Grouped in the database, and still right.
+    url = f"{BASE}/pages/memory-figures"
+    html = "<html><body><main><p>We hold 812 widgets in stock.</p>" + FILLER + "</main></body></html>"
+    for i in range(3):
+        u = f"{url}-{i}"
+        fetch.store("baci", u, html, parse.parse(html)["text_hash"])
+        from app.pipeline import extractors
+        doc = parse.parse(html)
+        st_, _ = extractors.run_all(doc)
+        figs, _ = account.unaccounted(doc, st_)
+        account.record("baci", u, figs)
+    g = next((x for x in account.open_figures("baci") if x["number"] == "812"), None)
+    ck("MEMORY figures grouped by the database keep their page counts",
+       g is not None and g["page_count"] == 3 and len(g["pages"]) == 3, str(g))
+    ck("MEMORY the trust panel counts open figures without loading them",
+       checks.trust("baci")["unaccounted_open"] == account.open_count("baci") >= 1)
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -1130,6 +1162,7 @@ def main() -> int:
     check_m9_what_a_fetch_cannot_see()
     check_the_crawl_is_a_kept_source()
     check_s1_figure_kinds()
+    check_listings_never_load_whole_pages()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

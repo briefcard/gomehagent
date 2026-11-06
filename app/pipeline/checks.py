@@ -196,7 +196,7 @@ def trust(tenant: str) -> dict:
     high_partly = sorted(u for u in high if u in partly)
     ka = check_known(tenant, record=False)
     rec = audit_recall(tenant)
-    figs = account.open_figures(tenant, limit=10_000)
+    n_figs = account.open_count(tenant)
     reasons, grade = [], "green"
     if not snaps:
         grade = "red"
@@ -217,9 +217,9 @@ def trust(tenant: str) -> dict:
         elif rec["recall"] is not None and rec["recall"] < 0.9:
             grade = "amber"
             reasons.append(f"audit recall {int(rec['recall'] * 100)}% (below 90%)")
-        if figs:
+        if n_figs:
             grade = "amber"
-            reasons.append(f"{len(figs)} figure(s) on the site not yet understood")
+            reasons.append(f"{n_figs} figure(s) on the site not yet understood")
         unrendered = [r.url for r in snaps if (r.rendered or 0) == 2]
         if unrendered:
             grade = "amber"
@@ -231,7 +231,7 @@ def trust(tenant: str) -> dict:
     return {"tenant": tenant, "grade": grade, "reasons": reasons,
             "pages_stored": len(snaps), "pages_by_tier": by_tier,
             "high_risk_pages": len(high), "high_risk_partly_read": high_partly[:20],
-            "known_answers": ka, "audit": rec, "unaccounted_open": len(figs),
+            "known_answers": ka, "audit": rec, "unaccounted_open": n_figs,
             "pages_needing_render": [r.url for r in snaps if (r.rendered or 0) == 2][:20],
             "pages_remembered": unread}
 

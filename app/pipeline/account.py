@@ -198,22 +198,38 @@ def record(tenant: str, url: str, items: list[dict]) -> int:
 
 
 def open_figures(tenant: str, limit: int = 200) -> list[dict]:
-    """Open figures, one per sentence, with how many pages carry it."""
+    """Open figures, one per sentence, most-repeated first, with up to five of
+    the pages that carry it. Grouped IN THE DATABASE: a large site has tens of
+    thousands of rows, and loading them all to show sixty took memory the web
+    service does not have."""
+    from sqlalchemy import func
+    U = db.UnaccountedNumber
     with db.SessionLocal() as s:
-        rows = (s.query(db.UnaccountedNumber)
-                .filter(db.tenant_filter(db.UnaccountedNumber, tenant),
-                        db.UnaccountedNumber.status == "open")
-                .order_by(db.UnaccountedNumber.context_hash).all())
-    by: dict[tuple, dict] = {}
-    for r in rows:
-        g = by.setdefault((r.number_text, r.context_hash), {
-            "id": r.id, "number": r.number_text, "context": r.context,
-            "kind": r.kind or "count", "pages": []})
-        g["pages"].append(r.url)
-    out = sorted(by.values(), key=lambda g: (-len(g["pages"]), g["context"]))
-    for g in out:
-        g["page_count"] = len(g["pages"])
-    return out[:limit]
+        groups = (s.query(U.number_text, U.context_hash, func.count(U.id),
+                          func.min(U.id), func.min(U.context), func.min(U.kind))
+                  .filter(db.tenant_filter(U, tenant), U.status == "open")
+                  .group_by(U.number_text, U.context_hash)
+                  .order_by(func.count(U.id).desc(), func.min(U.context))
+                  .limit(limit).all())
+        out = []
+        for num, ch, n, fid, ctx, kind in groups:
+            pages = [u for (u,) in s.query(U.url).filter(
+                db.tenant_filter(U, tenant), U.status == "open",
+                U.number_text == num, U.context_hash == ch).limit(5)]
+            out.append({"id": fid, "number": num, "context": ctx or "",
+                        "kind": kind or "count", "pages": pages, "page_count": n})
+    return out
+
+
+def open_count(tenant: str) -> int:
+    """How many distinct open figures (one per sentence) — a count, no rows."""
+    from sqlalchemy import func
+    U = db.UnaccountedNumber
+    with db.SessionLocal() as s:
+        sub = (s.query(U.number_text, U.context_hash)
+               .filter(db.tenant_filter(U, tenant), U.status == "open")
+               .group_by(U.number_text, U.context_hash).subquery())
+        return s.query(func.count()).select_from(sub).scalar() or 0
 
 
 def _same(s, tenant: str, fig_id: str):

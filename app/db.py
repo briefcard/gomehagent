@@ -2658,6 +2658,10 @@ class PageSnapshot(Base):
     risk_tier = Column(String, default="")         # pipeline.policy (M4)
     parser_version = Column(Integer, default=0)
     document = Column(JSON, default=dict)
+    # A few small facts about the page (title, headings, words, links …) so a
+    # LISTING never opens the Document — 900 Documents read to list titles
+    # took 45 s. Written with the Document; filled lazily for older rows.
+    summary = Column(JSON, default=dict)
     fetched_at = Column(DateTime(timezone=True), default=utcnow)
     changed_at = Column(DateTime(timezone=True), default=utcnow)
 

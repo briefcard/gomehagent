@@ -38,6 +38,15 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_page_listing_loads_every_page_whole",
+        "file": "app/pipeline/fetch.py",
+        "find": "          \"fetched_at\", \"changed_at\", \"summary\")\n",
+        "replace": "          \"fetched_at\", \"changed_at\", \"summary\", \"html_z\", \"document\")  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "listing a large site's pages loads every page's HTML and Document, "
+               "and the 512 MB web service runs out of memory and restarts",
+    },
+    {
         "name": "a_discount_is_not_a_figure",
         "file": "app/quantities.py",
         "find": "    (\"percent\", r\"\\boff\\b|discount|save|savings|coupon|promo|first order\", \"offer.discount_percent\"),\n",
@@ -541,8 +550,8 @@ SABOTAGES = [
     {
         "name": "figures_read_every_account",
         "file": "app/pipeline/account.py",
-        "find": "                .filter(db.tenant_filter(db.UnaccountedNumber, tenant),\n",
-        "replace": "                .filter(  # SABOTAGE\n",
+        "find": "                  .filter(db.tenant_filter(U, tenant), U.status == \"open\")\n                  .group_by(U.number_text, U.context_hash)\n                  .order_by(",
+        "replace": "                  .filter(U.status == \"open\")  # SABOTAGE\n                  .group_by(U.number_text, U.context_hash)\n                  .order_by(",
         "suites": ["test_pipeline.py"],
         "why": "one client's unexplained figures are listed for another client",
     },

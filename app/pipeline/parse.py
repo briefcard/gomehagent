@@ -215,6 +215,7 @@ def document(tenant: str, url: str) -> dict:
         r = s.get(db.PageSnapshot, row.id)
         if r is not None:
             r.document, r.parser_version = doc, VERSION
+            r.summary = _fetch.summarise(doc)
             s.commit()
     return doc
 

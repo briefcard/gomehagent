@@ -29,12 +29,18 @@ def clean(tenant: str = "", apply: bool = True) -> dict:
     is empty. Returns what it found and (on apply) removed."""
     dup = surplus = kept = pages = 0
     with db.SessionLocal() as s:
-        q = s.query(db.PageVersion)
+        # Columns only — never the stored copies' bytes: the clean decides
+        # from hashes and dates, and deletes by id.
+        from types import SimpleNamespace
+        V = db.PageVersion
+        q = s.query(V.id, V.tenant, V.url, V.content_hash, V.first_seen, V.last_seen)
         if tenant:
-            q = q.filter(db.tenant_filter(db.PageVersion, tenant))
+            q = q.filter(db.tenant_filter(V, tenant))
         by_page: dict[tuple, list] = {}
-        for v in q.all():
-            by_page.setdefault((v.tenant, v.url), []).append(v)
+        for vid, vt, vu, vh, vf, vl in q.all():
+            by_page.setdefault((vt, vu), []).append(
+                SimpleNamespace(id=vid, content_hash=vh, first_seen=vf, last_seen=vl))
+        doomed: list[str] = []
         current = {(r.tenant, r.url): r.content_hash
                    for r in s.query(db.PageSnapshot.tenant, db.PageSnapshot.url,
                                     db.PageSnapshot.content_hash)}
@@ -46,17 +52,18 @@ def clean(tenant: str = "", apply: bool = True) -> dict:
             for v in vers:
                 if v.content_hash in seen:
                     dup += 1
-                    if apply:
-                        s.delete(v)
+                    doomed.append(v.id)
                     continue
                 seen.add(v.content_hash)
                 keep.append(v)
             for v in keep[KEEP_VERSIONS:]:
                 surplus += 1
-                if apply:
-                    s.delete(v)
+                doomed.append(v.id)
             kept += min(len(keep), KEEP_VERSIONS)
-        if apply:
+        if apply and doomed:
+            for i in range(0, len(doomed), 500):
+                (s.query(db.PageVersion).filter(db.PageVersion.id.in_(doomed[i:i + 500]))
+                 .delete(synchronize_session=False))
             s.commit()
     return {"pages": pages, "kept": kept, "dropped_duplicates": dup,
             "dropped_beyond_last": surplus, "keep_versions": KEEP_VERSIONS,
