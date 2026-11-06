@@ -2272,6 +2272,9 @@ class KbStatement(Base):
     # different figures and never agree.
     kind = Column(String, default="count")
     currency = Column(String, default="")
+    # "history" when the sentence is a dated event or counts what was ADDED
+    # ("secures 6 new licences") — kept, shown, never compared with a total.
+    about = Column(String, default="")
     section = Column(Text, default="")                     # heading path on the page
     locator = Column(String, default="")                   # table/list position
 

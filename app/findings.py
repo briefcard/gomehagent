@@ -38,7 +38,9 @@ def _fp(*parts) -> str:
 
 def compute(tenant: str) -> list[dict]:
     """Every finding the stored data implies right now. Pure read."""
-    rows = statements.rows(tenant)
+    # History (dated announcements, increments) is never compared with a
+    # current total: "secures 6 new licences" is not a licence count.
+    rows = [r for r in statements.rows(tenant) if (getattr(r, "about", "") or "") != "history"]
     scopes = truth.page_scopes(tenant)
     vals = truth.values(tenant)
     out: list[dict] = []

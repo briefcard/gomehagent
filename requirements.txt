@@ -43,3 +43,7 @@ python-pptx>=1.0
 # deploy downloads no browser (`SHOTS_WS` names the remote one). A judge that
 # cannot see the email is skipped and says so; it never raises.
 playwright>=1.47
+# Claim grouping (BUILD-MAP §16): fast fuzzy matching, complete-linkage
+# clustering and the Wilson interval (scipy, via scikit-learn). Worker-side.
+rapidfuzz>=3.14,<4
+scikit-learn>=1.5,<2

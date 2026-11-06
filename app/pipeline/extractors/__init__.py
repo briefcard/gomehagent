@@ -11,6 +11,7 @@ off (`DISABLED`) without stopping the others.
 """
 from __future__ import annotations
 
+from ... import claim_context
 from . import availability, enumerations, numbers, quantities, structured
 
 EXTRACTORS = [numbers, quantities, enumerations, structured, availability]
@@ -35,6 +36,10 @@ def run_all(doc: dict, terms: tuple = ()) -> tuple[list[dict], dict]:
         for st in got:
             st.setdefault("extractor", e.NAME)
             st.setdefault("extractor_version", e.VERSION)
+            # A figure in a dated announcement or an increment ("secures 6 new
+            # licences") is history, never a current total (owner, 2026-11-06).
+            if claim_context.is_history(st.get("text", "")):
+                st["about"] = "history"
         counts[e.NAME] = len(got)
         out += got
     return out, counts

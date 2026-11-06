@@ -293,7 +293,8 @@ def record(tenant: str, url: str, facts: list[dict], authority: str = "derived",
                 extractor=f.get("extractor", "numbers"),
                 extractor_version=f.get("extractor_version", 1),
                 section=f.get("section", ""), locator=f.get("locator", ""),
-                kind=f.get("kind", "count"), currency=f.get("currency", "")))
+                kind=f.get("kind", "count"), currency=f.get("currency", ""),
+                about=f.get("about", "")))
         s.commit()
     return len(seen)
 

@@ -61,6 +61,8 @@ METHODS = {
                           "why": "the same sentence with and without a negation"},
     "value_slot":        {"kind": "family", "auto": True,
                           "why": "the same sentence with one different name or value"},
+    "similar_wording":   {"kind": "variants", "auto": False,
+                          "why": "nearly the same words, differing beyond a number or a single value"},
     "similar_meaning":   {"kind": "variants", "auto": False,
                           "why": "different words, very similar meaning (embedding similarity)"},
     "similar_frame_different_number": {"kind": "inconsistency", "auto": False,
@@ -215,126 +217,265 @@ def method_is_auto(stats: dict, method: str) -> bool:
     return n >= MIN_LABELS and lb is not None and lb >= TARGET
 
 
+#: Words that qualify a figure: changing one changes the claim ("25" vs
+#: "over 25"), so a difference in them is an inconsistency, not a rewording.
+_QUALIFIERS = {"over", "more", "than", "up", "to", "at", "least", "around", "about",
+               "nearly", "almost", "approximately", "under", "below", "above", "+", "plus"}
+#: Lexical candidate cut-off (RapidFuzz token_sort_ratio, 0-100). Every pair
+#: below it is unrelated; every pair above it is CLASSIFIED, never trusted.
+CANDIDATE_AT = 85
+#: Complete-linkage distance for groups: every member within this of every
+#: other (1 - similarity), so a group cannot chain (BUILD-MAP §16.2).
+LINK_DISTANCE = 0.15
+
+
+def _figures(toks: list[str]) -> str:
+    """The measures in a sentence with the qualifier before each ("over 25",
+    "26+"), for showing what differs between two versions."""
+    out = []
+    for i, t in enumerate(toks):
+        if _is_measure(toks, i):
+            q = []
+            j = i - 1
+            while j >= 0 and toks[j] in _QUALIFIERS and len(q) < 2:
+                if toks[j] == "to" and not (j > 0 and toks[j - 1] == "up"):
+                    break                       # "to 130+" is a preposition, "up to" a qualifier
+                q.insert(0, toks[j])
+                j -= 1
+            out.append(" ".join(q + [t]))
+    return ", ".join(out)
+
+
+def _span(ta: list[str], tb: list[str]) -> tuple[int, int, int]:
+    """(start, end in a, end in b) of the ONE stretch where two token lists
+    differ, between their common beginning and common end."""
+    p = 0
+    while p < min(len(ta), len(tb)) and ta[p] == tb[p]:
+        p += 1
+    q = 0
+    while q < min(len(ta), len(tb)) - p and ta[-1 - q] == tb[-1 - q]:
+        q += 1
+    return p, len(ta) - q, len(tb) - q
+
+
+def classify(a: str, b: str) -> tuple[str, str, str]:
+    """What separates two similar claims: (method, value in a, value in b).
+
+    The DIFFERENCE decides, never the similarity score alone: RapidFuzz scores
+    97 for a rewording, for a different fact ("to BHD" / "to BMD") and for a
+    contradiction ("25" / "over 25") alike. "" = blocked: never one group."""
+    from rapidfuzz.distance import Levenshtein
+    ta, tb = tokens(a), tokens(b)
+    if ta == tb:
+        return "normalised_equal", "", ""
+    ops = [o for o in Levenshtein.opcodes(ta, tb) if o.tag != "equal"]
+    ia = [i for o in ops for i in range(o.src_start, o.src_end)]
+    ib = [i for o in ops for i in range(o.dest_start, o.dest_end)]
+    da, db_ = [ta[i] for i in ia], [tb[i] for i in ib]
+    changed = da + db_
+    meas = [_is_measure(ta, i) for i in ia] + [_is_measure(tb, i) for i in ib]
+    # A changed token with digits that is NOT a measure is an identifier, a
+    # year or a label: two different records, never one claim.
+    if any(re.search(r"\d", t) and not m for t, m in zip(changed, meas)):
+        return "", "", ""
+    if changed and all(m or t in _QUALIFIERS for t, m in zip(changed, meas)):
+        return "number_slot", _figures(ta), _figures(tb)
+    if changed and all(t in _NEG or t.endswith("n't") or t in _AUX for t in changed):
+        return "negation", ("negated" if any(t in _NEG or t.endswith("n't") for t in da) else "affirmed"), \
+            ("negated" if any(t in _NEG or t.endswith("n't") for t in db_) else "affirmed")
+    p, ea, eb = _span(ta, tb)
+    va, vb = ta[p:ea], tb[p:eb]
+    if (1 <= len(va) <= 4 and 1 <= len(vb) <= 4 and not any(meas)
+            and not set(va + vb) & (_QUALIFIERS | _NEG | _AUX)):
+        return "value_slot", " ".join(va), " ".join(vb)
+    sa, sb = signature(a), signature(b)
+    if sa["negated"] != sb["negated"]:
+        return "", "", ""
+    if sa["numbers"] != sb["numbers"]:
+        if sa["numbers"] and sb["numbers"]:
+            return "similar_frame_different_number", _figures(ta), _figures(tb)
+        return "", "", ""
+    return "similar_wording", "", ""
+
+
+def _complete_link(ids: list[str], dist) -> list[list[str]]:
+    """Clusters in which EVERY member is within LINK_DISTANCE of every other
+    (scikit-learn, complete linkage). One bridging pair can never join two
+    unrelated groups, which is how connected components over-merge."""
+    if len(ids) < 3:
+        return [ids]
+    import numpy as np
+    from sklearn.cluster import AgglomerativeClustering
+    D = np.array([[0.0 if a == b else dist(a, b) for b in ids] for a in ids])
+    labels = AgglomerativeClustering(n_clusters=None, distance_threshold=LINK_DISTANCE,
+                                     metric="precomputed", linkage="complete").fit_predict(D)
+    out: dict[int, list] = {}
+    for cid, lab in zip(ids, labels):
+        out.setdefault(int(lab), []).append(cid)
+    return list(out.values())
+
+
 def compute(tenant: str, use_embeddings: bool = True) -> list[dict]:
-    """Every group the claims imply now. Pure read; `rebuild` stores it."""
+    """Every group the claims imply now. Pure read; `rebuild` stores it.
+
+    1. Candidates: every pair of claims RapidFuzz scores at CANDIDATE_AT or
+       above (one batched `cdist`, ~1 s for Transak's 1,823 claims), same
+       product scope only.
+    2. Each pair's DIFFERENCE is classified (`classify`).
+    3. Groups per method by complete linkage; pattern families by the shared
+       template either side of the one differing value.
+    4. Meaning-only matches from stored embeddings, as proposals."""
+    import numpy as np
+    from rapidfuzz import fuzz, process
     claims = _live_claims(tenant)
-    sig = {c.id: signature(c.claim) for c in claims}
     by_id = {c.id: c for c in claims}
     stats = accuracy(tenant)
     groups: list[dict] = []
-    used_as_variant: set[str] = set()
+    if len(claims) < 2:
+        return groups
 
     def add(kind, method, key, members, values=None, score=None):
-        mem = sorted(members, key=lambda cid: _rank(by_id[cid]))
+        mem = sorted(set(members), key=lambda cid: _rank(by_id[cid]))
+        if len(mem) < 2:
+            return
         groups.append({
             "kind": kind, "method": method, "key": key,
             "fingerprint": prov.fingerprint(f"{kind}|{method}|{key}"),
             "members": mem, "values": values or {},
             "auto": method_is_auto(stats, method), "score": score})
 
-    # 1. identical once normalised (and same scope)
-    by_canon: dict[tuple, list] = {}
-    for c in claims:
-        by_canon.setdefault((canon(c.claim), c.entity_key or ""), []).append(c.id)
-    for (k, ent), ids in by_canon.items():
-        if len(ids) > 1:
-            add("variants", "normalised_equal", f"{ent}|{k}", ids)
-            used_as_variant.update(ids)
-
-    # 2. same frame, different numbers or negation -> inconsistency
-    by_frame: dict[tuple, list] = {}
-    for c in claims:
-        s = sig[c.id]
-        if s["numbers"] or s["negated"]:
-            by_frame.setdefault((s["frame"], c.entity_key or ""), []).append(c.id)
-    for (frame, ent), ids in by_frame.items():
-        nums = {sig[i]["numbers"] for i in ids}
-        negs = {sig[i]["negated"] for i in ids}
-        if len(ids) < 2:
+    texts = [canon(c.claim) for c in claims]
+    M = process.cdist(texts, texts, scorer=fuzz.token_sort_ratio,
+                      score_cutoff=CANDIDATE_AT, dtype=np.uint8, workers=1)
+    edges: dict[str, dict] = {m: {} for m in METHODS}
+    values: dict[str, dict] = {m: {} for m in METHODS}
+    templates: dict[tuple, dict] = {}
+    score = {}
+    for i, j in zip(*np.nonzero(M)):
+        if i >= j:
             continue
-        if len(nums) > 1:
-            add("inconsistency", "number_slot", f"{ent}|{frame}", ids,
-                values={i: " ".join(sig[i]["numbers"]) for i in ids})
-        elif len(negs) > 1:
-            add("inconsistency", "negation", f"{ent}|{frame}", ids,
-                values={i: ("negated" if sig[i]["negated"] else "affirmed") for i in ids})
-
-    # 3. one non-numeric slot differs -> family (each value its own fact)
-    fam: dict[tuple, set] = {}
-    for c in claims:
-        t = sig[c.id]["tokens"]
-        if len(t) < 4:
+        a, b = claims[i], claims[j]
+        if (a.entity_key or "") != (b.entity_key or ""):
             continue
-        for size in (1, 2, 3):
-            for k in range(len(t) - size + 1):
-                slot = t[k:k + size]
-                if any(_NUM.match(x) for x in slot):
-                    continue                 # a number slot is an inconsistency, or a label
-                key = (" ".join(t[:k]) + " {X} " + " ".join(t[k + size:]), c.entity_key or "")
-                fam.setdefault(key, set()).add((c.id, " ".join(slot)))
-    taken: set[str] = set()
-    for key, mem in sorted(fam.items(), key=lambda kv: (-len(kv[1]), kv[0])):
-        ids = {cid for cid, _v in mem if cid not in taken}
-        values = {cid: v for cid, v in mem if cid in ids}
-        if len(ids) >= FAMILY_MIN and len(set(values.values())) == len(ids):
-            add("family", "value_slot", f"{key[1]}|{key[0]}", ids, values=values)
-            taken |= ids
+        method, va, vb = classify(a.claim, b.claim)
+        if not method:
+            continue
+        score[(a.id, b.id)] = score[(b.id, a.id)] = float(M[i, j]) / 100
+        edges[method].setdefault(a.id, set()).add(b.id)
+        edges[method].setdefault(b.id, set()).add(a.id)
+        if va or vb:
+            values[method].setdefault(a.id, va)
+            values[method].setdefault(b.id, vb)
+        if method == "value_slot":
+            ta = tokens(a.claim)
+            p, ea, _eb = _span(ta, tokens(b.claim))
+            key = (" ".join(ta[:p]), " ".join(ta[ea:]), a.entity_key or "")
+            fam = templates.setdefault(key, {})
+            fam[a.id], fam[b.id] = va, vb
 
-    # 4. similar meaning (stored vectors) — PROPOSALS unless the method has
-    #    earned auto status. Blocked: same numbers, negation and scope.
+    fam_of = {}
+    for key, fam in templates.items():
+        for c in fam:
+            fam_of.setdefault(c, set()).add(key)
+    for x in list(edges["similar_wording"]):
+        edges["similar_wording"][x] = {y for y in edges["similar_wording"][x]
+                                       if not (fam_of.get(x, set()) & fam_of.get(y, set()))}
+    edges["similar_wording"] = {x: ys for x, ys in edges["similar_wording"].items() if ys}
+
+    def dist(x, y):
+        return 1.0 - score.get((x, y), 0.0)
+
+    def components(adj: dict) -> list[list[str]]:
+        seen, out = set(), []
+        for start in adj:
+            if start in seen:
+                continue
+            comp, stack = [], [start]
+            while stack:
+                n = stack.pop()
+                if n in seen:
+                    continue
+                seen.add(n)
+                comp.append(n)
+                stack.extend(adj.get(n, ()))
+            out.append(sorted(comp))
+        return out
+
+    in_exact: dict[str, int] = {}
+    for method, kind in (("normalised_equal", "variants"), ("number_slot", "inconsistency"),
+                         ("negation", "inconsistency"), ("similar_wording", "variants"),
+                         ("similar_frame_different_number", "inconsistency")):
+        if method == "similar_frame_different_number":
+            # A pair already in one exact inconsistency group is not reported
+            # again as a looser one.
+            for x in list(edges[method]):
+                edges[method][x] = {y for y in edges[method][x]
+                                    if not (x in in_exact and in_exact.get(y) == in_exact[x])}
+            edges[method] = {x: ys for x, ys in edges[method].items() if ys}
+        for comp in components(edges[method]):
+            clusters = [comp] if method == "normalised_equal" else _complete_link(comp, dist)
+            for cl in clusters:
+                if method == "number_slot" and len(cl) > 1:
+                    gid = len(in_exact) + 1
+                    for c in cl:
+                        in_exact.setdefault(c, gid)
+                add(kind, method, "|".join(sorted(cl)), cl,
+                    values={c: values[method].get(c, "") for c in cl},
+                    score=min((score.get((x, y), 1.0) for x in cl for y in cl if x < y), default=None))
+    # One family per claim: the largest pattern it belongs to wins, so a claim
+    # is never reviewed twice ("MetaMask USD" in a 9-member and a 3-member one).
+    placed: set[str] = set()
+    for (pre, post, ent), fam in sorted(templates.items(), key=lambda kv: -len(kv[1])):
+        fam = {c: v for c, v in fam.items() if c not in placed}
+        if len(fam) >= FAMILY_MIN and len(set(fam.values())) == len(fam):
+            add("family", "value_slot", f"{ent}|{pre} {{X}} {post}", list(fam), values=fam)
+            placed |= set(fam)
+
     if use_embeddings:
-        groups += _similarity_groups(tenant, claims, sig, by_id, stats, used_as_variant, add)
+        _meaning_groups(tenant, claims, by_id, add)
     return groups
 
 
-def _similarity_groups(tenant, claims, sig, by_id, stats, used, add) -> list:
+def _meaning_groups(tenant, claims, by_id, add) -> None:
+    """Rewordings that share few words, from the stored embeddings — always
+    blocked first (numbers, negation, scope), always proposals until measured."""
     from . import embed
     try:
         rows = {r.row_id: r for r in embed.BACKEND.rows(tenant, "claim") if r.vector}
     except Exception:  # noqa: BLE001 — no index means no proposals, never a guess
-        return []
+        return
     live = [c for c in claims if c.id in rows]
     if len(live) < 2:
-        return []
-    vecs = [rows[c.id] for c in live]
-    pairs = embed._matches(vecs, vecs, PROPOSE_AT, same=True)
-    parent = {c.id: c.id for c in live}
-    best_score: dict[tuple, float] = {}
-    incons: list[tuple] = []
-    for i, j, sc in pairs:
+        return
+    pairs = embed._matches([rows[c.id] for c in live], [rows[c.id] for c in live],
+                           PROPOSE_AT, same=True)
+    sc, adj = {}, {}
+    for i, j, s_ in pairs:
         a, b = live[i], live[j]
         if (a.entity_key or "") != (b.entity_key or ""):
             continue
-        sa, sb = sig[a.id], sig[b.id]
-        if sa["negated"] != sb["negated"]:
-            continue
-        if sa["numbers"] != sb["numbers"]:
-            if sa["numbers"] and sb["numbers"] and sa["frame"] != sb["frame"]:
-                incons.append((a.id, b.id, sc))
+        sa, sb = signature(a.claim), signature(b.claim)
+        if sa["numbers"] != sb["numbers"] or sa["negated"] != sb["negated"]:
             continue
         if canon(a.claim) == canon(b.claim):
             continue
-        best_score[(a.id, b.id)] = sc
-    # Join by similarity to the group's CANONICAL claim, never by chaining.
-    adj: dict[str, dict] = {}
-    for (a, b), sc in best_score.items():
-        adj.setdefault(a, {})[b] = sc
-        adj.setdefault(b, {})[a] = sc
-    assigned: set[str] = set()
-    for cid in sorted(adj, key=lambda x: _rank(by_id[x])):
-        if cid in assigned:
+        sc[(a.id, b.id)] = sc[(b.id, a.id)] = s_
+        adj.setdefault(a.id, set()).add(b.id)
+        adj.setdefault(b.id, set()).add(a.id)
+    seen = set()
+    for start in adj:
+        if start in seen:
             continue
-        members = [cid] + [o for o, sc in sorted(adj[cid].items(), key=lambda kv: -kv[1])
-                           if o not in assigned]
-        if len(members) > 1:
-            add("variants", "similar_meaning", cid, members,
-                score=min(adj[cid].get(o, 1.0) for o in members[1:]))
-            assigned.update(members)
-    for a, b, sc in incons:
-        add("inconsistency", "similar_frame_different_number", f"{min(a, b)}|{max(a, b)}",
-            [a, b], values={a: " ".join(sig[a]["numbers"]), b: " ".join(sig[b]["numbers"])},
-            score=sc)
-    return []
+        comp, stack = [], [start]
+        while stack:
+            n = stack.pop()
+            if n not in seen:
+                seen.add(n)
+                comp.append(n)
+                stack.extend(adj.get(n, ()))
+        for cl in _complete_link(sorted(comp), lambda x, y: 1.0 - sc.get((x, y), 0.0)):
+            add("variants", "similar_meaning", "|".join(sorted(cl)), cl,
+                score=min((sc.get((x, y), 1.0) for x in cl for y in cl if x < y), default=None))
 
 
 # --- storing, keeping every decision -------------------------------------
@@ -510,15 +651,13 @@ def _fix(tenant: str, g: dict, keep_claim: str | None, new_text: str, reason: st
 
 # --- accuracy ------------------------------------------------------------
 
-def wilson_lower(k: int, n: int, z: float = 1.96) -> float | None:
-    """95% Wilson lower bound on a proportion — what "at least 99%" is judged on."""
+def wilson_lower(k: int, n: int) -> float | None:
+    """95% Wilson lower bound on a proportion (scipy) — what "at least 99%"
+    is judged on."""
     if n == 0:
         return None
-    p = k / n
-    den = 1 + z * z / n
-    centre = p + z * z / (2 * n)
-    adj = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
-    return (centre - adj) / den
+    from scipy.stats import binomtest
+    return float(binomtest(k, n).proportion_ci(confidence_level=0.95, method="wilson").low)
 
 
 def accuracy(tenant: str) -> dict:

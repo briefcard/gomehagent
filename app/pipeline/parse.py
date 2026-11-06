@@ -154,6 +154,44 @@ class _Walker(HTMLParser):
             self.item.append(data)
 
 
+_DATE = re.compile(r"(20\d\d|19\d\d)-(\d\d)-(\d\d)")
+
+
+def published_date(html: str, jsonld: list) -> str:
+    """The date the page says it was published or last changed (YYYY-MM-DD),
+    or "". From structured data, article metadata or a <time> tag — never
+    guessed. A claim's date is what makes "secures 6 new licences" history."""
+    def walk(node):
+        if isinstance(node, dict):
+            for k in ("dateModified", "datePublished", "uploadDate"):
+                v = node.get(k)
+                if isinstance(v, str) and _DATE.search(v):
+                    yield k, _DATE.search(v).group(0)
+            for v in node.values():
+                yield from walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from walk(v)
+    found = dict(walk(jsonld or []))
+    if found.get("datePublished") or found.get("dateModified"):
+        return found.get("datePublished") or found.get("dateModified")
+    for pat in (r'<meta[^>]+(?:property|name)=["\'](?:article:published_time|og:published_time|date|pubdate)["\'][^>]+content=["\']([^"\']+)',
+                r'<time[^>]+datetime=["\']([^"\']+)'):
+        m = re.search(pat, html or "", re.I)
+        if m and _DATE.search(m.group(1)):
+            return _DATE.search(m.group(1)).group(0)
+    return ""
+
+
+def title_of(html: str, headings: list) -> str:
+    m = re.search(r"<title[^>]*>(.*?)</title>", html or "", re.I | re.S)
+    t = " ".join((m.group(1) if m else "").split())
+    if not t and headings:
+        t = headings[0].get("text", "")
+    import html as _h
+    return _h.unescape(t)[:200]
+
+
 def parse(html: str) -> dict:
     """The Document for one page. Pure: same HTML, same Document."""
     # Postgres refuses a string holding NUL, and refuses it at the write, so
@@ -193,6 +231,8 @@ def parse(html: str) -> dict:
         "tables": w.tables,
         "lists": w.lists,
         "jsonld": jsonld,
+        "published": published_date(html, jsonld),
+        "title": title_of(html, w.headings),
         "links": w.links[:500],
         "interactive": sorted(w.hints),
         "hidden_elements": w.hidden,
@@ -230,5 +270,6 @@ def parse_text(text: str) -> dict:
             "blocks": lines, "body_blocks": lines, "lines": lines, "page_data": [],
             "from_page_data": False, "headings": [], "tables": [], "lists": [],
             "jsonld": [], "links": [], "interactive": [], "hidden_elements": 0,
+            "published": "", "title": "",
             "size_blocks": len(lines),
             "numbers_total": sum(len(_NUM_TOKEN.findall(x)) for x in lines)}
