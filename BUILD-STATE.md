@@ -22,6 +22,14 @@ creative-centre section below landed at `061d4f5`. The line further down about
 older still. **This pass rewrote only the two blocks that follow; everything
 below "Where the build is now" was not touched.**
 
+### THE TRUTH PIPELINE IS LIVE (2026-11-06, `c09c71b`) — this section only was added
+
+State of record for harvest → facts → QA → truth → changes is the STATUS block
+and §13–§14 of `BUILD-MAP-truth-pipeline.md`. Transak: 879 pages stored, 13
+subjects in disagreement, 0 answers set, trust amber. Other accounts: never
+harvested into the pipeline. §14.3 lists what must change before a company in
+a new industry is read as well as Transak.
+
 ### THE SUBSTRATE IS AN MCP SERVER; CLAUDE IS THE GENERATOR (2026-10-26)
 
 **Direction change (owner, 2026-10-22):** no new generators in the app. The

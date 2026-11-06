@@ -11,14 +11,18 @@ is the generator; drafts land in the approval queue. `INITIATIVE-mcp-substrate.m
 is the plan and the record. The sections below describe the app as it was
 built up to that decision and are still accurate about what exists.
 
-## Truth pipeline (2026-11-04) — built on the branch, NOT deployed
+## Truth pipeline — LIVE (2026-11-06, `c09c71b`)
 
-**`BUILD-MAP-truth-pipeline.md`** is the map and, in §13, the as-built record:
-harvest → snapshots/documents → readers (numbers, counted tables, JSON-LD,
-PDFs, data feeds) → unaccounted figures → known answers / audits / trust →
-QA-set truth per subject × scope → findings → the `contradicts_fact` gate in
-`validator.check` → change requests that close only when the site agrees.
-`scripts/test_pipeline.py` is its suite; one commit per milestone M1–M9.
+**`BUILD-MAP-truth-pipeline.md`** is the map: STATUS at the top, §13 the
+as-built record, **§14 the global lessons — rules for EVERY company, the
+onboarding checklist, and what is still shaped by the first clients.**
+harvest → kept crawl (+ last 5 copies) → readers (figures in text, counted
+tables/lists, JSON-LD, availability, linked PDFs, data feeds) → figures not
+understood → known answers / audits / trust → QA-set truth per subject ×
+scope → findings → the fact gate in `validator.check` → change requests that
+close only when the site agrees. Suite: `scripts/test_pipeline.py`.
+**A lesson learned on one company is fixed in code for all of them, with a
+guard — never in one company's settings.**
 
 ## Current state (2026-08-30, `ea420b7`, live)
 

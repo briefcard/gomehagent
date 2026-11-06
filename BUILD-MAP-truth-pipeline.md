@@ -7,11 +7,28 @@ judged against them. Companion design: `INITIATIVE-claims-reconciliation.md`
 apply to every line here (tenant scoping, `scripts/ship.sh`, a sabotage guard
 per fix, `REGISTER.md` regenerated).
 
-Status (2026-11-04, end of day): **M0–M9 are all built** on branch
-`claude/sleepy-mendel-lpoz4j` — one commit per milestone, each with its
-offline checks in `scripts/test_pipeline.py` and its sabotage guards — and
-NONE is deployed: production is still `19a68f7` and waits on the owner's
-"deploy". §13 lists every place the build departs from this map, and why.
+## STATUS (2026-11-06) — LIVE
+
+Production `main` = **`c09c71b`** (/health is the authority). Everything in
+this map — M0–M9, the kept crawl with its history, and four fixes found by
+the first real run (Transak) — is deployed. §13 is the as-built record and
+every departure from the plan; **§14 is the lessons, written as rules for
+EVERY company, with the onboarding checklist and what is still shaped by the
+first clients.** Read §14 before onboarding anyone.
+
+| Account | Pages stored | Trust | Open questions | Answers set | State |
+|---|---|---|---|---|---|
+| transak | 879 (legal 7, coverage 389, support 146, marketing 112, blog 225) | amber | 13 subjects disagree (1 P1, 9 P2, 3 P3) | 0 | 500+ figures not understood; 53 pages need a browser; no known answers, no audits |
+| baci, eien, coverings, ironside, agency | 0 | red — never harvested into the pipeline | — | — | first run: `recrawl=1` |
+
+Live counts: MCP `get_trust`, `get_truth`, `get_statements`, `get_pages`
+per account (read 2026-11-06).
+
+**Next, in order:** (1) Transak: owner adds known answers and draws 3 audits;
+label or dismiss the figures not understood, then "Re-read stored pages";
+answer the 13 questions, the P1 first. (2) Close the §14.3 gaps that matter
+before the next company. (3) Harvest Baci (most verified conflicts, writable
+store), then the rest.
 
 ---
 
@@ -390,11 +407,18 @@ acceptance is shown on that tenant.
 
 Each item is a deliberate decision or a known gap, not an accident. Commits:
 M1 `1e8ced3` · M2 `9cce423` · M3 `6249013` · M4 `6845318` · M5 `6563882` ·
-M6 `1f1f54d` · M7 `c897356` · M8 `eb525fc` · M9 (this commit).
+M6 `1f1f54d` · M7 `c897356` · M8 `eb525fc` · M9 `7eb6788` · kept crawl
+`7f398fa` · retention `bfabbc8` · and four fixes from the first real run
+(another session, on Transak, 2026-11-05/06): `de9f1ab` (a sentence
+punctuated two ways is one figure, not a crash) · `53337d6` (menus and footers
+are not censuses; state tables and licence sections are counted; the
+`availability` reader; generated page families read one page per place) ·
+`4b45a19` (a NUL byte no longer ends a run; a page remembered without a kept
+copy is unread) · `c09c71b` (a clause or step number is not a figure).
 
 | Area | Map said | Built | Why / what is left |
 |---|---|---|---|
-| Snapshots (M1) | one row per content hash | ONE row per URL (latest), `prev_hash` + `changed_at` kept | change verification needs only the latest copy; history per version is not stored |
+| Snapshots (M1) | one row per content hash | ONE row per URL (latest) + `page_versions`: the last 5 DISTINCT earlier copies, cleaned nightly | see "The crawl is a kept source" below |
 | Stages as jobs (M4) | a job kind per stage, harvest a coordinator | harvest calls the stages in-process; `reprocess`, `checks`, `findings` are job kinds | a page failure is already contained per page; per-page jobs can come when a site outgrows one run |
 | `extract_runs` (M3) | table with tokens per run | `extract_cache` (paid reading per exact chunk) + report counts | per-run token cost is in `usage`, not per extractor |
 | `kb_facts` register (M6) | a subject table with criticality and owner | `truth.CRITICALITY` by subject area, `truth.QUESTIONS` per subject | a per-tenant override of severity needs this table |
@@ -454,3 +478,92 @@ and `seo_guard`) · MCP `get_statements`, `get_trust`, `get_truth`.
 5. Review › Questions for QA: answer each, P1 first, with a reason.
 6. Review › Changes: propose store fixes (each is an approval), fix the rest
    by hand; a task closes when the next read shows the page agrees.
+
+## 14. Global lessons — every company, not one
+
+Owner, 2026-11-06: *"I want this to work for any new company I onboard so the
+lessons learned need to be global."* Every lesson below was learned on one
+client and is enforced in code that runs the same for every client — no
+lesson lives in a client's settings, a prompt, or this document alone. Each
+names the case that taught it, where it is enforced, and the guard that fails
+if someone removes it. Adding a company adds DATA (a tenant, its sources,
+answers QA sets); it never adds a code path.
+
+### 14.1 The rules
+
+| # | Rule (applies to every company) | Taught by | Enforced in | Guard (`scripts/sabotage.py`) |
+|---|---|---|---|---|
+| 1 | **Completeness is measured, never assumed.** Every stage reports what it did not read: pages left, pages partly read, figures not understood, pages needing a browser, documents not read, template pages left out. Coverage is stated BEFORE any finding. | Transak's seven country counts were missed by a 40-page read with silent cuts | harvest report, `checks.trust`, run card (`jobs.py`) | `a_long_page_is_cut_at_sixty_blocks_again`, `an_unaccounted_figure_is_not_listed`, `an_unrendered_page_reads_as_empty` |
+| 2 | **A census is code, not a model.** Figures are swept from the whole page — body, header, footer, stat tiles, embedded page data — by deterministic readers; the model only proposes claims. | "162+ Countries" tiles and footers never reached the claim reader | `pipeline/extractors/*`, `statements.find` | `a_stat_tile_is_dropped_as_noise`, `the_fact_sweep_records_nothing`, `a_javascript_page_reads_as_empty` |
+| 3 | **Legal pages are read first, in full, and bind** — compliance, licensing and regulatory pages included — **but a clause or step number on them is not a figure.** | "19 state licences" (compliance page); "11.2 Payment Methods" read as 11.2 payment methods | `compliance.LEGAL_PATHS`, `policy.TIERS["legal"]` (no ceiling), `statements.find` | `legal_pages_are_skipped_by_the_harvest`, `a_licensing_page_is_not_legal`, `a_legal_page_is_cut_like_a_blog_post` |
+| 4 | **A table or list under a heading that names a subject is a count; a menu or footer is not.** | the licence table that never writes "19"; nav menus counted as censuses | `extractors/enumerations` | `only_the_number_reader_runs`, `a_table_is_flattened_again` |
+| 5 | **Unread is never empty.** A page needing a browser, a page that failed, a page remembered without a kept copy, a scanned PDF — each is listed as unread and lowers trust. | JS pages read as "dead"; `pages_remaining` said 0 while pages were missing | `render.needed`, harvest `_kept_pages`, `checks.trust` | `a_page_with_no_copy_counts_as_read`, `trust_ignores_pages_it_could_not_draw` |
+| 6 | **One bad page never ends a run.** A NUL byte, a duplicate sentence, a timeout: contained to that page, recorded, the run goes on. | a 5m49s Transak pass ended on one NUL byte | `parse` strips NUL; per-page error handling in harvest | `a_nul_in_a_page_ends_the_harvest`, `a_nul_in_a_pdf_ends_the_harvest` |
+| 7 | **Runs walk the site, they do not restart it**, legal → coverage → the rest, and generated families of 500+ pages are read one page per place — with the skipped count on the run card. | 5,651 `/buy/<coin>/<place>` pages = 22 h for 63 answers | `policy.thin_families`, `policy.rank`, `_tried` | `the_budget_goes_to_marketing_pages_first`, `an_unreadable_page_holds_the_front_of_the_queue` |
+| 8 | **Machines propose; a person sets the truth, with a reason.** Per subject × scope (product, market); the most specific scope wins; a source page can be followed. | Baci's shipping policy vs terms; product-level availability | `truth.py`, `findings.decide` | `a_decision_needs_no_reason`, `the_brand_truth_overrides_a_product_truth` |
+| 9 | **Everything that can send or publish is held to the truth, failing closed** — including figures the site still disputes. | the inbox and the SEO agent could state any figure | `validator.check` → `truth.check_text` (drafts, triage, `seo_guard`, MCP `check`) | `a_wrong_figure_ships`, `a_disputed_figure_ships`, `a_reply_with_a_wrong_figure_auto_sends` |
+| 10 | **A change is done when the page, read again, agrees** — not when the edit was sent. Store edits go through an approval and replace exact, unique wording only. | "fixed" pages that still said the old figure | `change.verify`, `shopify_seo.replace_text` | `a_change_task_closes_before_the_page_agrees`, `a_store_fix_writes_without_approval`, `an_ambiguous_store_edit_guesses` |
+| 11 | **The crawl is a source of its own**, kept with history (last 5 distinct copies, cleaned nightly), outside the knowledge reset, readable by MCP `get_pages`. | owner: SEO/AEO and snapshots need it | `fetch.store`, `retention.clean`, `reset.CRAWL` | `a_changed_page_loses_its_old_copy`, `a_knowledge_reset_deletes_the_crawl`, `retention_keeps_duplicate_copies` |
+| 12 | **Every table, read and tool is per company.** | the platform rule (`CLAUDE.md` "MANDATORY") | `db.tenant_filter`, `test_tenant_isolation.py` | one `*_reads_every_account` guard per new table |
+
+### 14.2 Onboarding a new company — the checklist
+
+1. **Account and sources.** Create the tenant with its domain; add every
+   place it publishes (landing sites, help centre, docs host) as content
+   sources. Subdomains count.
+2. **First read.** `/admin/harvest?tenant=<key>&apply=1&limit=100&recrawl=1`,
+   then without `recrawl` until `pages_remaining` is 0. Read the run card
+   before anything else: tiers, partly read, template pages left out, pages
+   needing a browser, documents read, figures not understood.
+3. **Teach the vocabulary.** Review › Site facts › "Figures we could not
+   read": say what each kind of figure counts, or "Not a fact"; then
+   "Re-read stored pages". This is where a new industry's words enter
+   (see 14.3 — today they are learned per company).
+4. **Test the capture.** Review › Checks & trust: write 3–5 known answers
+   (one per legal/coverage page that matters), draw 3 audits. Trust must not
+   be red before anyone relies on a figure.
+5. **Data feeds.** If the company publishes an API listing what it supports,
+   add it as a data feed and consider making it the source of truth.
+6. **Answer the questions** (Review › Questions for QA), P1 first, each with a
+   reason; legal review where needed.
+7. **Changes.** Review › Changes: approve store fixes, fix the rest by hand;
+   they close when the next read agrees.
+8. **Only then** let drafts for that company rely on figures — `get_package`
+   carries the approved figures and lists the disputed ones.
+
+### 14.3 Still shaped by the first clients — close before calling it general
+
+Found by reading the code on 2026-11-06. Each is a place where a new company
+in a different industry would be read worse than Transak or Baci.
+
+1. **The built-in vocabulary is coverage, legal and scale words with a fintech
+   lean** (`statements.SUBJECTS`: countries, states, crypto assets, blockchains,
+   fiat, payment methods, licences, users, partners). Commerce and service
+   facts have no subject: free-shipping thresholds, return windows,
+   warranties, discounts, delivery times, capacity, years in business, ratings.
+   Currency-prefixed and percentage figures are treated as non-facts by
+   `account.NON_FACTS["price"]` and so never become statements — exactly the
+   figures an e-commerce brand is held to (Baci: ads say 10% off, code says 15%).
+2. **What a reviewer teaches stays with one company.** `kb_statement_terms` is
+   per tenant, so a word taught for Transak ("corridors") has to be taught
+   again for the next fintech. Needed: a GLOBAL vocabulary the owner promotes
+   a term into, applied to every company, with the per-company list kept for
+   words that mean something different there.
+3. **The subject templates of §6 are not built.** A new company starts with the
+   same fixed subjects whatever its business model. Needed: templates
+   (e-commerce, B2B spec, venue, agency, regulated finance) chosen at
+   onboarding, seeding subjects, questions and known-answer prompts.
+4. **Coverage-tier keywords lean fintech** (`policy._COVERAGE`: kyc, tokens,
+   networks, currencies). A retailer's shipping, returns and stockist pages
+   are read at the marketing tier, with a ceiling. The tier list should come
+   from the same templates.
+5. **Questions and severity exist only for the built-in subjects**
+   (`truth.QUESTIONS`, `truth.CRITICALITY` by area). A taught subject gets a
+   generic question and P3 unless its area is legal or coverage.
+6. **Store auto-fixes are Shopify-only**; WordPress, Squarespace, SEO meta,
+   ads and email schedules are manual tasks.
+7. **Browser rendering is off** until the owner decides where Chromium runs.
+
+Items 1–5 are one build ("industry templates + a global vocabulary"): data,
+not code paths, so every later company benefits from what the previous one
+taught.
