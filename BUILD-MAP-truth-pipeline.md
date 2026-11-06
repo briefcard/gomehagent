@@ -709,3 +709,109 @@ Srivastava, "Integrating Conflicting Data: The Role of Source Dependence"
 2023); Quantulum; Microsoft Recognizers-Text · Boilerpipe; Trafilatura;
 Web2Text (ECIR 2018) · Zyte AI extraction · Visualping, PageCrawl, Distill
 noise-filtering docs.
+
+## 16. One claim, every place it appears — claim groups (design, 2026-11-06, NOT BUILT)
+
+Owner: *"Shouldn't we be aggregating claims and use the pages as references?
+If they are duplicates then they just get added to a list of places the claim
+was found … any repeating claims only show up once even if they are phrased
+differently."* Then: *"research it thoroughly first."*
+
+### 16.1 What Transak's 1,823 proposed claims actually are (measured)
+
+| Kind of sameness | Count | What it needs |
+|---|---|---|
+| Same words on many pages | already ONE row each (fingerprint + "also seen on") | nothing new |
+| Same meaning, different words | small: word-overlap grouping merges ~40–80; meaning-based matching will find more | merge as VARIANTS, every wording and page kept |
+| Same pattern, different value ("Transak supports USDC on {Sui, Apechain, …}") | 104 claims in 17 families | ONE family item listing every value — never merged as duplicates (each value is its own fact) |
+| Similar words, different number or scope ("25+ countries" vs "over 160 countries") | the coverage and licence disagreements | NEVER merged: a finding for Questions for QA |
+| By source: blog/news/press 1,245 (68%), product & marketing 303, docs 128, help centre 75, legal 48, newsletter 24; only 782 name Transak at all | — | ORDER the queue by materiality and reach (§15 axes), dated and third-party material out of the default view |
+
+Grouping alone takes the queue from ~1,823 to ~1,650–1,740 items; grouping
+plus ordering puts ~550 in front of a reviewer first.
+
+### 16.2 What the research says (and the decision each one drives)
+
+- **Fixed similarity bands with a human middle.** Deployed claim-matching
+  (Meedan's tipline work) auto-groups above cosine 0.95 and sends 0.88–0.95
+  to people; 0.88 measured ~95% precise on a labelled sample (FACTors).
+  Record linkage (Fellegi–Sunter, Splink) uses the same three-way split:
+  link / possible link (clerical review) / no link. → **Three bands:**
+  auto-merge, "same claim?" proposal for a reviewer, separate.
+- **Embeddings do not see numbers or negation.** A sentence and its negation
+  score as near-identical; cosine measures topical overlap, not truth
+  conditions (HEROS; negation-benchmark work). Numeric mismatch is its own
+  contradiction class in NLI typologies. → **Hard blocking rules before any
+  similarity:** same numbers (normalised by the figure readers), same
+  negation, same product and market scope — otherwise never the same claim.
+  Same subject with a different number is routed to findings, not merged.
+- **Connected components over-merge by chaining.** Single linkage joins two
+  groups through one close pair; transitive closure of pairwise matches
+  stitches unrelated claims together (clustering and entity-resolution
+  literature). → **Join a group only if similar to its canonical claim
+  (centroid), not to any one member.**
+- **Keep every source record; the golden record is separate.** Entity
+  resolution practice: group records, keep all of them, and build the
+  canonical one by explicit SURVIVORSHIP rules with lineage back to each
+  source. → **Canonical wording = the variant on the most authoritative page
+  (legal > product > docs > help > blog), newest first; every variant and
+  page kept** (a change must reach every wording).
+- **Templates are database rows rendered into prose.** Wrapper-induction and
+  template-detection work treats repeated page/sentence structures as
+  generated from a structured source, and extracts the slot values. →
+  **Pattern families are detected by masking the one slot that varies; the
+  slot values become structured statements** (the coverage list), reviewed
+  once as a family.
+- **Queues are ordered by value, not arrival.** Moderation queues rank by
+  predicted severity × reach (views) × review time; LinkedIn reports ~60%
+  faster time-to-action from dynamic ordering. Measure queue depth,
+  time-to-first-review of the most severe items, and the no-action rate — a
+  high rate of rejections means thresholds are wrong, not reviewers slow.
+  → **Order by materiality × reach (pages, later GSC impressions) ×
+  authority; report those three queue metrics.**
+- **Check the automatic merges by sampling.** Clerical review as stratified
+  sampling by score decile reviewed ~7% of pairs instead of ~23% for the same
+  confidence (IJPDS 2026). → **Audit a sample of auto-merges per score band
+  each month; the measured precision moves the bands.**
+
+### 16.3 The design
+
+- `kb_claim_groups` (tenant-scoped): canonical claim id, kind (`variants` |
+  `family`), slot pattern for families, member count, page count, max
+  authority, materiality, created/updated, decided_by.
+- `kb_claim_members`: group id, claim id, wording, page(s), similarity to the
+  canonical, band (auto | proposed | confirmed | split), decided_by.
+- Grouping runs after every harvest and re-read: block by numbers, negation
+  and scope → embedding similarity to each group's canonical (one matrix
+  product, `embed._matches`) → bands → families by slot masking.
+- The claims queue shows GROUPS: one card per group, canonical wording, "found
+  on N pages in M wordings", the values of a family; one decision applies to
+  every member (approve, reject, demote to background), and any member can be
+  split off. Ordered by materiality × reach × authority; blog history,
+  third-party and dated claims behind a filter, counted.
+- A change to an approved claim lists every member's page (M8 change tasks
+  already work per page).
+- Never deletes a claim; a split is recorded; every decision carries who and
+  why (§7).
+
+### 16.4 Build order (each with its guard)
+
+1. Blocking rules + variant groups with the three bands; the queue shows
+   groups. Guard: two claims with different numbers are never one group.
+2. Pattern families with slot values → structured statements. Guard: "USDC
+   on Sui" and "USDC on Apechain" are never merged as one claim.
+3. Queue order by materiality × reach × authority, with the dated /
+   third-party filter (uses §15 step 2's `about` and `as_of`, built together).
+4. Monthly sample audit of auto-merges per band; queue metrics on the trust
+   panel.
+
+Sources: Claim2Vec (arXiv 2604.09812) · FACTors (arXiv 2505.09414) · Claim
+Matching Beyond English (arXiv 2106.00853) · claim-detection survey (arXiv
+2401.11969) · RETSim (arXiv 2311.17264) · Manku et al., near-duplicates for
+web crawling (Google) · HEROS (arXiv 2306.05083) · negation-robust
+representations (arXiv 2507.12782) · contradiction prototypes (arXiv
+2310.14732) · Stanford IR book on complete-link clustering · entity
+resolution and golden-record practice (Splink, MDM guides) · IJPDS
+threshold and clerical-review sampling papers · LinkedIn engineering on
+content-review prioritisation; QUEST queue simulation (arXiv 2103.16816) ·
+Joint template detection and wrapper generation (Microsoft Research).
