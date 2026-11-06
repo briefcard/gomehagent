@@ -2455,6 +2455,17 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner",
         # promised a porcelain cup would not break. Approving IS the scope
         # decision; it has to be made out loud. `brand_wide=True` is a person
         # saying so.
+        # Ruled brand-wide on the claim record (console or workbook) is the
+        # same out-loud decision as the box.
+        brand_wide = brand_wide or bool((row.scope or {}).get("brand_wide"))
+        if approve:
+            # THE EVIDENCE GATE (claim_record, BUILD-MAP §17): who it is about,
+            # what it is true of, as of when, and what it rests on — on every
+            # account that has turned evidence on. Code, not a prompt rule.
+            from . import claim_record
+            refusal = claim_record.gate(row.tenant, row)
+            if refusal:
+                return refusal
         if approve and not brand_wide and scope_unconfirmed(row):
             return ("Say what this claim is true of before approving it. A "
                     "claim approved with no scope is claimed of everything "
@@ -2515,6 +2526,33 @@ def review_claim(claim_id: str, approve: bool, by: str = "owner",
 
     return (f"Approved — now selectable, and final.{inferred}\n{text}" if approve
             else f"Rejected.\n{text}")
+
+
+def keep_as_history(claim_id: str, by: str, reason: str = "") -> dict:
+    """True on its date, not a claim about now ("secures 6 new licences").
+
+    Kept, approved as a record of what was said and when, and NOT selectable:
+    selection takes `status == active` only, so a history row can never reach
+    a draft as a current fact."""
+    with db.SessionLocal() as s:
+        row = s.get(db.KbClaim, claim_id)
+        if row is None:
+            return {"refused": "No such claim."}
+        sc = dict(row.scope or {})
+        sc["history"] = True
+        if reason:
+            sc["_why"] = reason[:500]
+        row.scope = sc
+        row.review, row.status = prov.APPROVED, "history"
+        row.approved_by, row.approved_at = by, db.utcnow()
+        tenant = row.tenant
+        s.commit()
+    try:
+        from . import embed
+        embed.forget(tenant, "claim", claim_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return {"did": "kept as history"}
 
 
 def review_entity(entity_id: str, approve: bool, by: str = "owner") -> str:

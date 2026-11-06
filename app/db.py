@@ -1902,6 +1902,17 @@ class KbBrand(Base):
     #   {"first_contact": {"entity_key": "diagnostic", "ask": "the paid diagnostic"}}
     next_steps = Column(JSON, default=dict)
 
+    #: The words THIS account uses to scope a claim (app/claim_record.py).
+    #: The rules are the same for every company; only this vocabulary is the
+    #: client's. Shape:
+    #:   {"self_names": ["Transak"], "evidence_required": true}
+    #: Products are NOT here: they are this account's entities (kb_entities),
+    #: each with attributes["match"] = {"urls": [...], "words": [...]}, so the
+    #: entity a claim is true of is the same key the whole KB already scopes by.
+    #: Empty = the brand's display name and domain as self names, evidence not
+    #: yet required for approval on this account.
+    claim_scope = Column(JSON, default=dict)
+
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
@@ -1974,6 +1985,35 @@ class KbClaim(_Provenance, Base):
     #: means "expires, on the usual interval"; it never means "unknown".
     expiry_policy = Column(String, default="")
     status = Column(String, default="active")   # active | retired | conflicted
+
+    # THE CLAIM RECORD (app/claim_record.py, BUILD-MAP §17). Owner,
+    # 2026-11-06: "not only do these facts on their own lack the context to
+    # have any significance, but a reviewer would have no way of verifying,
+    # supporting or approving them" — and the approved claim is what a prompt
+    # receives, so a sentence without its scope is a sentence a generator
+    # will repeat out of scope.
+    #: self | other | market | "" (not decided). Only `self` is a claim the
+    #: account makes; the others are cited background at most.
+    subject = Column(String, default="")
+    subject_name = Column(String, default="")
+    #: The named rules that matched (claim_record.KINDS), "|"-joined.
+    kinds = Column(String, default="")
+    #: Restrictive qualifiers (the Wikidata model): a consumer that drops one
+    #: changes what the claim says. {as_of, read_at, product, market,
+    #: jurisdiction, audience, environment, conditions, counts}.
+    scope = Column(JSON, default=dict)
+    #: Where each qualifier came from: page | url | rule | vocabulary |
+    #: claude | reviewer. A reviewer's value is never overwritten by a re-derive.
+    scope_origin = Column(JSON, default=dict)
+    #: The claim as one sentence that stands alone (decontextualized). Claude
+    #: proposes it; a reviewer confirms it. Empty = not written yet.
+    statement = Column(Text, default="")
+    statement_origin = Column(String, default="")   # claude | reviewer
+    #: derived | proposed | confirmed | infeasible — `infeasible` is the
+    #: honest answer for a fragment that cannot be made to stand alone.
+    record_status = Column(String, default="")
+    record_by = Column(String, default="")
+    record_at = Column(DateTime(timezone=True))
 
 
 class KbAudience(_Provenance, Base):
@@ -2628,6 +2668,43 @@ class PageVersion(Base):
     risk_tier = Column(String, default="")
     first_seen = Column(DateTime(timezone=True))   # when this copy was first fetched
     last_seen = Column(DateTime(timezone=True))    # when it was replaced
+
+
+class KbEvidence(Base):
+    """What supports a claim (or a truth), entered by the team.
+
+    Owner, 2026-11-06: *"we should be able to input the evidence manually
+    either with a link or a statement from the team to understand how we
+    quantify."* A link is checked to resolve; a statement is the team's own
+    account of HOW a figure is counted ("countries where the lookup API
+    returns isAllowed, on-ramp, as of the date"). Both carry who gave them and
+    when. Nothing is deleted: a withdrawn piece stays, marked, because the
+    record of what an approval rested on is the point of keeping it.
+
+    `target` is claim | fact | group, so the same evidence model serves a
+    claim, an approved truth (`kb_fact_values`) and a decided group.
+    """
+
+    __tablename__ = "kb_evidence"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    target = Column(String, default="claim")
+    target_id = Column(String, nullable=False, index=True)
+    kind = Column(String, default="link")          # link | statement
+    url = Column(Text, default="")
+    #: What the source says, or the team's statement.
+    text = Column(Text, default="")
+    #: How the figure is quantified — what is counted, from which system.
+    method = Column(Text, default="")
+    as_of = Column(String, default="")             # YYYY-MM-DD the evidence speaks for
+    provided_by = Column(String, default="")
+    status = Column(String, default="active")      # active | withdrawn
+    link_status = Column(String, default="")       # "" | ok | broken
+    link_checked_at = Column(DateTime(timezone=True))
+    withdrawn_by = Column(String, default="")
+    withdrawn_reason = Column(Text, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
 class KbClaimGroup(Base):

@@ -24,7 +24,9 @@ first clients.** Read §14 before onboarding anyone.
 Live counts: MCP `get_trust`, `get_truth`, `get_statements`, `get_pages`
 per account (read 2026-11-06).
 
-**Next, in order:** (1) Transak: owner adds known answers and draws 3 audits;
+**§17 (claim record + per-entity workbook + evidence) is built on branch
+`claude/sleepy-mendel-lpoz4j`, not deployed.** **Next, in order:** (0) deploy
+§16–§17 on the owner's word; (1) Transak: owner adds known answers and draws 3 audits;
 label or dismiss the figures not understood, then "Re-read stored pages";
 answer the 13 questions, the P1 first. (2) Close the §14.3 gaps that matter
 before the next company. (3) Harvest Baci (most verified conflicts, writable
@@ -815,3 +817,74 @@ resolution and golden-record practice (Splink, MDM guides) · IJPDS
 threshold and clerical-review sampling papers · LinkedIn engineering on
 content-review prioritisation; QUEST queue simulation (arXiv 2103.16816) ·
 Joint template detection and wrapper generation (Microsoft Research).
+
+## 17. The claim record — who, what it is true of, as of when, what it rests on (BUILT 2026-11-06, branch only)
+
+**Why.** Owner, 2026-11-06, on the Transak harvest: *"not only do these facts on
+their own lack the context to have any significance, but a reviewer would have
+no way of verifying, supporting or approving them"* — and the approved claim
+feeds prompts. The audit of all 1,823 claims (§17.2) showed the §16 grouping and
+the first context rules covered three of nine failure families.
+
+### 17.1 Researched before built
+| Need | Source | What we took |
+|---|---|---|
+| Claim + reference, approved once, retired | Pharma claims library (Veeva PromoMats) | a claim record with linked evidence |
+| What evidence a claim needs | CAP Code 3.7; FTC reasonable basis (1984); FCA FG23/3; MiCA Art. 66 | evidence per KIND, held before approval |
+| How scope is stored | Wikidata restrictive qualifiers | `scope`: as_of, market, jurisdiction, conditions… — a consumer must keep them |
+| A fragment made to stand alone | Choi et al. 2021 (decontextualization) | `statement`, and **infeasible** as an honest outcome |
+| Who / is it worth checking | ClaimBuster; Factcheck-GPT | `subject`: self / other / market; only self is approvable |
+| Page dates | `htmldate` (fast mode, markup only) | replaces our hand-written date reader; ~0.8 accuracy → shown with its origin, correctable |
+| Countries | `pycountry` | markets from country-page URLs and text |
+
+### 17.2 The audit (Transak, 1,823 claims, 2026-11-06)
+57% name no subject (740 on blog posts — ANZ, PYUSD, MiCA, Visa); 66% matched no
+kind; 195 coverage figures with **17 different country counts** (18+ … 190+:
+different products, different things counted, different years); 13% fragments;
+268 "proves" glosses that overstate; 55 testimonials used as product fact;
+55 dated items the event rule missed; 8 comparatives missed.
+
+### 17.3 As built
+* `app/claim_record.py` — vocabulary (self names + the account's **entities**
+  with `attributes.match = {urls, words}`; products ARE entities), `derive`
+  (code: date, read-at, market, jurisdiction, sandbox, subject when the account
+  names itself / speaks as "we" / on its own product or legal page, entity by
+  URL/words — never a pick between two), `set_record` (claude < reviewer;
+  a reviewer's value is final), evidence (`link` checked to resolve, or the
+  team's **statement of how it is counted**, with as-of and who; withdrawn is
+  kept), `missing()` + `gate()` (per kind: regulatory→link + jurisdiction;
+  comparative/superlative→link AND method; coverage→link or method + entity;
+  relationship→confirmation ≤90 days; testimonial→consent; absolute→conditions;
+  history and sandbox flagged), `qualifier_line` (what prompts carry).
+* `app/claim_sheet.py` — the workbook: one sheet per entity + Brand-wide / Not
+  assigned / Not about us + Entities; upload **Check** (writes nothing) /
+  **Apply**; a claim on two rows with two entities becomes two claims; decisions
+  approve (same gate) / reject / history / replace on site / remove from site
+  (→ `change.create_wording`, one task per page — the list of places to edit).
+* `claim_context` kinds: + comparative, regulatory, coverage; event catches
+  "now live / now supports / gone live"; superlative and relationship tightened
+  (no "only once", "first time", "integration paths").
+* Gate in `kb.review_claim` — on accounts with `claim_scope.evidence_required`.
+  **Off by default** so existing accounts approve as before; turned on per
+  account in Review › Claims by entity.
+* `kb.keep_as_history` — approved, status `history`, never selectable.
+* Prompts: bundle claims carry `statement` + `true_only`; grounding renders
+  "TRUE ONLY: … — never state it without these".
+* MCP `propose_claim_record` — Claude proposes subject / entity / qualifiers /
+  statement / infeasible; never approves; never overwrites a reviewer.
+* Console: Review › **Claims by entity** (download/upload, counts, names,
+  evidence switch, recompute on the worker); every queue card carries the
+  record, what is missing, and the evidence form. Re-group now runs on the worker.
+* Jobs `claim_records`; refresh after every harvest and reprocess.
+* Suite `scripts/test_claim_record.py`; 9 sabotage guards, all caught.
+
+### 17.4 Not done / next
+1. Transak: owner sets names + entities (workbook Entities sheet), turns
+   evidence on; a Claude session runs `propose_claim_record` over the ~900
+   undecided subjects; reviewers work the workbook.
+2. Transak's lookup API (`/api/v2/lookup/countries`, `isAllowed`; fiat
+   currencies with countries + payment methods) as the source of record for
+   coverage — not yet called live (auth requirement contradicts itself in docs).
+3. `proves` still reaches the bundle; it is a model gloss that overstates
+   (§17.2) — drop it from prompts once statements exist.
+4. Measure the kind rules from reviewer edits, as §16 measures grouping.

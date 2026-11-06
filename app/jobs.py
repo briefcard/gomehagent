@@ -100,6 +100,11 @@ KINDS: dict[str, dict] = {
         "target": "app.claim_groups:job",
         "retryable": True,
     },
+    "claim_records": {
+        "what": "each claim's record derived: who it is about, entity, market, date, kinds",
+        "target": "app.claim_record:job",
+        "retryable": True,
+    },
     "reprocess": {
         "what": "every stored page re-read with the current readers — no crawl",
         "target": "app.pipeline.reprocess:job",

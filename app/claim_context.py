@@ -36,7 +36,8 @@ KINDS: dict[str, dict] = {
             r"\b(secures?|secured|announc\w+|launch(?:es|ed)?|unveil\w*|introduc\w+|"
             r"partners? with|partnered|teams? up|joins?|joined|raises?|raised|acquir\w+|"
             r"expands?|expanded|celebrat\w+|today|this week|has (?:obtained|received|been granted)|"
-            r"is now live|goes live|went live)\b", re.I),
+            r"is now live|goes live|went live|gone live|now (?:live|supports?|available|offers?|"
+            r"enables?|licensed|accepts?|lets?|allows?|integrated|listed))\b", re.I),
         "check": "A dated announcement: true on its date, not a statement of today's totals. "
                  "Keep it as history (dated), or remove it from pages that read as current.",
         "owner": "PR / press office",
@@ -47,9 +48,13 @@ KINDS: dict[str, dict] = {
         "owner": "PR / press office",
     },
     "relationship": {
-        "rule": re.compile(r"\b(partner(?:ship|ed|s)?|integrat\w+|collaborat\w+|teams? up|"
-                           r"powered by|in partnership|alliance)\b", re.I),
-        "check": "Names a partner or integration: confirm it is still active before it is "
+        # A named relationship — "partners with X", "integrated into X". Not
+        # the noun "partners" (customers of a B2B firm) and not "integration
+        # paths" (a product feature): both matched in the Transak sample.
+        "rule": re.compile(r"\b(partner(?:ship|ed|s|ing)? with|in partnership with|partnership "
+                           r"(?:between|with)|integrat(?:es|ed|ing|ion)? (?:with|into)|"
+                           r"collaborat\w+ with|teams? up with|teamed up|joins? forces|joined forces|"
+                           r"powered by|alliance with)\b", re.I),        "check": "Names a partner or integration: confirm it is still active before it is "
                  "highlighted anywhere.",
         "owner": "partnerships owner",
     },
@@ -62,11 +67,40 @@ KINDS: dict[str, dict] = {
         "owner": "product owner + compliance",
     },
     "superlative": {
-        "rule": re.compile(r"\b(most|largest|biggest|best|leading|first|only|#1|number one|"
-                           r"fastest|cheapest|lowest|world'?s)\b", re.I),
-        "check": "A superlative needs substantiation on file (a ranking, a report, a regulator "
+        # "only" and "first" only as claims of rank ("the only provider",
+        # "the first … to"), never "only once" / "for the first time".
+        "rule": re.compile(r"\b(most|largest|biggest|best|leading|fastest|cheapest|lowest|"
+                           r"highest|#1|number one|world'?s|industry'?s first|first[- ]ever|"
+                           r"the (?:only|first) (?:[\w/]+[- ]){0,3}?(?:provider|platform|company|firm|"
+                           r"on[- ]?ramp|off[- ]?ramp|exchange|wallet|solution|one|service|"
+                           r"stablecoin|app|network|partner)s?|first to)\b", re.I),        "check": "A superlative needs substantiation on file (a ranking, a report, a regulator "
                  "source), or it should be removed.",
         "owner": "compliance (substantiation file)",
+    },
+    "comparative": {
+        "rule": re.compile(r"\b(?:higher|lower|better|faster|cheaper|more|fewer|less)\b[^.]{0,40}?"
+                           r"\b(?:than|compared (?:to|with)|versus|vs\.?)\b|\b(?:unmatched|unbeatable|"
+                           r"unrivall?ed|second to none|industry[- ]leading)\b", re.I),
+        "check": "A comparison: hold documentary evidence about every competitor compared, on "
+                 "the same measure and date (CAP 3.7, FTC reasonable basis).",
+        "owner": "compliance (substantiation file)",
+    },
+    "regulatory": {
+        "rule": re.compile(r"\b(licen[cs](?:e|es|ed|ing)|registered with|registration|regulated|"
+                           r"authori[sz](?:ed|ation)|FCA|FinCEN|AUSTRAC|MiCA|CASP|MSB|money "
+                           r"transmitter|VASP|e-money|EMI\b|compliant with|SOC ?2|ISO ?27001|PCI)\b", re.I),
+        "check": "A regulatory status: link the regulator's public register entry (entity, "
+                 "number, status) — and check 'licensed' is not said where it is a registration.",
+        "owner": "compliance",
+    },
+    "coverage": {
+        "rule": re.compile(r"\b\d[\d,.]*\s*\+?\s*(?:countries|markets|territories|jurisdictions|states|"
+                           r"currencies|fiat currencies|cryptocurrencies|crypto(?:currencies| assets)|"
+                           r"assets|tokens|coins|blockchains|chains|networks|payment methods|apps|"
+                           r"applications|partners|integrations|users|customers|licen[cs]es)\b", re.I),
+        "check": "A coverage count: say WHAT is counted, for which product, as of when — and "
+                 "link the system of record it is counted from, or state how the team counts it.",
+        "owner": "product owner",
     },
     "testimonial": {
         "rule": re.compile(r"^(?:[A-Z][a-z]+\.?\s+)?(?:i|i'm|i've|my|we've been)\s", re.I),

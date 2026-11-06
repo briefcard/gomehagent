@@ -267,6 +267,14 @@ def _situated(tenant: str, utterance: str, entity_key: str,
     return detected, out, support
 
 
+def _qualifiers(c) -> str:
+    try:
+        from . import claim_record
+        return claim_record.qualifier_line(c)
+    except Exception:  # noqa: BLE001 — a record that cannot render never drops the claim
+        return ""
+
+
 def _entity_dict(r) -> dict:
     """A catalogue row as the bundle carries it — the same shape
     `kb.match_entities` returns, so a named entity and a ranked one read
@@ -468,6 +476,12 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
             {"claim": c.claim, "evidence": c.evidence or "", "claim_id": c.id,
              "situations": sorted(c.situations or []),
              "scope": c.entity_key or "brand-wide",
+             # THE CLAIM RECORD (claim_record, BUILD-MAP §17): the reviewer's
+             # standalone sentence, and every restrictive qualifier — market,
+             # conditions, as of when. A generator that drops a qualifier
+             # changes what the claim says, so they ride with the claim.
+             "statement": getattr(c, "statement", "") or "",
+             "true_only": _qualifiers(c),
              "proves": getattr(c, "proves", "") or "",
              # WHAT KIND of proof this is, and what that kind PERMITS.
              # `kb.PROOF_USAGE` has always held the rule that a testimonial is

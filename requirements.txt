@@ -47,3 +47,5 @@ playwright>=1.47
 # clustering and the Wilson interval (scipy, via scikit-learn). Worker-side.
 rapidfuzz>=3.14,<4
 scikit-learn>=1.5,<2
+htmldate>=1.9,<2
+pycountry>=24.6

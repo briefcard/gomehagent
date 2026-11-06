@@ -20,7 +20,7 @@ from . import fetch as _fetch
 
 #: Bump when the Document changes shape or content; stored documents at an
 #: older version are re-parsed from the stored bytes, never refetched.
-VERSION = 4
+VERSION = 5
 #: Body text below this many characters means the page is drawn by JavaScript
 #: and its copy is in the embedded data (same floor as harvest.JS_THIN_CHARS).
 JS_THIN_CHARS = 200
@@ -175,6 +175,20 @@ def published_date(html: str, jsonld: list) -> str:
     found = dict(walk(jsonld or []))
     if found.get("datePublished") or found.get("dateModified"):
         return found.get("datePublished") or found.get("dateModified")
+    # A maintained library before our own patterns (owner, 2026-11-06: use
+    # libraries, do not hand-build). htmldate in its FAST mode reads only the
+    # page's markup — meta tags, <time>, URL — never a date that merely
+    # appears in the prose, which is what "extensive" mode would guess from.
+    # Its own evaluation puts accuracy near 0.8 on arbitrary pages, which is
+    # not 99%: the date is shown with where it came from and stays correctable.
+    try:
+        from htmldate import find_date
+        d = find_date(html or "", extensive_search=False, original_date=True,
+                      outputformat="%Y-%m-%d")
+        if d and _DATE.search(d):
+            return d
+    except Exception:  # noqa: BLE001 — no library or an unreadable page: fall through
+        pass
     for pat in (r'<meta[^>]+(?:property|name)=["\'](?:article:published_time|og:published_time|date|pubdate)["\'][^>]+content=["\']([^"\']+)',
                 r'<time[^>]+datetime=["\']([^"\']+)'):
         m = re.search(pat, html or "", re.I)

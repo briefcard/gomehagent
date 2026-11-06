@@ -124,7 +124,8 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
-         "get_claims", "get_statements", "get_trust", "get_truth", "get_pages",
+         "get_claims", "propose_claim_record",
+         "get_statements", "get_trust", "get_truth", "get_pages",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
 #: `ledger.ARTIFACT_FORMATS` keeps the WHOLE artifact beside its ledger row;
@@ -1001,6 +1002,10 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
         "review": r, "status": c.status or "", "origin": c.origin or "",
         "strength": c.strength or "", "verified_at": _iso(c.verified_at),
         "expires_at": _iso(c.expires_at),
+        # The claim record (BUILD-MAP §17) — what a reviewer still needs.
+        "subject": c.subject or "", "kinds": c.kinds or "",
+        "scope": {k: v for k, v in (c.scope or {}).items() if not k.startswith("_")},
+        "statement": c.statement or "", "record_status": c.record_status or "",
     } for c, r, is_legal in matched[offset:offset + limit]]
 
     pages_by_host: dict[str, int] = {}
@@ -1037,6 +1042,49 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
             "last_read": _iso(max((p.read_at for p in pages if p.read_at), default=None)),
         },
     }
+
+
+@server.tool()
+def propose_claim_record(tenant: str, claim_id: str, subject: str = "",
+                         subject_name: str = "", entity_key: str = "",
+                         market: str = "", jurisdiction: str = "", conditions: str = "",
+                         audience: str = "", counts: str = "", statement: str = "",
+                         infeasible: bool = False, why: str = "") -> dict[str, Any]:
+    """PROPOSE what one claim is about and the sentence it stands as — a reviewer confirms.
+
+    The claim record (BUILD-MAP §17): a claim harvested from a site is a
+    sentence without its scope — "Coverage of 18+ countries" does not say
+    which product, which countries, or as of when. Read the claim with
+    `get_claims` (its page, section, context and the record code already
+    derived), then propose only what the page itself supports:
+
+    * `subject`: self (the account says it of itself) | other (about a named
+      partner or third party — put the name in `subject_name`) | market (an
+      industry or market fact). Only `self` can ever be approved as a claim.
+    * `entity_key`: which of the account's entities it is true of, or
+      "brand-wide". Leave empty when the page does not say.
+    * `market`, `jurisdiction`, `conditions` (for whom / which method / which
+      KYC level), `audience` (partners or end users), `counts` (what a number
+      counts): restrictive qualifiers — the claim is false without them.
+    * `statement`: ONE sentence that stands alone — subject named, every
+      qualifier in it, nothing the page does not say. If the fragment cannot be
+      made to stand alone from its page, pass `infeasible=True` instead of
+      guessing (decontextualization's honest outcome).
+
+    Nothing here approves anything, and a reviewer's value is never
+    overwritten. `why`: one line on what in the page supports the proposal.
+    """
+    from . import claim_record, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}"}
+    scope = {k: v for k, v in (("market", market), ("jurisdiction", jurisdiction),
+                               ("conditions", conditions), ("audience", audience),
+                               ("counts", counts)) if v}
+    return claim_record.set_record(
+        tenant, claim_id, by="claude (mcp)", origin="claude",
+        subject=subject or None, subject_name=subject_name or None,
+        entity_key=entity_key or None, scope=scope or None,
+        statement=statement or None, infeasible=infeasible, why=why)
 
 
 # ---------------------------------------------------------------------------

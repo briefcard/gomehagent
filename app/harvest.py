@@ -446,6 +446,10 @@ def _findings_after(tenant: str) -> dict:
         # Claim groups: inconsistent wording, variants and pattern families.
         from . import claim_groups
         out["claim_groups"] = claim_groups.rebuild(tenant)
+        # The claim record (BUILD-MAP §17): who, what entity, which market,
+        # as of when — derived from the pages just read.
+        from . import claim_record
+        out["claim_records"] = claim_record.refresh(tenant)
         return out
     except Exception as exc:  # noqa: BLE001 — bookkeeping must not fail the read
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:120]}"}

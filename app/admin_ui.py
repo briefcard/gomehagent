@@ -6294,6 +6294,8 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                # Sentences the site states inconsistently, every wording and
                # page in one place, fixed in one decision (BUILD-MAP §16).
                ("wording", "Inconsistent wording"),
+               # Each claim's record and the per-entity workbook (§17).
+               ("byentity", "Claims by entity"),
                # A changed answer and every place it must reach (M8).
                ("changes", "Changes"),
                # Renamed from "Catalogue" (step 4, spec §4): this is a
@@ -6643,6 +6645,198 @@ _GROUP_TITLE = {"inconsistency": "Stated inconsistently", "variants": "Same clai
                 "family": "One pattern, different values"}
 
 
+_BROKEN = ' <span class="chip off">link broken</span>'
+_SUBJECT_LABEL = {"self": "the account itself", "other": "a partner / third party",
+                  "market": "the market / industry", "": "not decided"}
+_ORIGIN_LABEL = {"page": "from the page", "url": "from the address", "rule": "by rule",
+                 "vocabulary": "from the entity's pages", "claude": "proposed by Claude",
+                 "reviewer": "confirmed"}
+
+
+def _record_block(tenant: str, p, evs: list, cat: list) -> str:
+    """The claim record on a queue card: who it is about, what it is true of,
+    as of when, what it rests on — and what is still missing (claim_record)."""
+    try:
+        from . import claim_record as cr
+        miss = cr.missing(tenant, p, evs)
+        required = cr.vocabulary(tenant)["evidence_required"]
+    except Exception:                                            # noqa: BLE001
+        return ""
+    sc = {k: v for k, v in (p.scope or {}).items() if not str(k).startswith("_")}
+    so = p.scope_origin or {}
+
+    def chip(field):
+        o = so.get(field, "")
+        return f' <span class="chip {"on" if o == "reviewer" else "nb"}">{_esc(_ORIGIN_LABEL.get(o, o))}</span>' if o else ""
+
+    quals = "".join(
+        f"<li>{_esc(k.replace('_', ' '))}: <b>{_esc(str(v))}</b>{chip(k)}</li>"
+        for k, v in sc.items() if v not in ("", None, False))
+    kinds = " ".join(f'<span class="chip nb">{_esc(k)}</span>' for k in cr.kinds_of_row(p))
+    ev_rows = "".join(
+        f'<li>{"🔗 " + _page_link(e["url"]) if e["kind"] == "link" else "📝"} '
+        f'{_esc(e.get("method") or e.get("text") or "")}'
+        f'{_BROKEN if e.get("link_status") == "broken" else ""}'
+        f' <span class="mut">— {_esc(e["by"])}, {_esc(e["at"])}'
+        f'{", as of " + _esc(e["as_of"]) if e.get("as_of") else ""}</span>'
+        f'<form class="f" method="post" action="/admin/claim_evidence" style="display:inline">'
+        f'<input type="hidden" name="tenant" value="{_esc(tenant)}">'
+        f'<input type="hidden" name="claim_id" value="{_esc(p.id)}">'
+        f'<input type="hidden" name="evidence_id" value="{_esc(e["id"])}">'
+        f'<input name="reason" placeholder="why withdrawn" size="14">{_reviewer_field()}'
+        f'<button class="sec" name="action" value="withdraw">Withdraw</button></form></li>'
+        for e in evs)
+    ent_opts = "".join(
+        f'<option value="{_esc(k)}"{" selected" if k == (p.entity_key or "") else ""}>{_esc(n)}</option>'
+        for k, n in cat)
+    bw = " selected" if sc.get("brand_wide") else ""
+    subj_opts = "".join(
+        f'<option value="{v}"{" selected" if v == (p.subject or "") else ""}>{_esc(lbl)}</option>'
+        for v, lbl in (("", "— not decided —"), ("self", "the account itself"),
+                       ("other", "a partner / third party"), ("market", "the market / industry")))
+    gate = (('<div class="note"><b>Before this can be approved:</b><ul>'
+             + "".join(f"<li>{_esc(m)}</li>" for m in miss) + "</ul></div>") if miss and required
+            else ('<div class="when">Record complete — this can be approved.</div>' if required
+                  else (('<div class="when">Still open (evidence is not yet required on this '
+                         'account): ' + _esc("; ".join(miss)) + '</div>') if miss else "")))
+    return f"""
+            <details class="sec" open><summary><b>Claim record</b> — about {_esc(_SUBJECT_LABEL.get(p.subject or "", p.subject))}{chip("subject")} {kinds}</summary>
+              {gate}
+              {f"<ul>{quals}</ul>" if quals else '<p class="mut">No market, date or conditions found on the page.</p>'}
+              <form class="f" method="post" action="/admin/claim_record">
+                <input type="hidden" name="tenant" value="{_esc(tenant)}">
+                <input type="hidden" name="claim_id" value="{_esc(p.id)}">
+                <label>Who it is about</label><select name="subject">{subj_opts}</select>
+                <label>True of</label>
+                <select name="entity"><option value="">— not decided —</option>
+                  <option value="brand-wide"{bw}>the whole brand</option>{ent_opts}</select>
+                <label>Market</label><input name="market" value="{_esc(sc.get("market", ""))}" placeholder="e.g. United States, EU">
+                <label>Jurisdiction (regulatory claims)</label><input name="jurisdiction" value="{_esc(sc.get("jurisdiction", ""))}">
+                <label>Conditions — for whom, which method, which KYC level</label><input name="conditions" value="{_esc(sc.get("conditions", ""))}">
+                <label>As of (YYYY-MM-DD)</label><input name="as_of" value="{_esc(sc.get("as_of", ""))}">
+                <label>Statement — one sentence that stands alone; this is what prompts receive</label>
+                <textarea name="statement" rows="2" placeholder="Who, what, for which product and market, as of when">{_esc(p.statement or "")}</textarea>
+                {_reviewer_field()}<div class="row"><button class="sec">Save record</button></div>
+              </form>
+              <label>Evidence</label>
+              {f"<ul>{ev_rows}</ul>" if ev_rows else '<p class="mut">None yet.</p>'}
+              <form class="f" method="post" action="/admin/claim_evidence">
+                <input type="hidden" name="tenant" value="{_esc(tenant)}">
+                <input type="hidden" name="claim_id" value="{_esc(p.id)}">
+                <input name="url" placeholder="link to the source of record (https://…)" size="40">
+                <textarea name="method" rows="2" placeholder="or the team's statement: what is counted, from which system, how"></textarea>
+                <input name="as_of" placeholder="as of YYYY-MM-DD" size="14">{_reviewer_field()}
+                <div class="row"><button class="sec" name="action" value="add">Add evidence</button></div>
+              </form>
+            </details>"""
+
+
+def _claims_record_card(tenant: str, key: str = "") -> str:
+    """Review › Claims by entity — the workbook round trip and the record's
+    state across the account (claim_record / claim_sheet)."""
+    import collections
+    from . import claim_record as cr
+    voc = cr.vocabulary(tenant)
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbClaim.subject, db.KbClaim.entity_key, db.KbClaim.review,
+                        db.KbClaim.record_status)
+                .filter(db.KbClaim.tenant == tenant).all())
+        n_ev = (s.query(db.KbEvidence.target_id).filter(db.KbEvidence.tenant == tenant,
+                                                         db.KbEvidence.status == "active")
+                .distinct().count())
+    prop = [r for r in rows if r.review == "proposed"]
+    subj = collections.Counter(r.subject or "" for r in prop)
+    ents = collections.Counter(r.entity_key or "" for r in prop)
+    names = {e["key"]: e["name"] for e in voc["entities"]}
+    ent_rows = "".join(f"<tr><td>{_esc(names.get(k, k) or 'not assigned')}</td><td>{n}</td></tr>"
+                       for k, n in ents.most_common())
+    match_rows = "".join(
+        f"<tr><td>{_esc(e['name'])}</td><td>{_esc(', '.join(e['urls']) or '—')}</td>"
+        f"<td>{_esc(', '.join(e['words']) or '—')}</td></tr>" for e in voc["entities"])
+    t = _esc(tenant)
+    return f"""
+<div class="card">
+  <div class="head"><h2>Claims by entity</h2>
+    <span class="chip {'on' if voc['evidence_required'] else 'nb'}">{'evidence required to approve' if voc['evidence_required'] else 'evidence not yet required'}</span></div>
+  <p class="mut">Every claim carries who it is about, what it is true of, as of when and what it
+  rests on. Approve here card by card, or in the workbook: one sheet per entity, edit the
+  yellow columns, upload it back. <b>Check</b> shows what would change; <b>Apply</b> does it —
+  approvals go through the same gate as this console, and "replace / remove on site" becomes a
+  task for every page the claim is on, under Changes.</p>
+  <div class="row">
+    <a class="btn" href="/admin/claims_workbook?tenant={t}&amp;review=proposed">Download workbook — proposed</a>
+    <a class="btn sec" href="/admin/claims_workbook?tenant={t}&amp;review=all">— every claim</a>
+  </div>
+  <form class="f" method="post" action="/admin/claims_workbook_upload" enctype="multipart/form-data">
+    <input type="hidden" name="tenant" value="{t}">
+    <label>Upload the reviewed workbook (.xlsx)</label><input type="file" name="file" accept=".xlsx" required>
+    {_reviewer_field()}
+    <div class="row"><button class="sec" name="action" value="check">Check</button>
+      <button name="action" value="apply">Apply</button></div>
+  </form>
+  <table><tr><th>Proposed claims about</th><th>count</th></tr>
+    <tr><td>the account itself</td><td>{subj.get('self', 0)}</td></tr>
+    <tr><td>not decided — Claude proposes, you confirm</td><td>{subj.get('', 0)}</td></tr>
+    <tr><td>a partner / third party / the market (cannot be approved as a claim)</td><td>{subj.get('other', 0) + subj.get('market', 0)}</td></tr>
+  </table>
+  <table><tr><th>Proposed claims by entity</th><th>count</th></tr>{ent_rows}</table>
+  <p class="mut">{n_ev} claim(s) have evidence on file.</p>
+  <form class="f" method="post" action="/admin/claim_groups_rebuild_queued" style="display:inline">
+    <input type="hidden" name="tenant" value="{t}"><input type="hidden" name="sub" value="byentity">
+    <button class="sec">Recompute records and groups (runs on the worker)</button></form>
+</div>
+<div class="card">
+  <div class="head"><h2>How this account names itself</h2></div>
+  <p class="mut">The rules are the same for every account; these words are this one's. A claim
+  naming one of them (or saying "we") is the account's own claim. Entities — and the URLs and
+  words that place a claim on one — are edited on the workbook's Entities sheet.</p>
+  <form class="f" method="post" action="/admin/claim_vocab">
+    <input type="hidden" name="tenant" value="{t}">
+    <label>Names (comma-separated)</label><input name="self_names" value="{_esc(', '.join(voc['self_names']))}">
+    <label class="tag"><input type="checkbox" name="evidence_required" value="1"{' checked' if voc['evidence_required'] else ''}> Require a complete record and evidence before any claim is approved</label>
+    {_reviewer_field()}<div class="row"><button class="sec">Save</button></div>
+  </form>
+  <table><tr><th>Entity</th><th>URL patterns</th><th>Words</th></tr>{match_rows or '<tr><td colspan=3 class="mut">No entities yet — add them on the workbook\'s Entities sheet.</td></tr>'}</table>
+</div>"""
+
+
+def workbook_report(tenant: str, res: dict, action: str) -> str:
+    """The result of checking or applying a returned workbook."""
+    t = _esc(tenant)
+    if not res.get("ok"):
+        errs = "".join(f"<li>{_esc(e)}</li>" for e in res.get("errors", []))
+        body = f"<h2>That file could not be read</h2><ul>{errs}</ul>"
+    elif action == "apply":
+        ok = "".join(f"<li>{_esc(r['where'])}: {_esc(r['did'])}</li>" for r in res["applied"])
+        bad = "".join(f"<li>{_esc(r['where'])}: {_esc(r['why'])}</li>" for r in res["refused"])
+        ents = ", ".join(res.get("entities_added") or []) or "none"
+        body = (f"<h2>Applied — {len(res['applied'])} row(s); {len(res['refused'])} refused</h2>"
+                f"<p>Entities added: {_esc(ents)}. Page tasks created under "
+                f"{len(res['changes'])} change(s) — see Review › Changes.</p>"
+                f"<h3>Done</h3><ul>{ok or '<li>nothing</li>'}</ul>"
+                f"<h3>Refused — fix and upload again</h3><ul>{bad or '<li>none</li>'}</ul>")
+    else:
+        steps = "".join(
+            f"<li>{_esc(st['where'])}: "
+            + "; ".join(filter(None, [
+                ("copy for another entity" if st["split"] else ""),
+                (", ".join(f"{k} → {v[:60]}" for k, v in st["changes"].items()) if st["changes"] else ""),
+                ("evidence added" if st["evidence"] else ""),
+                (f"decision: {st['decision']}" if st["decision"] else "")]))
+            + "</li>" for st in res["steps"])
+        bad = "".join(f"<li>{_esc(r['where'])}: {_esc(r['why'])}</li>" for r in res["refused"])
+        ents = ", ".join(e["key"] for e in res.get("entities") or []) or "none"
+        body = (f"<h2>Check — {len(res['steps'])} row(s) would change, {len(res['refused'])} refused</h2>"
+                f"<p>{res['rows_read']} rows read. Entities that would be added: {_esc(ents)}. "
+                "Approvals are re-checked against the evidence gate when applied.</p>"
+                f"<h3>Would change</h3><ul>{steps or '<li>nothing</li>'}</ul>"
+                f"<h3>Refused</h3><ul>{bad or '<li>none</li>'}</ul>"
+                "<p>Nothing has been written. Upload the same file with <b>Apply</b> to do it.</p>")
+    return (f'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<title>Claims workbook</title><body style="font:15px/1.5 system-ui;max-width:900px;margin:24px auto;padding:0 16px">'
+            f'{body}<p><a href="{_esc(url(tenant, "content", sub="byentity"))}">Back to Claims by entity</a></p></body>')
+
+
 def _wording_card(tenant: str) -> str:
     """Review › Inconsistent wording — claim groups (app/claim_groups.py)."""
     from . import claim_groups as cg
@@ -6703,9 +6897,9 @@ def _wording_card(tenant: str) -> str:
   removal) becomes a task for every page, closed only when the page, read again,
   agrees. Nothing changes on the site until a fix is approved.</p>
   {"".join(cards) or '<p class="mut">No inconsistent wording found.</p>'}
-  <form class="f" method="post" action="/admin/claim_groups_rebuild" style="display:inline">
-    <input type="hidden" name="tenant" value="{_esc(tenant)}">
-    <button class="sec">Re-group now</button></form>
+  <form class="f" method="post" action="/admin/claim_groups_rebuild_queued" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}"><input type="hidden" name="sub" value="wording">
+    <button class="sec">Re-group (runs on the worker)</button></form>
 </div>
 <div class="card">
   <div class="head"><h2>How accurate is the grouping?</h2></div>
@@ -8479,6 +8673,12 @@ def render_content(key: str, tenant: str = "", started: str = "",
         _bg = kb.background_matches(tenant, [r.id for r in shown])
     except Exception:                                            # noqa: BLE001
         _bg = {}
+    # The evidence each shown claim rests on (claim_record, BUILD-MAP §17).
+    try:
+        from . import claim_record as _crm
+        _ev = _crm.evidence_for(tenant, [r.id for r in shown])
+    except Exception:                                            # noqa: BLE001
+        _ev = {}
     # The page renders the ANALYZED copies of the shown rows — same ids, same
     # order (both queries order by id), with the duplicate context attached.
     shown = [e["row"] for e in analyzed
@@ -8777,7 +8977,7 @@ the moment matches. The claim is retired, not deleted.">Not proof &mdash;
                   placeholder="what a reader should conclude from this">{_esc(getattr(p, 'proves', '') or '')}</textarea>
                 {rule if (not verbatim and rule) else ""}
               </details>
-            </form>"""
+            </form>{_record_block(tenant, p, _ev.get(p.id, []), cat)}"""
         # The checkboxes live inside each card but belong to THIS form via the
         # HTML5 `form` attribute — forms cannot nest, and duplicating the queue
         # into a separate compact list would mean deciding against a summary
@@ -9501,6 +9701,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         "truth": (_truth_card(tenant) if sub == "truth" else ""),
         "changes": (_changes_card(tenant) if sub == "changes" else ""),
         "wording": (_wording_card(tenant) if sub == "wording" else ""),
+        "byentity": (_claims_record_card(tenant) if sub == "byentity" else ""),
         "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Store sync</h2>
@@ -9884,6 +10085,9 @@ _KB_DESCRIBED = [
      "wording on every page (Review › Inconsistent wording)."),
     ("KbClaimMember", "kb_claim_members", "Each claim in a group, and the reviewer's verdict on it",
      "Confirmed / rejected memberships are the labels the grouping's accuracy is measured on."),
+    ("KbEvidence", "kb_evidence", "What each claim's approval rests on",
+     "A link (checked to resolve) or the team's statement of how a figure is counted, "
+     "with who gave it and when. Withdrawn evidence is kept, marked."),
     ("PageVersion", "page_versions", "Earlier copies of pages that changed",
      "Kept so the crawl answers what a page said on a date and what changed since "
      "(SEO/AEO, snapshots). Outside the knowledge reset: its own 'crawl' group."),

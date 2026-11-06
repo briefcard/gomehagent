@@ -9339,6 +9339,131 @@ async def claim_groups_rebuild(request: Request, key: str = Depends(admin_key)):
                             msg=f"{out['groups']} groups ({out['new']} new, {out['dropped']} gone)")
 
 
+@app.post("/admin/claim_groups_rebuild_queued", response_class=HTMLResponse)
+async def claim_groups_rebuild_queued(request: Request, key: str = Depends(admin_key)):
+    """Group (and derive records) on the WORKER — the libraries are heavy and
+    the web service has 512 MB."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import jobs
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    a = jobs.enqueue(tenant, "claim_records", label="claim records")
+    b = jobs.enqueue(tenant, "claim_groups", label="claim groups")
+    sub = str(form.get("sub", "")) if str(form.get("sub", "")) in ("byentity", "wording") else "byentity"
+    return _back_to_content(tenant, sub=sub,
+                            msg="Queued: claim records and groups" if a.get("ok") or b.get("ok")
+                            else (a.get("why") or b.get("why") or "already queued"))
+
+
+@app.get("/admin/claims_workbook")
+def claims_workbook(request: Request, key: str = Depends(admin_key), tenant: str = "",
+                    review: str = "proposed"):
+    """The claims as an Excel workbook, one sheet per entity (claim_sheet)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import claim_sheet, tenants
+    if tenants.get(tenant) is None:
+        return PlainTextResponse(f"unknown account {tenant!r}", 404)
+    if review not in ("proposed", "approved", "rejected", "all"):
+        review = "proposed"
+    blob = claim_sheet.export(tenant, review)
+    import datetime as _dt
+    name = f"{tenant}-claims-{review}-{_dt.date.today().isoformat()}.xlsx"
+    return Response(content=blob, headers={"Content-Disposition": f'attachment; filename="{name}"'},
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.post("/admin/claims_workbook_upload", response_class=HTMLResponse)
+async def claims_workbook_upload(request: Request, key: str = Depends(admin_key)):
+    """A returned workbook: `check` reports, `apply` writes (claim_sheet)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import admin_ui, claim_sheet
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    action = str(form.get("action", "check"))
+    up = form.get("file")
+    data = await up.read() if hasattr(up, "read") else b""
+    if not data:
+        return _back_to_content(tenant, sub="byentity", err="Choose the workbook to upload.")
+    if len(data) > 20_000_000:
+        return _back_to_content(tenant, sub="byentity", err="That file is over 20 MB.")
+    by = _qa_by(form, request)
+    res = (claim_sheet.apply(tenant, data, by) if action == "apply"
+           else claim_sheet.plan(tenant, data))
+    return HTMLResponse(admin_ui.workbook_report(tenant, res, action))
+
+
+@app.post("/admin/claim_evidence", response_class=HTMLResponse)
+async def claim_evidence(request: Request, key: str = Depends(admin_key)):
+    """Add (a link, or the team's statement of how it is counted) or withdraw
+    evidence on a claim (claim_record)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import claim_record
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    cid = str(form.get("claim_id", ""))
+    by = _qa_by(form, request)
+    if str(form.get("action", "add")) == "withdraw":
+        out = claim_record.withdraw_evidence(tenant, str(form.get("evidence_id", "")), by,
+                                             str(form.get("reason", "")))
+    else:
+        url = str(form.get("url", "")).strip()
+        method = str(form.get("method", "")).strip()
+        out = {"ok": True}
+        if url:
+            out = claim_record.add_evidence(tenant, cid, by, "link", url=url,
+                                            as_of=str(form.get("as_of", "")))
+        if out.get("ok") and method:
+            out = claim_record.add_evidence(tenant, cid, by, "statement", method=method,
+                                            as_of=str(form.get("as_of", "")))
+        if not (url or method):
+            out = {"ok": False, "why": "Give a link, or the team's statement of how it is counted."}
+    if not out.get("ok"):
+        return _back_to_content(tenant, err=out.get("why", "not recorded"), anchor=f"c-{cid}")
+    return _back_to_content(tenant, msg="Evidence recorded", anchor=f"c-{cid}")
+
+
+@app.post("/admin/claim_record", response_class=HTMLResponse)
+async def claim_record_set(request: Request, key: str = Depends(admin_key)):
+    """A reviewer sets who a claim is about, its entity, qualifiers and statement."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import claim_record
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    cid = str(form.get("claim_id", ""))
+    scope = {k: str(form.get(k, "")).strip() for k in
+             ("market", "jurisdiction", "conditions", "as_of") if k in form}
+    out = claim_record.set_record(
+        tenant, cid, by=_qa_by(form, request), origin="reviewer",
+        subject=(str(form.get("subject")) if "subject" in form else None),
+        entity_key=(str(form.get("entity")) if "entity" in form else None),
+        scope=scope or None,
+        statement=(str(form.get("statement")) if "statement" in form else None))
+    if not out.get("ok"):
+        return _back_to_content(tenant, err=out.get("why", "not recorded"), anchor=f"c-{cid}")
+    return _back_to_content(tenant, msg="Record saved", anchor=f"c-{cid}")
+
+
+@app.post("/admin/claim_vocab", response_class=HTMLResponse)
+async def claim_vocab(request: Request, key: str = Depends(admin_key)):
+    """This account's names for itself, and whether approval needs evidence."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import claim_record
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    names = [n for n in str(form.get("self_names", "")).replace("\n", ",").split(",")]
+    out = claim_record.set_vocabulary(tenant, _qa_by(form, request), self_names=names,
+                                      evidence_required=bool(form.get("evidence_required")))
+    if not out.get("ok"):
+        return _back_to_content(tenant, sub="byentity", err=out.get("why", ""))
+    return _back_to_content(tenant, sub="byentity", msg="Saved")
+
+
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
 async def claims_decide(request: Request, key: str = Depends(admin_key)):
     """Decide many proposals in one submit.

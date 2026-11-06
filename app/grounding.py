@@ -188,6 +188,11 @@ def render(bundle: dict) -> str:
             "traced back to what made it true:")
         for c in claims[:6]:
             line = f'- [{c["claim_id"]}] {c["claim"]}'
+            if c.get("statement") and c["statement"] != c["claim"]:
+                line += f'\n  (in full: {c["statement"]})'
+            if c.get("true_only"):
+                line += (f'\n  (TRUE ONLY: {c["true_only"]} — never state it '
+                         'without these)')
             if c.get("evidence"):
                 line += f'\n  (evidence: {c["evidence"]})'
             scope = c.get("scope") or "brand-wide"
