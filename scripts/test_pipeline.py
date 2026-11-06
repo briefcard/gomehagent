@@ -1041,6 +1041,75 @@ def check_the_crawl_is_a_kept_source():
        mcp_server.get_pages("eien")["total"] == 0 and not fetch.versions("eien", u))
 
 
+def check_s1_figure_kinds():
+    """§15 step 1 — money, percentages and durations are figures; shapes that
+    are not figures are hidden by named rules, and counted."""
+    from app import findings, statements as st, truth, validator
+    # The crawl check before this one runs a knowledge reset on baci; put the
+    # account's brand and ban list back, as onboarding would.
+    kb_seed.seed_all()
+    offers, policy = f"{BASE}/pages/offers", f"{BASE}/policies/shipping-policy"
+    product, returns = f"{BASE}/products/aqua-plate", f"{BASE}/pages/returns"
+    api = f"{BASE}/pages/developers"
+    pages = {
+        offers: ("<html><body><main><h1>Offers</h1><p>Get 15% off your first order with code CIAO.</p>"
+                 "<p>Free shipping on orders over $95.</p>" + FILLER + "</main></body></html>"),
+        policy: ("<html><body><main><h1>Shipping policy</h1><p>Orders ship free over $110.</p>"
+                 "<p>Orders ship in 3-5 business days.</p>" + FILLER + "</main></body></html>"),
+        product: ("<html><body><main><h1>Aqua plate</h1><p>Regular price $95.00</p>"
+                  + FILLER + "</main></body></html>"),
+        returns: ("<html><body><main><h1>Returns</h1><p>30-day returns on every piece.</p>"
+                  + FILLER + "</main></body></html>"),
+        api: ("<html><body><main><h1>API</h1><p>NMLS ID: 2362652</p><p>400 Bad Request Error</p>"
+              "<p>Brand colour hsl(210, 73%, 15%)</p><p>Subheading 3</p><p>Last 30 days</p>"
+              "<p>4 min read</p>" + FILLER + "</main></body></html>"),
+    }
+    net(pages)
+    res = harvest.harvest("baci", limit=30, apply=True, recrawl=True)
+    by = {(r.url, r.subject): r for r in st.rows("baci")}
+    disc = by.get((offers, "offer.discount_percent"))
+    ck("S1 a discount is a figure: 15% off, kind percent",
+       disc is not None and disc.value == "15%" and disc.kind == "percent", str(disc and disc.value))
+    fs1, fs2 = by.get((offers, "offer.free_shipping_threshold")), by.get((policy, "offer.free_shipping_threshold"))
+    ck("S1 a free-shipping threshold is money with its currency, on both pages",
+       fs1 and fs1.number == 95 and fs1.currency == "USD" and fs1.kind == "money"
+       and fs2 and fs2.number == 110, str([(x.value, x.currency) for x in (fs1, fs2) if x]))
+    rw = by.get((returns, "policy.return_window"))
+    dt = by.get((policy, "shipping.delivery_time"))
+    ck("S1 durations are figures: 30-day returns, 3–5 business days",
+       rw and rw.number == 30 and rw.kind == "duration" and dt and dt.qualifier == "up to" and dt.number == 5,
+       str([(x.value, x.number) for x in (rw, dt) if x]))
+    ck("S1 a bare product price is not a claim (the catalogue owns it)",
+       not any(r.url == product and r.kind == "money" for r in st.rows("baci")))
+    hidden = res.get("not_figures_by_rule") or {}
+    ck("S1 identifiers, HTTP codes, style values, labels and interface text are hidden — and counted by rule",
+       {"identifier", "code", "technical", "label", "ui"} <= set(hidden), str(hidden))
+    from app.pipeline import account
+    listed = [g for g in account.open_figures("baci") if any(u == api for u in g["pages"])]
+    ck("S1 none of them is listed as a figure to explain", not listed,
+       str([(g["number"], g["context"][:40]) for g in listed]))
+    q = next((f for f in findings.listing("baci") if f["subject"] == "offer.free_shipping_threshold"), None)
+    ck("S1 a threshold stated two ways is a P1 question in plain words",
+       q is not None and q["severity"] == "P1" and q["question"].startswith("Above what order value"),
+       str(q and (q["severity"], q["question"])))
+    # The gate: the Baci case — ads said 10% while the code gave 15%.
+    truth.set_value("baci", "offer.discount_percent", "15%", 15.0, "", reason="the code gives 15%",
+                    by="qa-anna")
+
+    def rules(body):
+        return [f["rule"] for f in validator.check("baci", body, require_citation=False)["failures"]]
+    ck("S1 a draft saying 10% off against an approved 15% is blocked",
+       "contradicts_fact" in rules("Subscribe today for 10% off your first order."))
+    ck("S1 the approved 15% passes",
+       "contradicts_fact" not in rules("Subscribe today for 15% off your first order."))
+    truth.set_value("baci", "offer.free_shipping_threshold", "$110", 110.0, "at least",
+                    reason="the shipping policy is binding", by="qa-anna")
+    ck("S1 money in another currency never agrees: €110 against $110 is blocked",
+       "contradicts_fact" in rules("Free shipping on orders over €110."))
+    ck("S1 the same figure in the same currency passes",
+       "contradicts_fact" not in rules("Free shipping on orders over $110."))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -1060,6 +1129,7 @@ def main() -> int:
     check_m8_changes_reach_every_place()
     check_m9_what_a_fetch_cannot_see()
     check_the_crawl_is_a_kept_source()
+    check_s1_figure_kinds()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

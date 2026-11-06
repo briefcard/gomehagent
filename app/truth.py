@@ -24,7 +24,14 @@ from . import db, statements
 #: How bad a disagreement on a subject is, by its area. Legal is P1; a
 #: coverage or availability figure is P2 (a customer acts on it); scale
 #: figures are P3. Any disagreement with a BINDING (legal-page) value is P1.
-CRITICALITY = {"legal": "P1", "coverage": "P2", "scale": "P3"}
+CRITICALITY = {"legal": "P1", "coverage": "P2", "scale": "P3",
+               # The terms a customer acts on: an offer, a price or fee, a
+               # policy (returns, warranty) is a commitment — consumer-
+               # protection exposure when stated two ways.
+               "offer": "P1", "pricing": "P1", "policy": "P1",
+               # Service levels a customer plans around.
+               "shipping": "P2", "service": "P2",
+               "reputation": "P3"}
 #: The plain question a reviewer is asked about each subject.
 QUESTIONS = {
     "coverage.countries": "How many countries do we say we serve?",
@@ -40,6 +47,25 @@ QUESTIONS = {
     "scale.users": "How many users or customers do we say we have?",
     "scale.apps": "How many apps or wallets do we say we are in?",
     "scale.partners": "How many partners or clients do we say we have?",
+    "offer.free_shipping_threshold": "Above what order value do we say shipping is free?",
+    "offer.discount_percent": "What percentage discount do we say we offer?",
+    "offer.discount_amount": "What discount amount do we say we offer?",
+    "offer.cashback_percent": "What cashback do we say we give?",
+    "offer.credit_amount": "What credit or gift amount do we say we give?",
+    "offer.trial_length": "How long do we say the free trial is?",
+    "pricing.minimum_order": "What minimum order do we say applies?",
+    "pricing.shipping_fee": "What do we say shipping costs?",
+    "pricing.fee": "What fee do we say we charge?",
+    "pricing.fee_percent": "What percentage fee do we say we charge?",
+    "pricing.rate_percent": "What rate do we say applies?",
+    "policy.return_window": "How long do we say customers have to return an order?",
+    "policy.warranty": "How long do we say the warranty or guarantee lasts?",
+    "shipping.delivery_time": "How long do we say delivery takes?",
+    "service.settlement_time": "How fast do we say funds settle or arrive?",
+    "service.uptime_percent": "What uptime do we say we guarantee?",
+    "scale.years_in_business": "How long do we say we have been in business?",
+    "reputation.rating": "What rating do we say customers give us?",
+    "reputation.satisfaction_percent": "What satisfaction figure do we state?",
 }
 
 
@@ -155,11 +181,20 @@ def compare(stmt, truth: dict | None) -> dict | None:
     otherwise what the disagreement is."""
     if not truth or truth.get("unknown"):
         return None
-    if agrees(stmt.number, stmt.qualifier, truth["number"], truth["qualifier"]):
+    if agrees(stmt.number, stmt.qualifier, truth["number"], truth["qualifier"]) \
+            and same_currency(getattr(stmt, "currency", "") or "", truth.get("value", "")):
         return None
     return {"subject": stmt.subject, "stated": stmt.value, "true": truth["value"],
             "url": stmt.url, "text": stmt.text, "binding": stmt.authority == "binding",
             "fact_value_id": truth["id"]}
+
+
+def same_currency(currency: str, true_value: str) -> bool:
+    """$95 never agrees with €95. Either side without a currency is not a
+    currency disagreement (a count has none)."""
+    from . import quantities
+    tc = quantities.currency_of(true_value)
+    return not (currency and tc and currency != tc)
 
 
 # --- page scopes ----------------------------------------------------------
@@ -273,8 +308,12 @@ def check_text(tenant: str, text: str, entity_key: str = "") -> list[dict]:
     to contradict (the citation rule is what grounds it)."""
     found = []
     seen = set()
+    from . import quantities
     for ln in statements._lines(text or "") or [text or ""]:
         found += statements.find(ln, statements.terms(tenant))
+        # Money, percentages and durations — the same rule set the site
+        # reader used, so "10% off" in a draft meets the 15% QA approved.
+        found += quantities.find(ln)
     if not found:
         return []
     vals = values(tenant)
@@ -290,7 +329,8 @@ def check_text(tenant: str, text: str, entity_key: str = "") -> list[dict]:
         seen.add(key)
         t = resolve(tenant, f["subject"], {"entity": entity_key}, _cache=vals)
         if t and not t.get("unknown"):
-            if not agrees(f["number"], f["qualifier"], t["number"], t["qualifier"]):
+            if not agrees(f["number"], f["qualifier"], t["number"], t["qualifier"]) \
+                    or not same_currency(f.get("currency", ""), t["value"]):
                 out.append({"rule": "contradicts_fact",
                             "detail": f"the draft says {f['match']!r}; the approved answer "
                                       f"({t['scope']}) is {t['value']}",

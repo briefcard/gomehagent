@@ -38,6 +38,46 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "a_discount_is_not_a_figure",
+        "file": "app/quantities.py",
+        "find": "    (\"percent\", r\"\\boff\\b|discount|save|savings|coupon|promo|first order\", \"offer.discount_percent\"),\n",
+        "replace": "    # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "ads saying 10% off while the code gives 15% go unnoticed, on every brand",
+    },
+    {
+        "name": "the_gate_ignores_money_and_percentages",
+        "file": "app/truth.py",
+        "find": "        found += quantities.find(ln)\n",
+        "replace": "        pass  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "a draft states a discount or a shipping threshold QA ruled wrong, and ships",
+    },
+    {
+        "name": "dollars_agree_with_euros",
+        "file": "app/truth.py",
+        "find": "    return not (currency and tc and currency != tc)\n",
+        "replace": "    return True  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "'free shipping over €110' passes against an approved $110",
+    },
+    {
+        "name": "an_identifier_is_a_figure_to_explain",
+        "file": "app/pipeline/account.py",
+        "find": "    \"identifier\": lambda tok, ln, at: (_ID_BEFORE.search(ln[max(0, at - 24):at]) is not None\n",
+        "replace": "    \"identifier\": lambda tok, ln, at: False and (_ID_BEFORE.search(ln[max(0, at - 24):at]) is not None  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "every licence, order and account number lands in the reviewer's queue as a figure",
+    },
+    {
+        "name": "style_values_are_figures",
+        "file": "app/pipeline/account.py",
+        "find": "                                      or any(m.start() <= at < m.end() for m in _CSS_FN.finditer(ln))),\n",
+        "replace": "                                      and False),  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "colour values from page styling are listed as figures to explain",
+    },
+    {
         "name": "retention_keeps_duplicate_copies",
         "file": "app/pipeline/retention.py",
         "find": "            if v.content_hash in seen:\n",
@@ -282,7 +322,7 @@ SABOTAGES = [
     {
         "name": "only_the_number_reader_runs",
         "file": "app/pipeline/extractors/__init__.py",
-        "find": "EXTRACTORS = [numbers, enumerations, structured, availability]\n",
+        "find": "EXTRACTORS = [numbers, quantities, enumerations, structured, availability]\n",
         "replace": "EXTRACTORS = [numbers]  # SABOTAGE\n",
         "suites": ["test_pipeline.py"],
         "why": "a licence table that never writes its count is not recorded, so "

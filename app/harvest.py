@@ -597,6 +597,7 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
     fact_subjects: dict[str, int] = {}    # statements the sweep found, by subject
     by_reader: dict[str, int] = {}        # statements per extractor
     unaccounted_total = 0                 # figures no reader explained
+    not_figures: dict[str, int] = {}      # numbers hidden as not-a-figure, by rule
     tiers_seen: dict[str, int] = {}       # pages read, by risk tier
     pages_rendered: list[str] = []        # drawn in a browser first
     pages_needing_render: list[str] = []  # needed a browser the deploy lacks
@@ -712,6 +713,8 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         facts, _by_reader = pipeline_extractors.run_all(doc, terms)
         figures, fig_counts = pipeline_account.unaccounted(doc, facts)
         unaccounted_total += len(figures)
+        for rule, n in (fig_counts.get("non_fact_by_rule") or {}).items():
+            not_figures[rule] = not_figures.get(rule, 0) + n
         for f in facts:
             fact_subjects[f["subject"]] = fact_subjects.get(f["subject"], 0) + 1
         for k, v in _by_reader.items():
@@ -995,6 +998,10 @@ def harvest(tenant: str, limit: int = 25, apply: bool = False,
         # and that are not a year, price, date or phone number — listed for a
         # reviewer (Review › Site facts), never dropped.
         "unaccounted_figures": unaccounted_total,
+        # Numbers hidden because their SHAPE says they are not figures — an
+        # identifier, an HTTP code, a style value, a step or label, interface
+        # text — counted per rule so what was hidden is on record.
+        "not_figures_by_rule": not_figures,
         # Pages whose body was nearly empty and whose copy was read from the
         # page's embedded data instead.
         "pages_from_page_data": len(pages_from_data),

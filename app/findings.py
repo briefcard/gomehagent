@@ -67,7 +67,7 @@ def compute(tenant: str) -> list[dict]:
                     "detail": {"true": t["value"], "examples": [x.text[:200] for x in rs[:3]],
                                "binding": binding, "source_url": t.get("source_url", "")}})
             continue
-        distinct = {(r.number, r.qualifier) for r in group}
+        distinct = {(r.number, r.qualifier, getattr(r, "currency", "") or "") for r in group}
         if len(distinct) > 1:
             vals_by: dict[str, dict] = {}
             for r in group:

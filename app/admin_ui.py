@@ -6308,6 +6308,16 @@ FACT_LABELS = {
     "coverage.markets": "Regions / markets", "coverage.languages": "Languages",
     "coverage.currencies": "Currencies", "legal.licences": "Licences & registrations",
     "scale.users": "Users", "scale.apps": "Apps", "scale.partners": "Partners",
+    "offer.free_shipping_threshold": "Free-shipping threshold",
+    "offer.discount_percent": "Discount (%)", "offer.discount_amount": "Discount (amount)",
+    "offer.cashback_percent": "Cashback", "offer.credit_amount": "Credit / gift amount",
+    "offer.trial_length": "Free trial length", "pricing.minimum_order": "Minimum order",
+    "pricing.shipping_fee": "Shipping cost", "pricing.fee": "Fee",
+    "pricing.fee_percent": "Fee (%)", "pricing.rate_percent": "Rate",
+    "policy.return_window": "Return window", "policy.warranty": "Warranty / guarantee",
+    "shipping.delivery_time": "Delivery time", "service.settlement_time": "Settlement time",
+    "service.uptime_percent": "Uptime", "scale.years_in_business": "Years in business",
+    "reputation.rating": "Rating", "reputation.satisfaction_percent": "Satisfaction",
 }
 
 
@@ -6328,7 +6338,7 @@ def _figures_block(figs: list, tenant: str) -> str:
     for g in figs:
         pages = ", ".join(_esc(u.split("://", 1)[-1][:50]) for u in g["pages"][:3])
         items.append(f"""
-<li><b>{_esc(g["number"])}</b> <span class="mut">on {g["page_count"]} page{'' if g["page_count"] == 1 else 's'} · {pages}</span>
+<li><b>{_esc(g["number"])}</b> <span class="chip nb">{_esc(g.get("kind") or "count")}</span> <span class="mut">on {g["page_count"]} page{'' if g["page_count"] == 1 else 's'} · {pages}</span>
   <div class="when">“{_esc(g["context"][:220])}”</div>
   <form class="f" method="post" action="/admin/figure_decide" style="display:inline">
     <input type="hidden" name="tenant" value="{_esc(tenant)}">

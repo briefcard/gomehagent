@@ -33,7 +33,10 @@ TIERS: dict[str, dict] = {
 _COVERAGE = re.compile(
     r"coverage|countr|support(?:ed)?-|supported|availab|where-we|locations?|"
     r"regions?|markets?|fees?|pricing|limits?|payment-methods?|kyc|"
-    r"currenc|assets|tokens|networks|licen", re.I)
+    r"currenc|assets|tokens|networks|licen|"
+    # The pages that hold a retailer's or service's commitments.
+    r"shipping|delivery|returns?|refunds?|exchanges?|warrant|guarantee|"
+    r"terms-of-sale|promotions?|offers?|discounts?|rates", re.I)
 _SUPPORT_HOST = re.compile(r"^(help|support|docs|developers?|kb|faq)\.", re.I)
 _SUPPORT_PATH = re.compile(r"/(help|support|docs|faq|knowledge|hc)(/|$)", re.I)
 _BLOG = re.compile(r"/(blog|news|press|articles?|stories|insights)(/|$)", re.I)

@@ -687,8 +687,12 @@ def check_statements_are_swept(ck, httpx):
                                    else _Resp(pages[url]) if url in pages
                                    else _Resp("", 404))
     hv.forget_pages("baci")
+    # Earlier checks' pages state an offer ("10% off", "free shipping over
+    # $95") and those ARE statements now; what a rehearsal must not do is add.
+    before = {(r.url, r.subject, r.value) for r in st.rows("baci")}
     harvest.harvest("baci", limit=10, apply=False)
-    ck("a rehearsal records no statements", not st.rows("baci"))
+    after = {(r.url, r.subject, r.value) for r in st.rows("baci")}
+    ck("a rehearsal records no statements", after == before, str(after - before))
     res = harvest.harvest("baci", limit=10, apply=True)
     got = {(r.subject, r.value, r.field) for r in st.rows("baci")}
     countries = sorted(r.value for r in st.rows("baci", "coverage.countries"))

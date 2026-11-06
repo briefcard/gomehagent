@@ -669,7 +669,7 @@ def get_results(tenant: str, dimension: str = "", days: int = 90) -> dict[str, A
 STATEMENT_CSV_COLUMNS = ("subject", "value", "number", "qualifier", "unit",
                          "authority", "field", "url", "text", "entity_key",
                          "market", "observed_at", "subject_conflict",
-                         "extractor", "section", "locator")
+                         "extractor", "section", "locator", "kind", "currency")
 
 
 @server.tool()
@@ -732,7 +732,8 @@ def get_statements(tenant: str, subject: str = "", conflicts_only: bool = False,
                     r.field, r.url, r.text, r.entity_key, r.market,
                     r.observed_at.isoformat() if r.observed_at else "",
                     "yes" if conflict[r.subject] else "",
-                    r.extractor or "", r.section or "", r.locator or ""])
+                    r.extractor or "", r.section or "", r.locator or "",
+                    r.kind or "count", r.currency or ""])
         n += 1
     out["rows"] = n
     out["csv"] = buf.getvalue()

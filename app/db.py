@@ -2267,6 +2267,11 @@ class KbStatement(Base):
     # extractor, never mixed with another reader's.
     extractor = Column(String, default="numbers")
     extractor_version = Column(Integer, default=1)
+    # WHAT KIND of figure (build map §15.3): count · money · percent ·
+    # duration · rating. Money keeps its currency: "$95" and "€95" are
+    # different figures and never agree.
+    kind = Column(String, default="count")
+    currency = Column(String, default="")
     section = Column(Text, default="")                     # heading path on the page
     locator = Column(String, default="")                   # table/list position
 
@@ -2310,6 +2315,7 @@ class UnaccountedNumber(Base):
     tenant = Column(String, nullable=False, index=True)
     url = Column(Text, nullable=False)
     number_text = Column(String, nullable=False)    # "40" as written
+    kind = Column(String, default="")               # count | money | percent | duration | …
     context = Column(Text, default="")              # the line it sits in
     context_hash = Column(String, nullable=False)
     status = Column(String, default="open")        # open | ignored | labelled

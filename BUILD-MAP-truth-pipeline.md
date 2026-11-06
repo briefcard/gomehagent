@@ -544,6 +544,8 @@ in a different industry would be read worse than Transak or Baci.
    Currency-prefixed and percentage figures are treated as non-facts by
    `account.NON_FACTS["price"]` and so never become statements — exactly the
    figures an e-commerce brand is held to (Baci: ads say 10% off, code says 15%).
+   **CLOSED for money, percent and duration by §15.6 step 1**; the vocabulary
+   itself is still code, not the global table (step 3).
 2. **What a reviewer teaches stays with one company.** `kb_statement_terms` is
    per tenant, so a word taught for Transak ("corridors") has to be taught
    again for the next fintech. Needed: a GLOBAL vocabulary the owner promotes
@@ -677,8 +679,20 @@ as proposals a reviewer accepts, exactly like harvested claims.
 
 ### 15.6 Build order (each with its guard, per §9)
 
-1. `kind` + the non-figure rules (identifiers, codes, steps, CSS, ratings) and
+1. **BUILT (2026-11-06)** — `kind` + the non-figure rules (identifiers, codes, steps, CSS, ratings) and
    money / percent as REAL figures — fixes the Baci 10%-vs-15% blind spot.
+   `app/quantities.py` (one rule set for the site reader AND the draft gate):
+   money with currency, percent, duration, rating, each given a subject only
+   by the words around it (`RULES` — offer / pricing / policy / shipping /
+   service / reputation subjects; a bare price stays the catalogue's). New
+   `quantities` reader; `kind` + `currency` on every statement; $ never agrees
+   with €. `account.NON_FACTS` gained named rules — identifier, code,
+   technical, label, step, ui — counted per rule on the run card
+   (`not_figures_by_rule`). Offer, pricing and policy subjects are P1.
+   Guards: `a_discount_is_not_a_figure`, `the_gate_ignores_money_and_percentages`,
+   `dollars_agree_with_euros`, `an_identifier_is_a_figure_to_explain`,
+   `style_values_are_figures`. After deploy: "Re-read stored pages" applies it
+   to every stored page with no crawl.
 2. `about` + `as_of` + `claim_fp`/`reach`; findings and summary read the
    material band grouped by claim.
 3. `kb_vocabulary` + `kb_figure_rules`, global with per-tenant overrides,

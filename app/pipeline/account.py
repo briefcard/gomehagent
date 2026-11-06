@@ -23,15 +23,80 @@ from .. import provenance as prov
 _TOKEN = re.compile(r"(?<![\w.\-/#:])\d[\d,]*(?:\.\d+)?\+?(?![\w\-/:])")
 _MONTHS = r"jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec"
 #: Explicit non-facts. Listed, so what is excluded is a decision on record.
+_ID_BEFORE = re.compile(
+    r"(?:nmls|\bid\b|\bno\.?|number|#|\bref\b|registration|reg\.?|licen[cs]e|sku|ein|"
+    r"order|account|invoice|ticket|case|crd|fca|frn|abn|vat|duns|routing|iban|code)"
+    r"[\s:#.-]*(?:id|no\.?|number)?[\s:#.-]*$", re.I)
+_HTTP_AFTER = re.compile(r"\s*(?:[-–:]\s*)?(?:bad request|unauthori[sz]ed|forbidden|not found|"
+                         r"internal server|too many|gateway|service unavailable|conflict|"
+                         r"error|status)", re.I)
+_CSS = re.compile(r"(?:hsla?|rgba?)\(|\b\d+(?:px|rem|em|vh|vw|pt)\b|#[0-9a-f]{3,8}\b", re.I)
+#: A whole style function, so every number inside hsl(210, 73%, 15%) is caught.
+_CSS_FN = re.compile(r"(?:hsla?|rgba?|calc|translate\w*|scale|rotate)\([^)]*\)", re.I)
+_LABEL_BEFORE = re.compile(r"\b(?:subheading|heading|step|tier|level|phase|chapter|part|option|"
+                           r"plan|version|v|page|slide|section|figure|fig\.|table|item|q[1-4]|"
+                           r"article|clause|paragraph|lesson|module|week|day|round)\s*[#:.]?\s*$", re.I)
+_UI = re.compile(r"\b(?:last|past|previous|next)\s+\d+\s+(?:days?|hours?|weeks?|months?|years?)\b|"
+                 r"\b\d+\s+of\s+\d+\b|\bpage\s+\d+\b|\b\d+\s*(?:min|minute)s?\s+read\b", re.I)
+
+
+def _step(tok, ln, at):
+    """The number opens the line as a step or list marker: "3 Provide your
+    details", "4. Choose the payout method", "in 5 Effortless Steps"."""
+    head = ln[:at].strip(" \t•·-–—#(")
+    rest = ln[at + len(tok):]
+    if not head and re.match(r"\s*[.)]?\s+[A-Z]", rest):
+        return True
+    return re.match(r"\s+(?:[A-Za-z]+\s+){0,2}steps?\b", rest, re.I) is not None
+
+
+#: Explicit non-figures, BY NAME. Listed, so what is excluded is a decision on
+#: record, and counted per rule on every run (`non_fact_by_rule`). Each rule is
+#: about the SHAPE of a figure, never about one company — build map §14, §15.
 NON_FACTS = {
     "year": lambda tok, ln, at: re.fullmatch(r"(19|20)\d\d", tok) is not None,
+    # A bare price. A price WITH a commitment's words around it ("free shipping
+    # over $95") is a statement already, read by the quantities reader.
     "price": lambda tok, ln, at: at > 0 and ln[at - 1] in "$€£¥",
     "small": lambda tok, ln, at: not tok.endswith("+") and _num(tok) < 3,
     "date": lambda tok, ln, at: re.search(rf"\b({_MONTHS})[a-z]*\.?\s*$", ln[:at], re.I) is not None
             or re.match(rf"\s*({_MONTHS})", ln[at + len(tok):], re.I) is not None,
     "phone": lambda tok, ln, at: re.search(r"\+?\d[\d\s().-]{8,}\d", ln[max(0, at - 6):at + len(tok) + 12]) is not None
              and len(re.sub(r"\D", "", ln[max(0, at - 6):at + len(tok) + 12])) >= 9,
+    # A number that names something rather than counting it: an NMLS or
+    # licence number, an order or account number, a long reference.
+    "identifier": lambda tok, ln, at: (_ID_BEFORE.search(ln[max(0, at - 24):at]) is not None
+                                       or (len(re.sub(r"\D", "", tok)) >= 6 and not tok.endswith("+")
+                                           and "," not in tok)),
+    # An HTTP status in API docs ("400 Bad Request").
+    "code": lambda tok, ln, at: re.fullmatch(r"[1-5]\d\d", tok) is not None
+            and _HTTP_AFTER.match(ln[at + len(tok):]) is not None,
+    # Styling leaked into text: hsl(210, 73%, 15%), 16px, #1a2b3c.
+    "technical": lambda tok, ln, at: (_CSS.search(ln[max(0, at - 6):at + len(tok) + 4]) is not None
+                                      or any(m.start() <= at < m.end() for m in _CSS_FN.finditer(ln))),
+    # A label: Subheading 3, Step 2, Tier 1, Q3, Version 4.
+    "label": lambda tok, ln, at: _LABEL_BEFORE.search(ln[max(0, at - 14):at]) is not None,
+    "step": _step,
+    # Interface text: "Last 30 days", "3 of 12", "Page 2", "5 min read".
+    "ui": lambda tok, ln, at: any(m.start() <= at < m.end() for m in _UI.finditer(ln)),
 }
+
+
+def kind_of(tok: str, ln: str, at: int) -> str:
+    """What a listed figure looks like, for the reviewer: count, money,
+    percent, duration or rating."""
+    after = ln[at + len(tok):at + len(tok) + 14].lower()
+    if at > 0 and ln[at - 1] in "$€£¥":
+        return "money"
+    if after.lstrip().startswith(("%", "percent")):
+        return "percent"
+    if re.match(r"\s?(?:-|–|to)?\s?\d*\s?(?:business |working )?(?:minutes?|hours?|days?|weeks?|months?|years?)\b", after):
+        return "duration"
+    if re.match(r"\s?(?:/\s?5|out of 5|stars?)", after):
+        return "rating"
+    return "count"
+
+
 #: The most figures listed for one page — reported when hit, never silent.
 MAX_PER_PAGE = 200
 
@@ -64,6 +129,7 @@ def unaccounted(doc: dict, stmts: list[dict]) -> tuple[list[dict], dict]:
     out, seen = [], set()
     counts = {"numbers": 0, "accounted": 0, "in_counted_table": 0, "non_fact": 0,
               "unaccounted": 0}
+    by_rule: dict[str, int] = {}
     for ln in doc.get("lines", []) + doc.get("page_data", []):
         key = " ".join(ln.split())[:400]
         if enum_blob and key and key in enum_blob:
@@ -78,8 +144,10 @@ def unaccounted(doc: dict, stmts: list[dict]) -> tuple[list[dict], dict]:
                     t.rstrip("+") for t in explained.get(key, ())}:
                 counts["accounted"] += 1
                 continue
-            if any(rule(tok, ln, at) for rule in NON_FACTS.values()):
+            hit = next((name for name, rule in NON_FACTS.items() if rule(tok, ln, at)), "")
+            if hit:
                 counts["non_fact"] += 1
+                by_rule[hit] = by_rule.get(hit, 0) + 1
                 continue
             counts["unaccounted"] += 1
             # Keyed on the fingerprint, the same identity the table's unique
@@ -90,7 +158,8 @@ def unaccounted(doc: dict, stmts: list[dict]) -> tuple[list[dict], dict]:
                 continue
             seen.add(k)
             out.append({"number_text": tok, "context": ln[:400],
-                        "context_hash": k[1]})
+                        "context_hash": k[1], "kind": kind_of(tok, ln, at)})
+    counts["non_fact_by_rule"] = by_rule
     counts["listed"] = min(len(out), MAX_PER_PAGE)
     counts["cut"] = len(out) > MAX_PER_PAGE
     return out[:MAX_PER_PAGE], counts
@@ -138,7 +207,8 @@ def open_figures(tenant: str, limit: int = 200) -> list[dict]:
     by: dict[tuple, dict] = {}
     for r in rows:
         g = by.setdefault((r.number_text, r.context_hash), {
-            "id": r.id, "number": r.number_text, "context": r.context, "pages": []})
+            "id": r.id, "number": r.number_text, "context": r.context,
+            "kind": r.kind or "count", "pages": []})
         g["pages"].append(r.url)
     out = sorted(by.values(), key=lambda g: (-len(g["pages"]), g["context"]))
     for g in out:
