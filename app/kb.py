@@ -3679,6 +3679,31 @@ def overlaps(tenant: str, min_score: float | None = None,
     return out
 
 
+def background_matches(tenant: str, claim_ids, min_score: float | None = None,
+                       limit: int = 200) -> dict:
+    """{claim_id: [(background row, score)]} for THESE claims only.
+
+    What the Review queue needs from `overlaps`: whether a claim on the page
+    is already filed as background. `overlaps` compares every claim with every
+    claim too, which the queue never reads — at 1,823 claims that was the
+    30-second render. This asks about the page's claims and nothing else."""
+    min_score = OVERLAP_SCORE if min_score is None else min_score
+    ids = frozenset(claim_ids or ())
+    if not ids:
+        return {}
+    from . import embed
+    live_cx = {c.id: c for c in contexts(tenant)}
+    out: dict = {}
+    for p in embed.cross_pairs(tenant, "claim", "context", min_score, limit, only_a=ids):
+        cx = live_cx.get(p["b"])
+        if cx is None:
+            continue
+        out.setdefault(p["a"], []).append(
+            ({"kind": "context", "id": cx.id, "text": cx.text,
+              "scope": cx.entity_key or "brand-wide"}, p["score"]))
+    return out
+
+
 def claim_to_context(claim_id: str) -> str:
     """Demote a claim to background. Owner's control, 2026-08-31.
 

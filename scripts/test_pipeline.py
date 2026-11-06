@@ -1142,6 +1142,45 @@ def check_listings_never_load_whole_pages():
        checks.trust("baci")["unaccounted_open"] == account.open_count("baci") >= 1)
 
 
+def check_similarity_is_one_matrix_product():
+    """Transak's Review page timed out (2026-11-06): 1,823 claims compared
+    pair by pair on every render. The batched product must find EXACTLY the
+    pairs the pair-by-pair loop finds, and the queue must ask only about the
+    claims on its page."""
+    import random
+    from types import SimpleNamespace
+    from app import admin_ui, embed, kb
+    rnd = random.Random(7)
+    base = [[rnd.gauss(0, 1) for _ in range(16)] for _ in range(6)]
+    rows = []
+    for i in range(60):        # near-copies of six bases, so some pairs match
+        v = [x + rnd.gauss(0, 0.15) for x in base[i % 6]]
+        rows.append(SimpleNamespace(row_id=f"r{i}", vector=v))
+    want = {(i, j) for i in range(60) for j in range(i + 1, 60)
+            if embed.cosine(rows[i].vector, rows[j].vector) >= 0.85}
+    got = {(i, j) for i, j, _ in embed._matches(rows, rows, 0.85, same=True)}
+    ck("SIMILARITY the batched product finds exactly the pairs the loop finds",
+       got == want and want, f"{len(got)} vs {len(want)}")
+    ck("SIMILARITY a row is never paired with itself or counted twice",
+       all(i < j for i, j in got))
+    other = rows[:10]
+    want_x = {(i, j) for i in range(10) for j in range(60)
+              if embed.cosine(other[i].vector, rows[j].vector) >= 0.85}
+    got_x = {(i, j) for i, j, _ in embed._matches(other, rows, 0.85, same=False)}
+    ck("SIMILARITY across two lists matches the loop too", got_x == want_x)
+    asked = []
+    real = embed.cross_pairs
+    embed.cross_pairs = lambda *a, **k: (asked.append(k.get("only_a")) or [])
+    try:
+        admin_ui.render_content("s3cret", tenant="baci", sub="claims")
+    finally:
+        embed.cross_pairs = real
+    pending = len(kb.pending_claims("baci"))
+    ck("SIMILARITY the claims queue asks only about the claims on its page",
+       all(a is not None for a in asked) and all(len(a) <= max(pending, 1) for a in asked),
+       str([len(a) if a is not None else None for a in asked]))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -1163,6 +1202,7 @@ def main() -> int:
     check_the_crawl_is_a_kept_source()
     check_s1_figure_kinds()
     check_listings_never_load_whole_pages()
+    check_similarity_is_one_matrix_product()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

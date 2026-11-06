@@ -8390,12 +8390,12 @@ def render_content(key: str, tenant: str = "", started: str = "",
     #
     # One call, zero provider calls: both sides are embedded when written, so
     # this is stored vector against stored vector.
+    # Only the claims ON THIS PAGE against background (`kb.background_matches`)
+    # — comparing every claim with every claim on each render took Transak's
+    # 1,823-claim queue past 30 s (2026-11-06).
     _bg: dict = {}
     try:
-        for _p in kb.overlaps(tenant)["pairs"]:
-            for _x, _y in ((_p["a"], _p["b"]), (_p["b"], _p["a"])):
-                if _x["kind"] == "claim" and _y["kind"] == "context":
-                    _bg.setdefault(_x["id"], []).append((_y, _p["score"]))
+        _bg = kb.background_matches(tenant, [r.id for r in shown])
     except Exception:                                            # noqa: BLE001
         _bg = {}
     # The page renders the ANALYZED copies of the shown rows — same ids, same
@@ -9380,7 +9380,9 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   {clear_all}
 </div>""",
         "pictures": assets_form,
-        "context": _context_card(key, tenant),
+        # Built only when it is the tab being looked at: it runs the
+        # near-duplicate report over every claim and background line.
+        "context": (_context_card(key, tenant) if sub == "context" else ""),
         "other": f"""
 <div class="anchor" id="others"></div>
 <div class="card">

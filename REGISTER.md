@@ -697,8 +697,8 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`available`**() → `tuple[bool, str]`  ·  from `email_harvest.py`, `harvest.py`, `test_embed.py`, `test_extract.py`, `test_sources.py`, `web.py`
 - **`backfill`**(tenant, kind, items) → `dict`  ·  from `tenant_scope.py`, `test_embed.py`, `test_migration.py`, `test_tenant_scope.py`, `web.py`
-- **`cosine`**(a, b) → `float`  ·  **from nothing**
-- **`cross_pairs`**(tenant, kind_a, kind_b, min_score?, limit?) → `list[dict]`  ·  from `kb.py`
+- **`cosine`**(a, b) → `float`  ·  from `test_pipeline.py`
+- **`cross_pairs`**(tenant, kind_a, kind_b, min_score?, limit?, only_a?) → `list[dict]`  ·  from `kb.py`
 - **`embed_texts`**(texts) → `tuple[list[list[float]] | None, str]`  ·  from `test_spend_complete.py`
 - **`ensure`**(tenant, kind, row_id, text) → `tuple[bool, str]`  ·  from `archive.py`, `kb.py`, `test_embed.py`
 - **`forget`**(tenant, kind, row_id) → `bool`  ·  from `command_agent.py`, `credentials.py`, `kb.py`, `seo_tools.py`, `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `web.py`
@@ -940,6 +940,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`audience`**(tenant, key) → `db.KbAudience | None`  ·  **from nothing**
 - **`audience_entities`**(tenant, audience_key, available_only?) → `list`  ·  from `skill_pack.py`, `test_audience_entities.py`
 - **`audiences`**(tenant, include_proposed?) → `list[db.KbAudience]`  ·  from `admin_ui.py`, `assurance.py`, `creative.py`, `planner.py`, `resolve.py`, `segments.py`, `skill_pack.py`, `systems.py`, `test_audience_entities.py`, `test_esp.py`, `test_funnel.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_provenance.py`, `test_schema_tab.py`, `web.py`
+- **`background_matches`**(tenant, claim_ids, min_score?, limit?) → `dict`  ·  from `admin_ui.py`
 - **`banned_claims`**(tenant) → `list[str]`  ·  from `catalog_sync.py`, `compliance.py`, `email_harvest.py`, `harvest.py`, `keywords.py`, `recreate.py`, `seed_demo.py`, `sources.py`, `systems.py`, `test_ban_list.py`, `test_catalog_sync.py`, `test_intake.py`, `test_kb.py`, `test_objection_scope.py`, `test_pipeline.py`, `test_systems.py`, `validator.py`, `voice.py`
 - **`batch_assets`**(tenant, batch) → `list[db.KbAsset]`  ·  from `test_creative_batch.py`, `web.py`
 - **`batches`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `test_the_model_takes_what_the_docs_say.py`
@@ -986,7 +987,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`next_step_for`**(tenant, stage) → `dict`  ·  from `brief.py`
 - **`objections`**(tenant, audience_key?, include_proposed?, entity_key?, any_entity?, situations?) → `list[db.KbObjection]`  ·  from `admin_ui.py`, `assurance.py`, `brief.py`, `claim_trace.py`, `dossier.py`, `email_harvest.py`, `funnel.py`, `planner.py`, `resolve.py`, `skill_pack.py`, `systems.py`, `test_email_harvest.py`, `test_entity_selectors.py`, `test_funnel.py`, `test_gbp_post.py`, `test_intake.py`, `test_kb.py`, `test_kb_removal.py`, `test_kb_ui.py`, `test_objection_scope.py`, `test_propose.py`, `test_provenance.py`, `test_responder.py`, `test_schema_tab.py`, `test_selection.py`, `web.py`
 - **`overlaps`**(tenant, min_score?, limit?) → `dict`  ·  from `admin_ui.py`, `test_context.py`
-- **`pending_claims`**(tenant?) → `list[db.KbClaim]`  ·  from `email_harvest.py`, `harvest.py`, `seed_demo.py`, `test_claim_fix.py`, `test_classify.py`, `test_context.py`, `test_dossier.py`, `test_email_harvest.py`, `test_embed.py`, `test_harvest.py`, `test_intake.py`, `test_kb_ui.py`, `test_provenance.py`, `test_resolve.py`, `test_responder.py`
+- **`pending_claims`**(tenant?) → `list[db.KbClaim]`  ·  from `email_harvest.py`, `harvest.py`, `seed_demo.py`, `test_claim_fix.py`, `test_classify.py`, `test_context.py`, `test_dossier.py`, `test_email_harvest.py`, `test_embed.py`, `test_harvest.py`, `test_intake.py`, `test_kb_ui.py`, `test_pipeline.py`, `test_provenance.py`, `test_resolve.py`, `test_responder.py`
 - **`pending_contexts`**(tenant?) → `list[db.KbContext]`  ·  from `admin_ui.py`, `test_context.py`
 - **`pending_counts`**(tenant) → `dict`  ·  from `systems.py`, `test_approval_gate.py`
 - **`pinned`**(row, boards_?) → `list`  ·  from `admin_ui.py`, `creative.py`, `test_a_pinterest_board_link_fills_a_board.py`, `test_the_board_reaches_the_generator.py`

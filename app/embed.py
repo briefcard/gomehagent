@@ -236,63 +236,99 @@ def ensure(tenant: str, kind: str, row_id: str, text: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _matches(left: list, right: list, min_score: float, same: bool) -> list[tuple]:
+    """(i, j, score) for every left×right pair at or above `min_score`.
+
+    ONE matrix product, in blocks, when numpy is present. The old loop
+    converted both vectors to arrays for every pair: on Transak's 1,823
+    claims that was 1.66 million conversions and cosines on every render of
+    the Review page, which took over 30 s and timed the page out
+    (2026-11-06). `same` = left and right are the same list: only the upper
+    triangle, never a row against itself."""
+    if not left or not right:
+        return []
+    if _np is None:
+        out = []
+        for i, a in enumerate(left):
+            for j in (range(i + 1, len(right)) if same else range(len(right))):
+                sc = cosine(list(a.vector), list(right[j].vector))
+                if sc >= min_score:
+                    out.append((i, j, sc))
+        return out
+    dims = {len(r.vector) for r in left} | {len(r.vector) for r in right}
+    if len(dims) != 1:
+        # Mixed dimensions never compare (cosine returns 0): keep the largest
+        # group so a model change cannot crash the queue.
+        d = max(dims, key=lambda k: sum(1 for r in left + right if len(r.vector) == k))
+        li = [i for i, r in enumerate(left) if len(r.vector) == d]
+        ri = [j for j, r in enumerate(right) if len(r.vector) == d]
+        sub = _matches([left[i] for i in li], [right[j] for j in ri], min_score, False)
+        return [(li[a], ri[b], sc) for a, b, sc in sub
+                if not same or li[a] < ri[b]]
+
+    def _unit(rows):
+        m = _np.asarray([list(r.vector) for r in rows], dtype=_np.float32)
+        n = _np.linalg.norm(m, axis=1, keepdims=True)
+        n[n == 0] = 1.0
+        return m / n
+
+    A = _unit(left)
+    B = A if same else _unit(right)
+    out = []
+    step = 512
+    for start in range(0, len(A), step):
+        sims = A[start:start + step] @ B.T
+        ii, jj = _np.nonzero(sims >= min_score)
+        for i, j in zip(ii.tolist(), jj.tolist()):
+            gi = start + i
+            if same and j <= gi:
+                continue
+            out.append((gi, j, float(sims[i, j])))
+    return out
+
+
 def pairs(tenant: str, kind: str, min_score: float = 0.85,
           limit: int = 50) -> list[dict]:
     """Every pair of indexed rows above a similarity, cheapest possible.
 
     Both sides are already embedded, so this costs **no provider call at all** —
-    it is stored vector against stored vector. That is what makes "which two
-    rows are secretly the same thing" a query rather than a project.
-
-    O(n²) on purpose and bounded by the same ceiling as everything else here:
-    21 rows is 210 comparisons, 20,000 rows would be 200 million and is what
-    `BRUTE_FORCE_CEILING` exists to catch first.
+    it is stored vector against stored vector. One matrix product (`_matches`),
+    bounded by `BRUTE_FORCE_CEILING` like everything else here.
     """
-    rows = [r for r in BACKEND.rows(tenant, kind) if r.vector]
     model = config.EMBED_MODEL
-    rows = [r for r in rows if not r.model or r.model == model]
-    out = []
-    for i, a in enumerate(rows):
-        for b in rows[i + 1:]:
-            score = cosine(list(a.vector), list(b.vector))
-            if score >= min_score:
-                out.append({"a": a.row_id, "b": b.row_id,
-                            "score": round(score, 4)})
+    rows = [r for r in BACKEND.rows(tenant, kind)
+            if r.vector and (not r.model or r.model == model)]
+    out = [{"a": rows[i].row_id, "b": rows[j].row_id, "score": round(sc, 4)}
+           for i, j, sc in _matches(rows, rows, min_score, same=True)]
     out.sort(key=lambda p: -p["score"])
     return out[:limit]
 
 
 def cross_pairs(tenant: str, kind_a: str, kind_b: str,
-                min_score: float = 0.85, limit: int = 50) -> list[dict]:
+                min_score: float = 0.85, limit: int = 50,
+                only_a: set | frozenset | None = None) -> list[dict]:
     """Near matches ACROSS two kinds. Same cost as `pairs`: no provider call.
 
     `pairs` answers "which two claims are secretly the same claim". This
     answers the question that only exists once there is more than one kind of
     knowledge: **is this claim the same thing as something already filed as
-    background?** Owner, 2026-08-31 — a statement that keeps coming up in
-    different words is the case both dedup mechanisms were for, and each of
-    them could only see its own half.
+    background?** Owner, 2026-08-31.
 
-    Both sides are stored vectors, so this is arithmetic over rows that are
-    already embedded — which is what makes it cheap enough to run on every
-    render of a queue rather than behind a button nobody presses.
+    `only_a` limits the left side to those row ids — a queue page asks about
+    the claims ON the page, not every claim on file.
     """
-    if kind_a == kind_b:
+    if kind_a == kind_b and only_a is None:
         return pairs(tenant, kind_a, min_score=min_score, limit=limit)
     model = config.EMBED_MODEL
     ra = [r for r in BACKEND.rows(tenant, kind_a)
-          if r.vector and (not r.model or r.model == model)]
+          if r.vector and (not r.model or r.model == model)
+          and (only_a is None or r.row_id in only_a)]
     rb = [r for r in BACKEND.rows(tenant, kind_b)
           if r.vector and (not r.model or r.model == model)]
-    out = []
-    for a in ra:
-        va = list(a.vector)
-        for b in rb:
-            score = cosine(va, list(b.vector))
-            if score >= min_score:
-                out.append({"a": a.row_id, "b": b.row_id,
-                            "a_kind": kind_a, "b_kind": kind_b,
-                            "score": round(score, 4)})
+    out = [{"a": ra[i].row_id, "b": rb[j].row_id, "a_kind": kind_a, "b_kind": kind_b,
+            "score": round(sc, 4)}
+           for i, j, sc in _matches(ra, rb, min_score, same=False)
+           if ra[i].row_id != rb[j].row_id]
     out.sort(key=lambda p: -p["score"])
     return out[:limit]
 

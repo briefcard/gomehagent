@@ -38,6 +38,23 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: reading a STALE report needs to know what stopped being covered.
 SABOTAGES = [
     {
+        "name": "the_queue_compares_every_claim_with_every_claim",
+        "file": "app/admin_ui.py",
+        "find": "        _bg = kb.background_matches(tenant, [r.id for r in shown])\n",
+        "replace": "        kb.overlaps(tenant); _bg = kb.background_matches(tenant, [r.id for r in shown])  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "every render of a large claims queue compares all claims pairwise, "
+               "and Transak's Review page times out",
+    },
+    {
+        "name": "a_row_is_its_own_near_duplicate",
+        "file": "app/embed.py",
+        "find": "            if same and j <= gi:\n",
+        "replace": "            if False:  # SABOTAGE\n",
+        "suites": ["test_pipeline.py"],
+        "why": "every claim is reported as a duplicate of itself, and each pair twice",
+    },
+    {
         "name": "a_page_listing_loads_every_page_whole",
         "file": "app/pipeline/fetch.py",
         "find": "          \"fetched_at\", \"changed_at\", \"summary\")\n",
