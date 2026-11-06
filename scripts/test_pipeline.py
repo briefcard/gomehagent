@@ -1181,6 +1181,36 @@ def check_similarity_is_one_matrix_product():
        str([len(a) if a is not None else None for a in asked]))
 
 
+def check_claim_groups_work_in_progress():
+    """WORK IN PROGRESS (BUILD-MAP §16, to be rebuilt on RapidFuzz +
+    scikit-learn): the console's two claim-group controls, pressed over HTTP."""
+    from fastapi.testclient import TestClient
+    from app import change, claim_groups, web as _web
+    page = f"{BASE}/pages/coverage-claims"
+    with db.SessionLocal() as s:
+        for txt in ("Coverage of 26+ countries.", "Coverage of 25+ countries."):
+            s.add(db.KbClaim(tenant="baci", claim=txt, source=f"stated on {page}",
+                             review="proposed", status="pending", origin="crawl"))
+        s.commit()
+    c = TestClient(_web.app)
+    r = c.post("/admin/claim_groups_rebuild?key=s3cret", data={"tenant": "baci"}, follow_redirects=False)
+    g = next((x for x in claim_groups.listing("baci") if x["kind"] == "inconsistency"
+              and any("26+" in m["wording"] for m in x["members"])), None)
+    ck("GROUPS 'Re-group now' finds the same sentence stated with two numbers",
+       r.status_code in (200, 303) and g is not None and len(g["members"]) == 2)
+    if g:
+        keep = next(m for m in g["members"] if "26+" in m["wording"])
+        r = c.post("/admin/claim_group_decide?key=s3cret", data={
+            "tenant": "baci", "group_id": g["id"], "member_id": keep["member_id"],
+            "decision": "use_wording", "reason": "the licence register lists 26", "by": "qa-anna"},
+            follow_redirects=False)
+        ch = next((x for x in change.listing("baci") if x["subject"].startswith("wording:")), None)
+        ck("GROUPS 'use this wording everywhere' makes a task to replace the other wording on its page",
+           ch is not None and any(t["find"] == "Coverage of 25+ countries." and t["location"] == page
+                                  and t["replace"] == "Coverage of 26+ countries." for t in ch["tasks"]),
+           str(ch and ch["tasks"]))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -1203,6 +1233,7 @@ def main() -> int:
     check_s1_figure_kinds()
     check_listings_never_load_whole_pages()
     check_similarity_is_one_matrix_product()
+    check_claim_groups_work_in_progress()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

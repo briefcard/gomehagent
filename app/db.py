@@ -2627,6 +2627,54 @@ class PageVersion(Base):
     last_seen = Column(DateTime(timezone=True))    # when it was replaced
 
 
+class KbClaimGroup(Base):
+    """Claims that are the same claim, the same pattern, or the same sentence
+    stated inconsistently (app/claim_groups.py, BUILD-MAP §16).
+
+    `method` names the rule that grouped them, so its accuracy is measured
+    from reviewer decisions. `auto` = grouped without a person, allowed only
+    while that method's measured precision holds at 99%.
+    """
+
+    __tablename__ = "kb_claim_groups"
+    __table_args__ = (UniqueConstraint("tenant", "fingerprint", name="uq_kb_claim_group"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    fingerprint = Column(String, nullable=False)
+    kind = Column(String, nullable=False)          # inconsistency | variants | family
+    method = Column(String, nullable=False)
+    auto = Column(Integer, default=0)
+    canonical_claim_id = Column(String, default="")
+    member_count = Column(Integer, default=0)
+    status = Column(String, default="open")        # open | decided
+    decision = Column(String, default="")
+    reason = Column(Text, default="")
+    decided_by = Column(String, default="")
+    decided_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class KbClaimMember(Base):
+    """One claim in a group. `band`: auto | proposed | confirmed | rejected —
+    confirmed and rejected are a reviewer's labels, the measure of accuracy."""
+
+    __tablename__ = "kb_claim_members"
+    __table_args__ = (UniqueConstraint("tenant", "group_id", "claim_id", name="uq_kb_claim_member"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    group_id = Column(String, nullable=False, index=True)
+    claim_id = Column(String, nullable=False, index=True)
+    band = Column(String, default="proposed")
+    value = Column(Text, default="")               # the differing number or value
+    score = Column(Float)                          # similarity, when that grouped it
+    decided_by = Column(String, default="")
+    reason = Column(Text, default="")
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class PageSnapshot(Base):
     """A page as last fetched, stored ONCE, read by every reader.
 

@@ -9307,6 +9307,38 @@ async def api_source(request: Request, key: str = Depends(admin_key)):
                             msg="Feed added — it is counted on the next harvest")
 
 
+@app.post("/admin/claim_group_decide", response_class=HTMLResponse)
+async def claim_group_decide(request: Request, key: str = Depends(admin_key)):
+    """A reviewer acts on a claim group (claim_groups.decide)."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import claim_groups
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    out = claim_groups.decide(
+        tenant, str(form.get("group_id", "")), str(form.get("decision", "")),
+        str(form.get("reason", "")), by=_qa_by(form, request),
+        member_id=str(form.get("member_id", "")), replacement=str(form.get("replacement", "")))
+    if out.get("error"):
+        return _back_to_content(tenant, sub="wording", err=out["error"])
+    msg = "Recorded"
+    if out.get("tasks") is not None:
+        msg = f"Recorded — {out['tasks']} place(s) to update, listed under Changes"
+    return _back_to_content(tenant, sub="wording", msg=msg)
+
+
+@app.post("/admin/claim_groups_rebuild", response_class=HTMLResponse)
+async def claim_groups_rebuild(request: Request, key: str = Depends(admin_key)):
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import claim_groups
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    out = claim_groups.rebuild(tenant)
+    return _back_to_content(tenant, sub="wording",
+                            msg=f"{out['groups']} groups ({out['new']} new, {out['dropped']} gone)")
+
+
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
 async def claims_decide(request: Request, key: str = Depends(admin_key)):
     """Decide many proposals in one submit.

@@ -54,6 +54,8 @@ def reprocess(tenant: str, apply: bool = False) -> dict:
         from .. import change, findings
         fnd = findings.rebuild(tenant)
         fnd["changes_verified"] = change.verify(tenant)["verified"]
+        from .. import claim_groups
+        fnd["claim_groups"] = claim_groups.rebuild(tenant)
     return {"tenant": tenant, "applied": apply, "known_answers": ka, "findings": fnd, "pages_read_from_store": pages,
             "pages_fetched": 0, "statements": statements_n,
             "statements_by_extractor": by_extractor, "unaccounted_figures": unacc,

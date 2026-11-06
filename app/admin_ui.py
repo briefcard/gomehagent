@@ -6291,6 +6291,9 @@ REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
                # The reconciliation queue: one plain question per subject the
                # site disagrees on, decided by a person (BUILD-MAP M6).
                ("truth", "Questions for QA"),
+               # Sentences the site states inconsistently, every wording and
+               # page in one place, fixed in one decision (BUILD-MAP §16).
+               ("wording", "Inconsistent wording"),
                # A changed answer and every place it must reach (M8).
                ("changes", "Changes"),
                # Renamed from "Catalogue" (step 4, spec §4): this is a
@@ -6633,6 +6636,84 @@ def _changes_card(tenant: str) -> str:
   {f'<h3>Done</h3><ul>{done_html}</ul>' if done_html else ''}
   <p><a href="/admin/qa_log.csv?tenant={_esc(tenant)}">Download the QA decision log (CSV)</a>
   <span class="mut">— every answer, decision, change and audit: who, when, why</span></p>
+</div>"""
+
+
+_GROUP_TITLE = {"inconsistency": "Stated inconsistently", "variants": "Same claim, different wording",
+                "family": "One pattern, different values"}
+
+
+def _wording_card(tenant: str) -> str:
+    """Review › Inconsistent wording — claim groups (app/claim_groups.py)."""
+    from . import claim_groups as cg
+    groups = cg.listing(tenant, "open")
+    acc = cg.accuracy(tenant)
+    need = cg.labels_needed()
+    acc_rows = "".join(
+        f'<tr><td>{_esc(m)}</td><td>{_esc(cg.METHODS[m]["why"])}</td><td>{a["labels"]}</td>'
+        f'<td>{"—" if a["precision"] is None else f"{a['precision'] * 100:.1f}%"}</td>'
+        f'<td>{"—" if a["lower_bound"] is None else f"{a['lower_bound'] * 100:.1f}%"}</td>'
+        f'<td><span class="chip {"on" if a["auto"] else "nb"}">{"automatic" if a["auto"] else "needs your confirmation"}</span></td></tr>'
+        for m, a in acc.items())
+    cards = []
+    for g in groups[:60]:
+        rows = []
+        for m in g["members"]:
+            pages = ", ".join(_page_link(u) for u in m["pages"][:4])
+            more = f' <span class="mut">+{m["page_count"] - 4} more</span>' if m["page_count"] > 4 else ""
+            legal = ' <span class="chip off">legal page</span>' if m["legal"] else ""
+            val = f' <b>{_esc(m["value"])}</b>' if m["value"] else ""
+            rows.append(f"""
+<li>{val} “{_esc(m["wording"][:260])}”{legal}
+  <div class="mut">{m["page_count"]} page{"" if m["page_count"] == 1 else "s"}: {pages}{more}</div>
+  <form class="f" method="post" action="/admin/claim_group_decide" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="group_id" value="{_esc(g["id"])}">
+    <input type="hidden" name="member_id" value="{_esc(m["member_id"])}">
+    <input name="reason" placeholder="reason (required)" size="22">{_reviewer_field()}
+    <button class="sec" name="decision" value="use_wording">Use this wording everywhere</button>
+    <button class="sec" name="decision" value="split_member">Doesn't belong here</button>
+  </form></li>""")
+        auto = ('<span class="chip on">grouped by rule</span>' if g["auto"]
+                else '<span class="chip nb">proposed — please confirm</span>')
+        cards.append(f"""
+<div class="conn-site"><h3>{_esc(_GROUP_TITLE.get(g["kind"], g["kind"]))} <span class="chip {_SEV.get(g["severity"], "nb")}">{_esc(g["severity"])}</span> {auto}</h3>
+  <p class="mut">{_esc(g["why"])} · {len(g["members"])} versions on {g["reach"]} page placements</p>
+  <ul>{"".join(rows)}</ul>
+  <form class="f" method="post" action="/admin/claim_group_decide">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <input type="hidden" name="group_id" value="{_esc(g["id"])}">
+    <input name="reason" placeholder="reason (required)" size="30">{_reviewer_field()}
+    <input name="replacement" placeholder="or the correct wording, to use everywhere" size="40">
+    <div class="row">
+      <button name="decision" value="use_wording">Use the wording above everywhere</button>
+      <button class="sec" name="decision" value="remove_everywhere">Remove everywhere</button>
+      <button class="sec" name="decision" value="not_a_problem">Both right — not a problem</button>
+      <button class="sec" name="decision" value="confirm">The grouping is right</button>
+    </div>
+  </form>
+</div>""")
+    n_inc = sum(1 for g in groups if g["kind"] == "inconsistency")
+    return f"""
+<div class="card">
+  <div class="head"><h2>Inconsistent wording</h2>
+    <span class="chip {'off' if n_inc else 'on'}">{n_inc} stated inconsistently</span></div>
+  <p class="mut">Sentences the site states more than one way, with every wording and
+  every page it is on. One decision fixes all of them: the wording you choose (or
+  removal) becomes a task for every page, closed only when the page, read again,
+  agrees. Nothing changes on the site until a fix is approved.</p>
+  {"".join(cards) or '<p class="mut">No inconsistent wording found.</p>'}
+  <form class="f" method="post" action="/admin/claim_groups_rebuild" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}">
+    <button class="sec">Re-group now</button></form>
+</div>
+<div class="card">
+  <div class="head"><h2>How accurate is the grouping?</h2></div>
+  <p class="mut">Every confirmation and every "doesn't belong" is a measurement. A
+  rule groups on its own only while its measured precision has a 95% lower bound of
+  at least 99% — {need} error-free decisions are needed to show that. Until then
+  its groups wait for your confirmation.</p>
+  <table><tr><th>Rule</th><th>What it groups</th><th>Decisions</th><th>Precision</th><th>95% lower bound</th><th>Status</th></tr>{acc_rows}</table>
 </div>"""
 
 
@@ -9326,6 +9407,13 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         n_findings = 0
     try:
         with db.SessionLocal() as _s:
+            n_wording = (_s.query(db.KbClaimGroup)
+                         .filter(db.KbClaimGroup.tenant == tenant, db.KbClaimGroup.status == "open",
+                                 db.KbClaimGroup.kind == "inconsistency").count())
+    except Exception:  # noqa: BLE001
+        n_wording = 0
+    try:
+        with db.SessionLocal() as _s:
             n_changes = (_s.query(db.ChangeRequest)
                          .filter(db.ChangeRequest.tenant == tenant,
                                  db.ChangeRequest.status == "open").count())
@@ -9336,7 +9424,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
               "other": n_other, "plans": len(plans_wait),
               "conflicts": len(open_conflicts), "catalogue": len(flagged),
               "facts": n_fact_conflicts, "checks": n_check_fail,
-              "truth": n_findings, "changes": n_changes}
+              "truth": n_findings, "changes": n_changes, "wording": n_wording}
     sub = (sub or "").strip().lower()
     if sub not in dict(REVIEW_SUBS):
         # LAND ON THE WORK. With no section asked for, open the first one that
@@ -9412,6 +9500,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         "checks": (_checks_card(tenant) if sub == "checks" else ""),
         "truth": (_truth_card(tenant) if sub == "truth" else ""),
         "changes": (_changes_card(tenant) if sub == "changes" else ""),
+        "wording": (_wording_card(tenant) if sub == "wording" else ""),
         "catalogue": f"""
 <div class="card">
   <div class="head"><h2>Store sync</h2>
@@ -9790,6 +9879,11 @@ _KB_DESCRIBED = [
     ("KbApiSource", "kb_api_sources", "Public data feeds counted as figures",
      "A feed (e.g. a supported-countries API) registered by a reviewer; its list is "
      "counted on every harvest and can be made the source of truth."),
+    ("KbClaimGroup", "kb_claim_groups", "Claims stated inconsistently, reworded, or in one pattern",
+     "Computed from the claims after every read; a reviewer's decision on a group fixes every "
+     "wording on every page (Review › Inconsistent wording)."),
+    ("KbClaimMember", "kb_claim_members", "Each claim in a group, and the reviewer's verdict on it",
+     "Confirmed / rejected memberships are the labels the grouping's accuracy is measured on."),
     ("PageVersion", "page_versions", "Earlier copies of pages that changed",
      "Kept so the crawl answers what a page said on a date and what changed since "
      "(SEO/AEO, snapshots). Outside the knowledge reset: its own 'crawl' group."),

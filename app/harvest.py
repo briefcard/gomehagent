@@ -443,6 +443,9 @@ def _findings_after(tenant: str) -> dict:
         # CHANGE verification: a task closes only when the page, as just
         # read, agrees with the answer.
         out["changes_verified"] = change.verify(tenant)["verified"]
+        # Claim groups: inconsistent wording, variants and pattern families.
+        from . import claim_groups
+        out["claim_groups"] = claim_groups.rebuild(tenant)
         return out
     except Exception as exc:  # noqa: BLE001 — bookkeeping must not fail the read
         return {"error": f"{exc.__class__.__name__}: {str(exc)[:120]}"}

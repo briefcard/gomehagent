@@ -95,6 +95,11 @@ KINDS: dict[str, dict] = {
         "target": "app.pipeline.retention:job",
         "retryable": True,
     },
+    "claim_groups": {
+        "what": "claims grouped: inconsistent wording, variants, pattern families",
+        "target": "app.claim_groups:job",
+        "retryable": True,
+    },
     "reprocess": {
         "what": "every stored page re-read with the current readers — no crawl",
         "target": "app.pipeline.reprocess:job",

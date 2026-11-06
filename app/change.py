@@ -133,6 +133,20 @@ def create(tenant: str, subject: str, new_value: str, reason: str, by: str = "",
             "new_value": pick["value"]}
 
 
+def create_wording(tenant: str, group_id: str, old_value: str, new_value: str,
+                   reason: str, by: str, locs: list[dict]) -> dict:
+    """A WORDING change (claim_groups): one task per wording per page. Kept
+    here so every change request is written by this module."""
+    with db.SessionLocal() as s:
+        ch = db.ChangeRequest(tenant=tenant, subject=f"wording:{group_id}", scope={},
+                              old_value=old_value[:500], new_value=new_value or "(removed)",
+                              reason=reason, requested_by=by)
+        s.add(ch)
+        s.commit()
+        cid = ch.id
+    return {"change_id": cid, "tasks": _add_tasks(tenant, cid, locs)}
+
+
 def _add_tasks(tenant: str, cid: str, locs: list[dict]) -> int:
     with db.SessionLocal() as s:
         have = {(t.location, t.find) for t in s.query(db.ChangeTask)
@@ -223,7 +237,11 @@ def verify(tenant: str) -> dict:
                                                db.ChangeTask.status.notin_(("verified", "skipped"))):
             ch = changes[t.change_id]
             ok = False
-            if t.kind in ("auto_edit", "manual"):
+            if t.kind in ("auto_edit", "manual") and (ch.subject or "").startswith("wording:"):
+                # A WORDING fix (claim_groups): verified when the page, read
+                # AFTER the task was made, no longer carries the old wording.
+                ok = wording_gone(tenant, t.location, t.find, t.updated_at or ch.created_at)
+            elif t.kind in ("auto_edit", "manual"):
                 # THIS task's wording, on the page as last read: verified when
                 # no statement of the subject that still disagrees with the
                 # answer carries it. Another wrong figure on the same page is
@@ -253,6 +271,23 @@ def verify(tenant: str) -> dict:
                 ch.status, ch.closed_at = "done", _now()
         s.commit()
     return {"verified": verified}
+
+
+def wording_gone(tenant: str, url: str, wording: str, since) -> bool:
+    """The page was read after `since` and its text no longer holds `wording`
+    (compared normalised, so a re-flowed line is still the same words)."""
+    from .claim_groups import canon
+    from .pipeline import fetch, parse
+    row = fetch.latest(tenant, url)
+    if row is None or row.fetched_at is None:
+        return False
+    at = row.fetched_at if row.fetched_at.tzinfo else row.fetched_at.replace(tzinfo=dt.timezone.utc)
+    s0 = since if (since is None or since.tzinfo) else since.replace(tzinfo=dt.timezone.utc)
+    if s0 is not None and at <= s0:
+        return False
+    doc = parse.document(tenant, url)
+    text = canon(" ".join(doc.get("lines", []) + doc.get("page_data", [])))
+    return canon(wording) not in text
 
 
 def fetch_stored(tenant: str, url: str) -> bool:
