@@ -235,6 +235,17 @@ def check_m3_what_the_readers_must_not_count():
     ck("READ a number beside a singular word is not a count",
        not st.find("45123 Country Code") and not st.find("Only Alpha-2 country codes")
        and st.find("Live in 1 country") and st.find("Live in 25 countries"))
+    for said in ("11.2 Payment Methods", "20.1 For Vermont Members/Customers:",
+                 "2 Select fiat currency and payment method",
+                 "Under Section 4 users must verify", "Step 3 Choose your payment method"):
+        ck("READ a section or step number is not a figure", not st.find(said),
+           f"{said!r} -> {[f['value'] for f in st.find(said)]}")
+    for said, want in (("162+ Countries", "162+"), ("20 Supported Countries", "20"),
+                       ("1.5 million users", "1.5 million"), ("64 countries", "64"),
+                       ("Transak serves 11.2 million users", "11.2 million"),
+                       ("Available in 2.5k cities and 160 countries", "160")):
+        got_ = [f["value"] for f in st.find(said)]
+        ck("READ a tile or sentence that counts still counts", want in got_, f"{said!r} -> {got_}")
     t_ = "tenant_authority_fixture"
     st.record(t_, "https://x.test/legal", [
         {"subject": "scale.apps", "value": "600+", "number": 600, "qualifier": "",

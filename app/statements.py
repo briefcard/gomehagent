@@ -71,6 +71,32 @@ _NOT_FILLER = re.compile(r"\b(per|each|every|percent|years?|days?|months?|hours?
 
 _SINGULAR = {"country", "license", "licence"}
 
+#: A word that names the number after it as a place in a document.
+_MARKER_WORD = re.compile(r"(?:section|clause|article|paragraph|step|part|§)\s*$", re.I)
+
+
+def _is_marker(text: str, m, qual, num, plus, scale, filler, unit) -> bool:
+    """The number numbers the line, it does not count the unit.
+
+    From Transak's legal and help pages (2026-11-06), each read as a figure
+    and the first two as BINDING, because they sat on legal pages:
+    "11.2 Payment Methods" (Terms of Service), "20.1 For Vermont
+    Members/Customers:" (Privacy Policy), and a step badge read into the
+    step's text, "2 Select fiat currency and payment method" (105 pages).
+    A stat tile has the same shape ("162+ Countries", "20 Supported
+    Countries"), so the test is narrow: nothing qualifies the number, it opens
+    the line, and either it is a section number (11.2) followed by a
+    capital, or a capitalised word starts a sentence the unit is lower-case
+    in. A word before it ("Section 4", "Step 2") is a marker anywhere."""
+    if _MARKER_WORD.search(text[:m.start()]):
+        return True
+    if qual or plus or scale or text[:m.start()].strip(" \t•·-–—#(").strip():
+        return False
+    first = (filler or unit).lstrip()[:1]
+    if "." in num and first.isupper():
+        return True
+    return bool(filler) and filler[:1].isupper() and unit[:1].islower()
+
 _SCRIPT = re.compile(r"<script\b[^>]*>(.*?)</script>", re.I | re.S)
 _STYLE = re.compile(r"<style\b[^>]*>.*?</style>", re.I | re.S)
 _TAGS = re.compile(r"<[^>]+>")
@@ -166,6 +192,8 @@ def find(text: str, extra: tuple[tuple[str, str], ...] = ()) -> list[dict]:
     for m in _fact_re(extra).finditer(text or ""):
         qual, num, plus1, scale, plus2, filler, unit = m.groups()
         if filler and _NOT_FILLER.search(filler):
+            continue
+        if _is_marker(text, m, qual, num, plus1 or plus2, scale, filler, unit):
             continue
         subj = terms.get(unit.lower()) or subject_for(unit)
         if not subj:
