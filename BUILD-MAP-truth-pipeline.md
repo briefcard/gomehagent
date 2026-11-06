@@ -567,3 +567,131 @@ in a different industry would be read worse than Transak or Baci.
 Items 1–5 are one build ("industry templates + a global vocabulary"): data,
 not code paths, so every later company benefits from what the previous one
 taught.
+
+## 15. Signal vs noise — which figures matter (design, 2026-11-06, NOT BUILT)
+
+Owner: *"How would we differentiate between important numbers / figures and
+noise? … research thoroughly how top-tier scrapers do this."*
+
+### 15.1 What the live data says (Transak, 2,402 statements, 2026-11-06)
+
+| Share | What it is | Treat as |
+|---|---|---|
+| 38% | stated in dated blog / news / press posts | HISTORY: true on its date, not a current claim |
+| 45% | no subject named in the sentence (a bare "in 25+ countries", a stat tile) | the brand's IF it sits in the brand's own furniture or hero; unknown otherwise |
+| ~7% | worked examples ("Scenario 3: … 50 countries"), other companies (Visa, Stripe, Deel, MiCA) | NOT the brand's claim |
+| 1 sentence on 236 pages | "in 25+ countries" — one template block | ONE claim with 236 placements: one decision, one fix |
+
+And the 500+ figures not understood are mostly non-facts with recognisable
+shapes: step numbers, HTTP codes in API docs, CSS colour values, star
+ratings and review text, "Last 30 days" UI labels, licence/ID numbers.
+
+### 15.2 What the best extractors do (research)
+
+- **Score every fact, keep a threshold, keep the provenance.** Diffbot gives
+  each fact a confidence in [0,1] from source trust and cross-source
+  agreement and drops facts below 0.5; Google's Knowledge Vault attaches a
+  confidence and provenance to every triple. → every statement gets a
+  `weight` with its reasons; below the line is HIDDEN, never deleted.
+- **Agreement is counted per independent source, not per page.** Truth-
+  discovery work (Dong, Berti-Équille, Srivastava) shows copied values
+  inflate a false answer; detect copying and count it once. → a sentence
+  repeated across 236 pages is ONE claim with 236 placements.
+- **Source trust is learned from how often a source is right.**
+  Knowledge-Based Trust scores a source by the share of its facts that check
+  out. → each page TYPE (legal, product, blog, partner announcement) earns a
+  trust from QA's own decisions over time.
+- **Three classes, not two.** ClaimBuster sorts sentences into check-worthy
+  factual, unimportant factual and non-factual; CheckThat! 2025 added a task
+  for numerical claims specifically. → material / immaterial / not a figure.
+- **Typed quantities, normalised units.** Recognizers-Text, Quantulum and
+  CQE extract value + unit + kind (money, percent, duration, count); CQE
+  finds unit normalisation is where most tools fail. → every figure gets a
+  KIND, and money keeps its currency.
+- **Templates are found across pages, content within a page.** Boilerpipe and
+  Trafilatura judge one page (text and link density); site-level template
+  detection compares many pages of one site. → we already have both
+  (furniture field, cross-page repetition); for COMPLIANCE a site-wide
+  figure is the most important, not the least — it reaches every visitor.
+- **Typed extraction by page type; models only for the custom part.** Zyte
+  runs deterministic trained models for standard page types and an LLM only
+  for custom fields. → industry templates choose what is expected per page
+  type; Claude (via MCP) proposes only what the rules cannot decide.
+- **Noise rules learned from "mark as noise" feedback** (Visualping,
+  PageCrawl, Distill): ignore by region or pattern, refined from each
+  dismissal. → a reviewer's "Not a fact" becomes a reusable RULE, global
+  when the owner promotes it.
+
+### 15.3 The design — five facts about every figure, then one weight
+
+Computed by code at read time (no model in the app), stored on the
+statement, re-computable from the kept crawl with `reprocess`:
+
+| Axis | Values | How it is decided |
+|---|---|---|
+| **kind** | count · money (with currency) · percent · duration · rating · identifier · code · step · date · technical | the figure's own shape and DOM context (`<code>`, `<style>`, ordered-list markers, API-doc pages) — identifier/code/step/technical are NOT figures |
+| **about** | brand · product (entity) · customer quote · third party · example | brand name / aliases / "we, our" in the sentence; review blocks and JSON-LD Review; a named other organisation without the brand; "e.g., scenario, imagine, for companies…" |
+| **as_of** | the date the statement speaks for | the page's own date (JSON-LD `datePublished`/`dateModified`, a date in the URL, the post date), an in-text "as of Q1 2026"; undated evergreen pages = now |
+| **placement** | where and how often: hero / header / footer / body / legal / table + number of pages carrying the same sentence | the Document's field and section, and the text fingerprint across the crawl (copy detection) |
+| **materiality** | P1 commitment · P2 customer-facing fact · P3 vanity | the SUBJECT's industry template: price, shipping threshold, return window, licences, coverage = commitments; users, partners = vanity |
+
+**weight = materiality × attribution × currency × trust, with reach as the
+tie-breaker** — stored with its reasons ("about a third party", "in a 2022
+post", "on 236 pages, footer"). Three bands, like ClaimBuster:
+- **material** → findings, the fact gate, change tasks;
+- **immaterial** (about others, dated history, examples, vanity) → kept and
+  visible under "not counted", never a finding, never blocks a draft;
+- **not a figure** → hidden by rule, the count reported.
+
+Every band is shown with its count; a reviewer can move a figure between
+bands, and that ruling becomes a RULE (pattern + scope) that applies to every
+later read — globally once the owner promotes it.
+
+### 15.4 What changes in what is stored
+
+- `kb_statements` gains `kind`, `currency`, `about`, `as_of`, `placement`,
+  `claim_fp` (the sentence fingerprint across pages), `reach`, `weight`,
+  `band`, `reasons`. `statements.summary` and `findings.compute` read only the
+  material band, grouped by claim (one claim, N placements), largest reach
+  first — "in 25+ countries ×236" heads the countries question.
+- `kb_figure_rules` (new, global or per tenant): noise and attribution rules
+  ("hsl(…)" = technical; "Step N" = step; reviews block = customer quote),
+  each with who promoted it and what it matched — the "mark as noise" loop.
+- `kb_vocabulary` (new, global or per tenant): unit word → subject → kind →
+  materiality. The current built-in list moves here as global rows; a
+  reviewer's term is per tenant until the owner promotes it (§14.3 item 2).
+- `kb_templates` (new, data): per industry — e-commerce, B2B spec, venue,
+  agency, regulated finance — the subjects, their materiality, the page types
+  that are coverage-tier, the question per subject, and known-answer prompts
+  for onboarding (§14.3 items 3–5).
+- Source trust per page type, computed from QA decisions (`findings` decided
+  "this page is wrong" vs "correct") — a column on the tier policy, reported
+  on the trust panel.
+
+### 15.5 What it is not
+
+No model judges inside the app (owner direction, 2026-10-22). The axes are
+rules; what the rules cannot decide stays `unknown` and is shown as such.
+Claude, through MCP, may PROPOSE labels for the unknowns in bulk — they land
+as proposals a reviewer accepts, exactly like harvested claims.
+
+### 15.6 Build order (each with its guard, per §9)
+
+1. `kind` + the non-figure rules (identifiers, codes, steps, CSS, ratings) and
+   money / percent as REAL figures — fixes the Baci 10%-vs-15% blind spot.
+2. `about` + `as_of` + `claim_fp`/`reach`; findings and summary read the
+   material band grouped by claim.
+3. `kb_vocabulary` + `kb_figure_rules`, global with per-tenant overrides,
+   with "promote to all companies" on the console.
+4. `kb_templates` per industry, chosen at onboarding; tier keywords and
+   questions come from it.
+5. Source trust per page type from QA decisions.
+
+Sources: Diffbot (data provenance, knowledge fusion) · Google Knowledge Vault
+(KDD 2014) and Knowledge-Based Trust (VLDB 2015) · Dong, Berti-Équille,
+Srivastava, "Integrating Conflicting Data: The Role of Source Dependence"
+(PVLDB 2009); "Truth Discovery Algorithms: An Experimental Evaluation"
+(arXiv 1409.6428) · ClaimBuster; CLEF CheckThat! 2018–2025 · CQE (EMNLP
+2023); Quantulum; Microsoft Recognizers-Text · Boilerpipe; Trafilatura;
+Web2Text (ECIR 2018) · Zyte AI extraction · Visualping, PageCrawl, Distill
+noise-filtering docs.
