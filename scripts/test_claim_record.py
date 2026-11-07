@@ -359,6 +359,46 @@ def check_console_controls():
        "/admin/claim_record" in html and "/admin/claim_evidence" in html and "Before this can be approved" in html)
 
 
+def check_rescan():
+    """Owner, 2026-11-07: "run a new scan completely and toss the old info" —
+    without tossing what people decided."""
+    from fastapi.testclient import TestClient
+    from app import web as _web, claim_record as cr, kb as _kb
+    c = TestClient(_web.app)
+    u = page("/pricing", "<p>Acme charges 1% per transaction.</p>", title="Pricing")
+    crawled = claim("Acme charges 1% per transaction.", u, "data")
+    _kb.add_claim(T, "Acme was founded in 2019.", "", [], origin="human", assess=False)
+    with db.SessionLocal() as s:
+        human = s.query(db.KbClaim).filter(db.KbClaim.tenant == T,
+                                           db.KbClaim.claim == "Acme was founded in 2019.").one().id
+        n_pages = s.query(db.PageSnapshot).filter(db.PageSnapshot.tenant == T).count()
+    r = c.post("/admin/rescan?key=s3cret", data={"tenant": T, "confirm": "", "by": "qa"},
+               follow_redirects=False)
+    ck("RESCAN without typing the account's key nothing is removed",
+       get(crawled) is not None and n_pages > 0)
+    r = c.post("/admin/rescan?key=s3cret", data={"tenant": T, "confirm": T, "by": "qa"},
+               follow_redirects=False)
+    with db.SessionLocal() as s:
+        pages_left = s.query(db.PageSnapshot).filter(db.PageSnapshot.tenant == T).count()
+        crawled_left = s.get(db.KbClaim, crawled)
+        human_left = s.get(db.KbClaim, human)
+        ents = {e.key for e in s.query(db.KbEntity).filter(db.KbEntity.tenant == T)}
+        job = (s.query(db.JobQueue).filter(db.JobQueue.tenant == T, db.JobQueue.kind == "harvest")
+               .order_by(db.JobQueue.created_at.desc()).first())
+        stmts = s.query(db.KbStatement).filter(db.KbStatement.tenant == T).count()
+    ck("RESCAN removes the stored pages, the crawled claims and what was read off them",
+       r.status_code in (200, 303) and pages_left == 0 and crawled_left is None and stmts == 0,
+       f"pages {pages_left}, statements {stmts}")
+    ck("RESCAN keeps a claim a person entered", human_left is not None)
+    ck("RESCAN keeps the entities and the account's names and switches",
+       {"offramp", "stream"} <= ents and "Acme" in cr.vocabulary(T)["self_names"]
+       and cr.vocabulary(T)["record_required"])
+    ck("RESCAN queues a full re-crawl on the worker",
+       job is not None and (job.payload or {}).get("recrawl") is True
+       and (job.payload or {}).get("limit", 0) >= 1000 and (job.payload or {}).get("apply") is True,
+       str(job and job.payload))
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -368,6 +408,7 @@ def main() -> int:
     check_gate_and_evidence(ids)
     check_workbook(ids)
     check_console_controls()
+    check_rescan()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
 

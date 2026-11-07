@@ -11167,6 +11167,14 @@ SABOTAGES = [
     },
     # --- the claim record (BUILD-MAP §17) ---------------------------------
     {
+        "name": "rescan_deletes_peoples_claims",
+        "file": "app/reset.py",
+        "find": 'PARTIAL = {("scan", "kb_claims"): lambda m: m.origin == "crawl"}\n',
+        "replace": 'PARTIAL = {}  # SABOTAGE\n',
+        "suites": ["test_claim_record.py"],
+        "why": "a new scan deletes the claims a person wrote by hand along with the crawled ones",
+    },
+    {
         "name": "proof_blocks_while_only_noted",
         "file": "app/claim_record.py",
         "find": '        proof_missing(tenant, row) if v["evidence_required"] else [])\n',

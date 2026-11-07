@@ -169,8 +169,22 @@ ACCESS = {"credentials", "connect_links", "intake_links", "portal_links"}
 #: Opt in by name (groups=crawl) to delete it, as with access.
 CRAWL = {"page_snapshots", "page_versions"}
 
+#: THE SCAN — everything a crawl and its readers produced, and nothing a
+#: person decided. Owner, 2026-11-07: *"I need to run a new scan completely
+#: and toss the old info."* A knowledge reset would also take the brand row
+#: (names, ban list, the approval switches), the entities, the truth QA set
+#: and the known answers — work a new scan cannot rebuild. So this group is
+#: the pages, what was read off them, and the claims the CRAWL proposed;
+#: claims a person entered (any origin but crawl) are kept, as is evidence.
+SCAN = {"page_snapshots", "page_versions", "harvested_pages", "kb_statements",
+        "unaccounted_numbers", "extract_cache", "findings", "kb_claim_groups",
+        "kb_claim_members", "kb_claims"}
+#: Row filters for a table a group only partly owns: (group, table) -> column
+#: test. Applied only when no other selected group claims the whole table.
+PARTIAL = {("scan", "kb_claims"): lambda m: m.origin == "crawl"}
+
 GROUPS = {"knowledge": KNOWLEDGE, "operations": OPERATIONS, "access": ACCESS,
-          "crawl": CRAWL}
+          "crawl": CRAWL, "scan": SCAN}
 
 
 def _tenant_models() -> dict[str, object]:
@@ -225,20 +239,43 @@ def _run(tenant: str, groups, apply: bool) -> dict:
     models = _tenant_models()
     # A table carrying `tenant` that no group claims is reported rather than
     # quietly skipped: the point of deriving the list is to notice these.
-    unclassified = sorted(set(models) - KNOWLEDGE - OPERATIONS - ACCESS - CRAWL)
+    unclassified = sorted(set(models) - KNOWLEDGE - OPERATIONS - ACCESS - CRAWL - SCAN)
 
     counts, deleted = {}, 0
+    whole = set()
+    for g in groups:
+        whole |= {t for t in GROUPS[g] if (g, t) not in PARTIAL}
     with db.SessionLocal() as s:
+        gone_claims: list[str] = []
         for table in sorted(wanted & set(models)):
             model = models[table]
             q = s.query(model).filter(model.tenant == tenant)
+            if table not in whole:
+                for (g, t), test in PARTIAL.items():
+                    if t == table and g in groups:
+                        q = q.filter(test(model))
             n = q.count()
             if not n:
                 continue
             counts[table] = n
             deleted += n
+            if table == "kb_claims" and table not in whole:
+                gone_claims = [r for (r,) in q.with_entities(model.id).all()]
             if apply:
                 q.delete(synchronize_session=False)
+        if gone_claims and "kb_embeddings" not in wanted:
+            # The deleted claims' vectors, so similarity never finds a claim
+            # that no longer exists.
+            E = db.KbEmbedding
+            for i in range(0, len(gone_claims), 500):
+                qe = s.query(E).filter(E.tenant == tenant, E.kind == "claim",
+                                       E.row_id.in_(gone_claims[i:i + 500]))
+                n = qe.count()
+                if n:
+                    counts["kb_embeddings"] = counts.get("kb_embeddings", 0) + n
+                    deleted += n
+                    if apply:
+                        qe.delete(synchronize_session=False)
         if apply:
             s.commit()
 

@@ -6796,6 +6796,18 @@ def _claims_record_card(tenant: str, key: str = "") -> str:
     <button class="sec">Recompute records and groups (runs on the worker)</button></form>
 </div>
 <div class="card">
+  <div class="head"><h2>Start over — a new scan</h2></div>
+  <p class="mut">Removes everything the last scan produced — {_scan_n(tenant)} — and
+  crawls every page again with the current readers. <b>Kept:</b> this account's names
+  and switches, its entities, approved answers, known answers, evidence, and any claim
+  a person entered. Approvals of crawled claims are lost with them.</p>
+  <form class="f" method="post" action="/admin/rescan">
+    <input type="hidden" name="tenant" value="{t}">
+    <label>Type <b>{t}</b> to confirm</label><input name="confirm" size="16" autocomplete="off">
+    {_reviewer_field()}<div class="row"><button class="sec">Remove the old scan and crawl again</button></div>
+  </form>
+</div>
+<div class="card">
   <div class="head"><h2>How this account names itself</h2></div>
   <p class="mut">The rules are the same for every account; these words are this one's. A claim
   naming one of them (or saying "we") is the account's own claim. Entities — and the URLs and
@@ -6809,6 +6821,17 @@ def _claims_record_card(tenant: str, key: str = "") -> str:
   </form>
   <table><tr><th>Entity</th><th>URL patterns</th><th>Words</th></tr>{match_rows or '<tr><td colspan=3 class="mut">No entities yet — add them on the workbook\'s Entities sheet.</td></tr>'}</table>
 </div>"""
+
+
+def _scan_n(tenant: str) -> str:
+    try:
+        from . import reset as _rs
+        p = _rs.preview(tenant, groups=("scan",))
+        r = p.get("rows", {})
+        return (f"{r.get('page_snapshots', 0):,} stored pages, {r.get('kb_claims', 0):,} crawled "
+                f"claims, {r.get('kb_statements', 0):,} figures, {r.get('findings', 0):,} findings")
+    except Exception:  # noqa: BLE001
+        return "the stored pages and what was read off them"
 
 
 def workbook_report(tenant: str, res: dict, action: str) -> str:

@@ -9465,6 +9465,35 @@ async def claim_vocab(request: Request, key: str = Depends(admin_key)):
     return _back_to_content(tenant, sub="byentity", msg="Saved")
 
 
+@app.post("/admin/rescan", response_class=HTMLResponse)
+async def rescan(request: Request, key: str = Depends(admin_key)):
+    """Toss the old scan and crawl the account again (reset group `scan`,
+    then a full harvest on the worker). Keeps everything a person decided:
+    the brand row, entities, approved answers, known answers, evidence and
+    any claim a person entered."""
+    if key != config.APPROVAL_SECRET:
+        return _signin_first(request)
+    from . import reset as rs_reset
+    form = await request.form()
+    tenant = str(form.get("tenant", ""))
+    if str(form.get("confirm", "")).strip().lower() != tenant.lower() or not tenant:
+        return _back_to_content(tenant, sub="byentity",
+                                err="Type the account's key to confirm the rescan.")
+    out = rs_reset.reset(tenant, groups=("scan",), apply=True)
+    if out.get("error"):
+        return _back_to_content(tenant, sub="byentity", err=out["error"])
+    q = _jobs.enqueue(tenant, "harvest", payload={"limit": RESCAN_PAGES, "apply": True,
+                                                  "recrawl": True}, dedupe=False)
+    return _back_to_content(tenant, sub="byentity",
+                            msg=f"Old scan removed ({out['total']} rows); a full crawl is queued"
+                            + ("" if q.get("ok") else f" — but queuing failed: {q.get('why')}"))
+
+
+#: Pages one rescan reads — the whole of a large marketing site (Transak's
+#: last full read was 1,186 pages) in one job.
+RESCAN_PAGES = 3000
+
+
 @app.post("/admin/claims_decide", response_class=HTMLResponse)
 async def claims_decide(request: Request, key: str = Depends(admin_key)):
     """Decide many proposals in one submit.

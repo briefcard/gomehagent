@@ -998,7 +998,10 @@ def check_the_crawl_is_a_kept_source():
     ck("CRAWL the crawl is its own reset group, outside the default reset",
        "crawl" not in default and "page_snapshots" in reset.GROUPS["crawl"]
        and "page_versions" in reset.GROUPS["crawl"]
-       and not any("page_snapshots" in g for k, g in reset.GROUPS.items() if k != "crawl")
+       # `scan` (2026-11-07, a new scan from scratch) also holds the pages —
+       # opt-in by name, like crawl; no DEFAULT group may.
+       and not any("page_snapshots" in reset.GROUPS[k] for k in default)
+       and "scan" not in default
        and "page_snapshots" not in prev, f"default={default}")
     n_before = len(fetch.snapshots("baci"))
     reset.reset("baci", groups=("knowledge",), apply=True)
