@@ -259,12 +259,21 @@ CLAUDE.md. Tenant scoping applies to both new tables.
    (assignment by entity or item type), a second tier for high-risk kinds
    (regulatory, superlative, comparative), and agreement between reviewers as
    a quality figure on the Overview.
-2. **Risk order** — is regulatory > coverage > superlative > comparative the
-   right priority for Transak's compliance?
-3. **What auto-passes** — even at a measured 99%, should any Transak decision
-   skip a person (e.g. "not Transak's claim" for market statistics)?
-4. **Labels** — correct `transak-entity-sample-100.xlsx`; it becomes the fixed
-   test every method is scored against.
+2. **Risk order** — DECIDED (owner, 2026-11-07): regulatory > coverage >
+   superlative > comparative.
+3. **What auto-passes** — DECIDED (owner, 2026-11-07): *"market stats do not
+   need review."* A sentence classified as a market fact skips the queue and is
+   kept as cited background, never as a Transak claim. The risk moves to the
+   CLASSIFICATION: a Transak claim misfiled as "market" would never be seen.
+   So the "market" call is measured like every other method (decision log +
+   the client's sample sheet), and a sample of auto-passed items is shown on
+   the Overview for spot checks.
+4. **Labels** — DECIDED (owner, 2026-11-07): the answer key comes from the
+   CLIENT. *"I would need to give this to the Transak client as a 'claim
+   sample sheet' to train the model."* Built as a client-facing workbook (no
+   internal terms, no AI suggestions shown — an answer key written with the
+   machine's answer in view is anchored to it); its returned answers become
+   the fixed test set every method is scored against, per account.
 
 ## Sources
 - Prodigy, Web application & text classification docs: https://prodi.gy/docs/web-app · https://prodi.gy/docs/text-classification · forum: https://support.prodi.gy/t/efficient-binary-annotation-using-textcat-teach/2343
