@@ -125,6 +125,11 @@ def check_derive():
        r["3p"].subject == "", r["3p"].subject)
     ck("DERIVE the entity comes from the entity's own URL patterns",
        r["off"].entity_key == "offramp", r["off"].entity_key)
+    v = cr.vocabulary(T)
+    ck("DERIVE the page a claim sits on outranks a product merely named in it",
+       cr.entity_of("Acme Stream users can also use the off-ramp.", SITE + "/stream", "", "", v)[0] == "stream")
+    ck("DERIVE two products named on a neutral page are left to a person",
+       cr.entity_of("Acme Stream and the off-ramp both settle fast.", SITE + "/blog/x", "", "", v)[0] == "")
     ck("DERIVE the market comes from a country page's address",
        (r["and"].scope or {}).get("market") == "Andorra", str(r["and"].scope))
     ck("DERIVE the regulator names the jurisdiction",
@@ -231,6 +236,11 @@ def check_gate_and_evidence(ids):
     cr.set_vocabulary(T, "qa", evidence_required=True, record_required=True)
 
 
+def cr_voc(t):
+    from app import claim_record
+    return claim_record.vocabulary(t)["entities"]
+
+
 def check_workbook(ids):
     from openpyxl import load_workbook
     from app import change, claim_sheet as cs
@@ -276,6 +286,11 @@ def check_workbook(ids):
     es.cell(es.max_row + 1, 1).value = "nft-checkout"
     es.cell(es.max_row, 2).value = "NFT Checkout"
     es.cell(es.max_row, 4).value = "/nft-checkout"
+    es.cell(es.max_row, 7).value = "Buy or mint NFTs with fiat."
+    es.cell(es.max_row, 8).value = SITE + "/nft-checkout\n" + SITE + "/blog/nft-guide"
+    for rr in range(2, es.max_row + 1):
+        if es.cell(rr, 1).value == "stream":
+            es.cell(rr, 7).value = "Crypto-to-cash via an assigned wallet address."
     buf = io.BytesIO()
     wb.save(buf)
     up = buf.getvalue()
@@ -286,6 +301,13 @@ def check_workbook(ids):
        any("maybe" in x["why"] and x["where"].startswith(na.title + "!") for x in p["refused"]), str(p["refused"]))
     a = cs.apply(T, up, "qa-anna")
     ck("WORKBOOK a new row on the Entities sheet creates the entity", "nft-checkout" in a["entities_added"])
+    voc = {e["key"]: e for e in cr_voc(T)}
+    ck("WORKBOOK the entity keeps its description and its reference pages",
+       voc["nft-checkout"]["description"] == "Buy or mint NFTs with fiat."
+       and voc["nft-checkout"]["references"] == [SITE + "/nft-checkout", SITE + "/blog/nft-guide"],
+       str(voc.get("nft-checkout")))
+    ck("WORKBOOK an edited existing entity is updated",
+       "stream" in a["entities_updated"] and voc["stream"]["description"].startswith("Crypto-to-cash"))
     with db.SessionLocal() as s:
         copies = s.query(db.KbClaim).filter(db.KbClaim.tenant == T,
                                             db.KbClaim.entity_key.in_(("offramp", "stream")),
@@ -399,6 +421,67 @@ def check_rescan():
        str(job and job.payload))
 
 
+def check_no_duplicates_and_mcp():
+    """Owner, 2026-11-07: "make sure that the claims are connected not
+    duplicated on upload. Also we should make MCP endpoint for this"."""
+    from openpyxl import load_workbook
+    from app import claim_record as cr, claim_sheet as cs, jobs, mcp_server
+    def n_claims():
+        with db.SessionLocal() as s:
+            return s.query(db.KbClaim).filter(db.KbClaim.tenant == T).count()
+    # Attaching via the workbook relinks the claim; uploading twice adds nothing.
+    u = page("/otc", "<p>Acme OTC sources liquidity from 10+ exchanges.</p>", title="OTC")
+    cid = claim("Acme OTC sources liquidity from 10+ exchanges.", u, "data")
+    cr.refresh(T)
+    data = cs.export(T, "all")
+    wb = load_workbook(io.BytesIO(data))
+    hdr = None
+    for w in wb.worksheets:
+        if w.title in ("How to use", "Entities"):
+            continue
+        hdr = [c.value for c in w[1]]
+        col = {f: hdr.index(h) + 1 for h, f, _w, _e in cs.COLUMNS}
+        for r in range(2, w.max_row + 1):
+            if w.cell(r, 1).value == cid:
+                w.cell(r, col["entity"]).value = "stream"
+    buf = io.BytesIO(); wb.save(buf); up = buf.getvalue()
+    before = n_claims()
+    cs.apply(T, up, "qa")
+    ck("NO-DUP attaching a claim to an entity relinks THAT claim — no copy is made",
+       n_claims() == before and get(cid).entity_key == "stream", f"{before} -> {n_claims()}")
+    cs.apply(T, up, "qa")
+    ck("NO-DUP uploading the same workbook again adds nothing", n_claims() == before)
+    # MCP: entities, bulk records, recompute.
+    out = mcp_server.propose_entity(T, "otc", "Acme OTC", "product", description="Large trades.",
+                                    url_patterns=["/otc"], words=["Acme OTC"],
+                                    references=[SITE + "/otc"])
+    again = mcp_server.propose_entity(T, "otc", "Acme OTC", "product", description="Large crypto trades.",
+                                      url_patterns=["/otc"], words=["Acme OTC"], references=[SITE + "/otc"])
+    with db.SessionLocal() as s:
+        rows = s.query(db.KbEntity).filter(db.KbEntity.tenant == T, db.KbEntity.key == "otc").all()
+        rv = rows[0].review if rows else ""
+    ck("MCP propose_entity files a PROPOSED entity with its match rules and references",
+       out["ok"] and rv == "proposed")
+    ck("MCP proposing the same key again updates it — never a second entity", len(rows) == 1 and again["ok"])
+    ents = {e["key"]: e for e in mcp_server.get_entities(T)["entities"]}
+    ck("MCP get_entities returns match rules, references and claim counts",
+       ents["otc"]["match"]["urls"] == ["/otc"] and ents["otc"]["references"] == [SITE + "/otc"]
+       and "urls" not in ents["otc"] and isinstance(ents["stream"]["claims"], dict))
+    before = n_claims()
+    res = mcp_server.propose_claim_records(T, [{"claim_id": cid, "entity_key": "otc", "why": "on /otc"},
+                                               {"claim_id": "nope", "entity_key": "otc"}])
+    ck("MCP propose_claim_records attaches in bulk and reports what failed",
+       res["written"] == 1 and res["failed"] == 1 and n_claims() == before)
+    ck("MCP ... but never moves a claim a reviewer placed", get(cid).entity_key == "stream")
+    ck("MCP propose_claim_records refuses more than its limit",
+       not mcp_server.propose_claim_records(T, [{"claim_id": "x"}] * 501)["ok"])
+    r = mcp_server.recompute_claim_records(T)
+    with db.SessionLocal() as s:
+        kinds = [j.kind for j in s.query(db.JobQueue).filter(db.JobQueue.tenant == T)]
+    ck("MCP recompute_claim_records queues the work on the worker",
+       r["ok"] and "claim_records" in kinds and "claim_groups" in kinds)
+
+
 def main() -> int:
     db.init_db()
     tenants.seed()
@@ -408,6 +491,7 @@ def main() -> int:
     check_gate_and_evidence(ids)
     check_workbook(ids)
     check_console_controls()
+    check_no_duplicates_and_mcp()
     check_rescan()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0

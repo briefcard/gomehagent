@@ -882,6 +882,19 @@ different products, different things counted, different years); 13% fragments;
 * Jobs `claim_records`; refresh after every harvest and reprocess.
 * Suite `scripts/test_claim_record.py`; 9 sabotage guards, all caught.
 
+### 17.3b Added 2026-11-07
+* Entities carry a description and reference pages (Entities sheet columns
+  7–8; `attributes.references`); an edited existing entity is updated.
+* `entity_of`: one URL match outranks products merely named in the claim.
+* Uploads RELINK claims — setting an entity changes that claim; only a
+  second row with another entity (a split) makes a copy, and re-uploading
+  the same file adds nothing (guard `attaching_a_claim_copies_it`).
+* MCP: `get_entities`, `propose_entity` (proposed; same key updates),
+  `propose_claim_records` (bulk ≤500, never over a reviewer),
+  `recompute_claim_records` (queues on the worker).
+* Reset group `scan` + Review › Claims by entity › Start over (keeps what
+  people decided).
+
 ### 17.4 Not done / next
 1. Transak: owner sets names + entities (workbook Entities sheet), turns
    evidence on; a Claude session runs `propose_claim_record` over the ~900

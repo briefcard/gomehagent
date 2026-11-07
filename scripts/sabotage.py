@@ -11167,6 +11167,14 @@ SABOTAGES = [
     },
     # --- the claim record (BUILD-MAP §17) ---------------------------------
     {
+        "name": "attaching_a_claim_copies_it",
+        "file": "app/claim_sheet.py",
+        "find": '        split = cid in seen and r.get("entity") != seen[cid]\n',
+        "replace": '        split = bool(r.get("entity"))  # SABOTAGE\n',
+        "suites": ["test_claim_record.py"],
+        "why": "setting a claim's entity in the workbook makes a second copy of it — every upload doubles the queue and splits the decisions",
+    },
+    {
         "name": "rescan_deletes_peoples_claims",
         "file": "app/reset.py",
         "find": 'PARTIAL = {("scan", "kb_claims"): lambda m: m.origin == "crawl"}\n',

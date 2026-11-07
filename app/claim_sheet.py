@@ -64,7 +64,9 @@ COLUMNS = [
     ("Note / reason", "note", 30, True),
 ]
 ENTITY_COLUMNS = [("key", 16), ("name", 24), ("type", 12), ("URL patterns (comma-separated)", 40),
-                  ("Words (comma-separated)", 40), ("Status", 14)]
+                  ("Words (comma-separated)", 40), ("Status", 14),
+                  ("Description — what it is, for whom", 50),
+                  ("Reference pages (one per line)", 60)]
 README = [
     "How to use this workbook",
     "",
@@ -202,7 +204,8 @@ def export(tenant: str, review: str = "proposed") -> bytes:
         es.column_dimensions[c.column_letter].width = w
     for i, e in enumerate(ents, 2):
         for j, v in enumerate([e["key"], e["name"], e.get("type", ""), ", ".join(e["urls"]),
-                               ", ".join(e["words"]), "existing"], 1):
+                               ", ".join(e["words"]), "existing", e.get("description", ""),
+                               "\n".join(e.get("references") or [])], 1):
             es.cell(row=i, column=j, value=v)
     for i, (path, n) in enumerate(suggest_entities(tenant, {e["key"] for e in ents}),
                                   len(ents) + 2):
@@ -259,13 +262,14 @@ def read(data: bytes) -> dict:
         header = [(str(h or "").strip().lower()) for h in header]
         if ws.title == "Entities":
             for vals in it:
-                v = [("" if x is None else str(x)).strip() for x in (vals or ())] + [""] * 6
+                v = [("" if x is None else str(x)).strip() for x in (vals or ())] + [""] * 8
                 if not v[0]:
                     continue
                 ents.append({"key": v[0], "name": v[1] or v[0], "type": v[2] or "product",
                              "urls": [x.strip() for x in v[3].split(",") if x.strip()],
                              "words": [x.strip() for x in v[4].split(",") if x.strip()],
-                             "status": v[5]})
+                             "status": v[5], "description": v[6],
+                             "references": [x.strip() for x in v[7].splitlines() if x.strip()]})
             continue
         fields = [by_head.get(h, "") for h in header]
         if "claim_id" not in fields:
@@ -297,6 +301,12 @@ def plan(tenant: str, data: bytes) -> dict:
     # "keep", or anything else): a suggestion left as it was creates nothing.
     new_ents = [e for e in parsed["entities"] if e["key"] and e["key"] not in ent_keys
                 and not e["status"].lower().startswith("suggested")]
+    # An existing entity whose row was edited (its URLs, words, description
+    # or references) is updated — the Entities sheet is where they are kept.
+    have = {e["key"]: e for e in claim_record.vocabulary(tenant)["entities"]}
+    upd_ents = [e for e in parsed["entities"] if e["key"] in have and any(
+        e[k] != have[e["key"]].get(k, [] if k in ("urls", "words", "references") else "")
+        for k in ("urls", "words", "description", "references"))]
     known = ent_keys | {e["key"] for e in new_ents}
     steps, refused, seen = [], [], {}
     for r in parsed["claims"]:
@@ -336,7 +346,8 @@ def plan(tenant: str, data: bytes) -> dict:
             continue
         steps.append({"where": r["_where"], "claim_id": cid, "split": split,
                       "changes": ch, "evidence": ev, "decision": dec, "row": r})
-    return {"ok": True, "entities": new_ents, "steps": steps, "refused": refused,
+    return {"ok": True, "entities": new_ents, "entities_updated": upd_ents,
+            "steps": steps, "refused": refused,
             "rows_read": len(parsed["claims"])}
 
 
@@ -347,9 +358,11 @@ def apply(tenant: str, data: bytes, by: str) -> dict:
     p = plan(tenant, data)
     if not p.get("ok"):
         return p
-    for e in p["entities"]:
+    for e in p["entities"] + p.get("entities_updated", []):
         kb.add_entity(tenant, e["type"] or "product", e["key"], e["name"],
-                      attributes={"match": {"urls": e["urls"], "words": e["words"]}},
+                      description=e.get("description", ""),
+                      attributes={"match": {"urls": e["urls"], "words": e["words"]},
+                                  "references": e.get("references", [])},
                       source="claims workbook", origin="human")
     done, refused, changes = [], list(p["refused"]), []
     for st in p["steps"]:
@@ -392,6 +405,7 @@ def apply(tenant: str, data: bytes, by: str) -> dict:
             {"where": st["where"], "claim_id": target, "did": out.get("did", "updated"),
              **({"why": out["refused"]} if out.get("refused") else {})})
     return {"ok": True, "entities_added": [e["key"] for e in p["entities"]],
+            "entities_updated": [e["key"] for e in p.get("entities_updated", [])],
             "applied": done, "refused": refused, "changes": changes}
 
 

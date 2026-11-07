@@ -124,7 +124,8 @@ NAME = "gomehagent"
 #: The tools, by name. The suite asserts the live list IS this tuple, so a
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
-         "get_claims", "propose_claim_record",
+         "get_claims", "propose_claim_record", "propose_claim_records",
+         "get_entities", "propose_entity", "recompute_claim_records",
          "get_statements", "get_trust", "get_truth", "get_pages",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
@@ -1085,6 +1086,128 @@ def propose_claim_record(tenant: str, claim_id: str, subject: str = "",
         subject=subject or None, subject_name=subject_name or None,
         entity_key=entity_key or None, scope=scope or None,
         statement=statement or None, infeasible=infeasible, why=why)
+
+
+#: Most records one `propose_claim_records` call writes.
+RECORDS_MAX = 500
+
+
+@server.tool()
+def propose_claim_records(tenant: str, records: list[dict]) -> dict[str, Any]:
+    """PROPOSE records for many claims in one call — e.g. attach 500 claims to their entities.
+
+    Each item is a dict with `claim_id` and any of the fields
+    `propose_claim_record` takes (subject, subject_name, entity_key, market,
+    jurisdiction, conditions, audience, counts, statement, infeasible, why).
+    The claim itself is updated — never copied: attaching a claim to an
+    entity sets that claim's entity. At most 500 per call. Nothing is
+    approved; a reviewer's value is never overwritten (`held_by_reviewer`).
+    """
+    from . import claim_record, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}"}
+    if not isinstance(records, list) or not records:
+        return {"ok": False, "why": "records must be a non-empty list"}
+    if len(records) > RECORDS_MAX:
+        return {"ok": False, "why": f"at most {RECORDS_MAX} per call", "sent": len(records)}
+    out, done, failed = [], 0, 0
+    for r in records:
+        if not isinstance(r, dict) or not r.get("claim_id"):
+            out.append({"ok": False, "why": "each record needs claim_id"})
+            failed += 1
+            continue
+        scope = {k: r[k] for k in ("market", "jurisdiction", "conditions", "audience", "counts")
+                 if r.get(k)}
+        res = claim_record.set_record(
+            tenant, str(r["claim_id"]), by="claude (mcp)", origin="claude",
+            subject=r.get("subject") or None, subject_name=r.get("subject_name") or None,
+            entity_key=r.get("entity_key") or None, scope=scope or None,
+            statement=r.get("statement") or None, infeasible=bool(r.get("infeasible")),
+            why=str(r.get("why") or ""))
+        res["claim_id"] = r["claim_id"]
+        out.append(res)
+        done += bool(res.get("ok"))
+        failed += not res.get("ok")
+    return {"ok": failed == 0, "written": done, "failed": failed,
+            "results": [x for x in out if not x.get("ok") or x.get("held_by_reviewer")][:100]}
+
+
+@server.tool()
+def get_entities(tenant: str) -> dict[str, Any]:
+    """The account's entities — products and services — with what places a claim on each.
+
+    Per entity: key, name, type, description, the URL patterns and words
+    that attach a claim to it (`match`), its reference pages, whether it is
+    approved, and how many claims are attached (by review state). A claim is
+    true OF one entity, or brand-wide; read this before proposing records.
+    """
+    from . import claim_record, db, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}"}
+    voc = claim_record.vocabulary(tenant)
+    with db.SessionLocal() as s:
+        rows = (s.query(db.KbClaim.entity_key, db.KbClaim.review)
+                .filter(db.KbClaim.tenant == tenant).all())
+        review = {e.key: (e.review or "") for e in
+                  s.query(db.KbEntity).filter(db.KbEntity.tenant == tenant)}
+    counts: dict = {}
+    for k, r in rows:
+        counts.setdefault(k or "", {}).setdefault(r or "", 0)
+        counts[k or ""][r or ""] += 1
+    return {"ok": True, "tenant": tenant, "self_names": voc["self_names"],
+            "record_required": voc["record_required"],
+            "evidence_required": voc["evidence_required"],
+            "entities": [{"key": e["key"], "name": e["name"], "type": e["type"],
+                          "description": e["description"], "references": e["references"],
+                          "match": {"urls": e["urls"], "words": e["words"]},
+                          "review": review.get(e["key"], ""),
+                          "claims": counts.get(e["key"], {})} for e in voc["entities"]],
+            "unassigned_claims": counts.get("", {})}
+
+
+@server.tool()
+def propose_entity(tenant: str, key: str, name: str, type: str = "product",
+                   description: str = "", url_patterns: list[str] | None = None,
+                   words: list[str] | None = None,
+                   references: list[str] | None = None) -> dict[str, Any]:
+    """PROPOSE a product or service the account offers, with what places claims on it.
+
+    `url_patterns`: parts of a page's path that mean "this page is about it"
+    (e.g. "/off-ramp", "/sell/"). `words`: names that mean a sentence is
+    about it ("Transak Stream"). `references`: the pages that describe it.
+    `description`: what it is and for whom, from the account's own pages only.
+    Filed as a PROPOSAL (approved in the console, like any entity); claims
+    attach to it on the next `recompute_claim_records`. An existing key is
+    updated, never duplicated.
+    """
+    from . import kb, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}"}
+    if type not in ("product", "service", "program", "offer", "collection", "space"):
+        return {"ok": False, "why": "type is product | service | program | offer | collection | space"}
+    said = kb.add_entity(tenant, type, key, name, description=description,
+                         attributes={"match": {"urls": [u for u in (url_patterns or []) if u],
+                                               "words": [w for w in (words or []) if w]},
+                                     "references": [r for r in (references or []) if r]},
+                         source="proposed by Claude (mcp)", origin="crawl")
+    return {"ok": not said.startswith(("An entity needs",)), "said": said}
+
+
+@server.tool()
+def recompute_claim_records(tenant: str) -> dict[str, Any]:
+    """Queue the claim records and claim groups to be recomputed (on the worker).
+
+    Run after proposing entities: every claim is placed on the one entity
+    whose page or name it carries (a claim on two is left for a person), and
+    its date, market and kind re-derived. Reviewer and Claude values are kept.
+    """
+    from . import jobs, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}"}
+    a = jobs.enqueue(tenant, "claim_records", label="claim records (mcp)")
+    b = jobs.enqueue(tenant, "claim_groups", label="claim groups (mcp)")
+    return {"ok": True, "claim_records": a, "claim_groups": b,
+            "says": "queued on the worker; read the result with get_entities / get_claims"}
 
 
 # ---------------------------------------------------------------------------

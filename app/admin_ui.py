@@ -6864,6 +6864,9 @@ def workbook_report(tenant: str, res: dict, action: str) -> str:
             + "</li>" for st in res["steps"])
         bad = "".join(f"<li>{_esc(r['where'])}: {_esc(r['why'])}</li>" for r in res["refused"])
         ents = ", ".join(e["key"] for e in res.get("entities") or []) or "none"
+        upd = ", ".join(e["key"] for e in res.get("entities_updated") or [])
+        if upd:
+            ents += f"; entities that would be updated: {upd}"
         body = (f"<h2>Check — {len(res['steps'])} row(s) would change, {len(res['refused'])} refused</h2>"
                 f"<p>{res['rows_read']} rows read. Entities that would be added: {_esc(ents)}. "
                 "Approvals are re-checked against the evidence gate when applied.</p>"

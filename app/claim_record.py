@@ -133,7 +133,9 @@ def vocabulary(tenant: str) -> dict:
             m = (e.attributes or {}).get("match") or {}
             ents.append({"key": e.key, "name": e.name, "type": e.type,
                          "urls": [u for u in (m.get("urls") or []) if u],
-                         "words": [w for w in (m.get("words") or []) if w]})
+                         "words": [w for w in (m.get("words") or []) if w],
+                         "description": e.description or "",
+                         "references": list((e.attributes or {}).get("references") or [])})
     return {"self_names": names, "entities": ents,
             "record_required": bool(conf.get("record_required")),
             "evidence_required": bool(conf.get("evidence_required"))}
@@ -244,11 +246,19 @@ def entity_of(text: str, url: str, section: str, title: str, vocab: dict) -> tup
     when none or several match — never a pick between two."""
     path = "/" + url.split("://", 1)[-1].split("/", 1)[-1].lower() if url else ""
     words_in = " ".join([text or "", section or "", title or ""]).lower()
-    hits = []
+    hits, by_url = [], []
     for e in vocab.get("entities") or []:
-        if any(u.lower() in path for u in e["urls"]) or any(
+        on_url = any(u.lower() in path for u in e["urls"])
+        if on_url:
+            by_url.append(e["key"])
+        if on_url or any(
                 re.search(r"\b" + re.escape(w.lower()) + r"\b", words_in) for w in e["words"]):
             hits.append(e["key"])
+    # The page a claim sits on outranks a product merely NAMED in it: a claim
+    # on /off-ramp that mentions "buy crypto" is the off-ramp's. Only one
+    # URL match decides; two still leave it to a person.
+    if len(by_url) == 1:
+        return by_url[0], hits
     return (hits[0], hits) if len(hits) == 1 else ("", hits)
 
 
