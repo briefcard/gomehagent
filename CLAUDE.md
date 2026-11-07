@@ -11,6 +11,13 @@ is the generator; drafts land in the approval queue. `INITIATIVE-mcp-substrate.m
 is the plan and the record. The sections below describe the app as it was
 built up to that decision and are still accurate about what exists.
 
+## Next: the review surface (2026-11-07) — read before touching the Review tab
+**`INITIATIVE-review-surface.md`**: the audit (a claim card = 22 fields, 9
+buttons, 6 forms; 14 Review sub-tabs; one claim in seven places; AI work and
+reviewer findings invisible), the research, and the 4-layer architecture
+(stage reports → review items → decision log → Overview / Review / Library /
+Changes). Phase 0 is a freeze: no new field on the claim card.
+
 ## Truth pipeline — LIVE (2026-11-06, `c09c71b`)
 
 **`BUILD-MAP-truth-pipeline.md`** is the map: STATUS at the top, §13 the
