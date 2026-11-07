@@ -894,6 +894,11 @@ different products, different things counted, different years); 13% fragments;
   `recompute_claim_records` (queues on the worker).
 * Reset group `scan` + Review › Claims by entity › Start over (keeps what
   people decided).
+* ONE claim, SEVERAL entities: `KbClaim.also_entities` beside the primary
+  `entity_key`. `kb.claims` selects it for any of them; the workbook's Entity
+  cell takes "a, b"; the console select is multiple; MCP takes a list or
+  "a, b". Derive attaches a claim naming several products (on a neutral
+  page) to each; two products' PAGES still leave it to a person.
 
 ### 17.4 Not done / next
 1. Transak: owner sets names + entities (workbook Entities sheet), turns

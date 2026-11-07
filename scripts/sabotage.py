@@ -6756,7 +6756,7 @@ SABOTAGES = [
     {
         "name": "specificity_is_scored_against_the_nearest_subject",
         "file": "app/kb.py",
-        "find": "            depth = max((scope_depth(k, r.entity_key, chain) for k in wanted),\n                        default=scope_depth(None, r.entity_key, chain))",
+        "find": "            depth = max((scope_depth(k, e, chain) for k in wanted for e in _mine),\n                        default=scope_depth(None, r.entity_key, chain))",
         "replace": "            depth = scope_depth(wanted[0] if wanted else None, r.entity_key, chain)  # SABOTAGE",
         "suites": ["test_entity_scope.py"],
         "why": "with several subjects in scope, every claim is scored against "
@@ -11166,6 +11166,14 @@ SABOTAGES = [
                "false reassurance the first live Baci read handed back on 2026-11-03",
     },
     # --- the claim record (BUILD-MAP §17) ---------------------------------
+    {
+        "name": "a_claim_on_two_entities_reaches_only_one",
+        "file": "app/kb.py",
+        "find": '                    or set(getattr(r, "also_entities", None) or []) & (set(wanted) | set(chain))]\n',
+        "replace": '                    or False]  # SABOTAGE\n',
+        "suites": ["test_claim_record.py"],
+        "why": "a claim true of the on-ramp AND the off-ramp is never offered to an article about the second one — the team copies it per product and the copies drift",
+    },
     {
         "name": "attaching_a_claim_copies_it",
         "file": "app/claim_sheet.py",

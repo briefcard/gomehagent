@@ -191,11 +191,16 @@ def claims(tenant: str, situations: list[str] | None = None,
                 if a not in chain:
                     chain.append(a)
         if wanted:
-            q = q.filter(db.KbClaim.entity_key.in_(
-                ["", None, *wanted, *chain]))
+            # A claim attached to several entities (`also_entities`) is found
+            # for any of them — read in Python, so the JSON list needs no
+            # dialect-specific operator.
+            allowed = {"", None, *wanted, *chain}
+            rows = [r for r in q.all()
+                    if r.entity_key in allowed
+                    or set(getattr(r, "also_entities", None) or []) & (set(wanted) | set(chain))]
         else:
             q = q.filter(db.KbClaim.entity_key.in_(["", None]))
-        rows = q.all()
+            rows = q.all()
         scored = []
         for r in rows:
             # Was `r.expires_at and ... < now`, which read the column
@@ -226,7 +231,8 @@ def claims(tenant: str, situations: list[str] | None = None,
             # the Atrium as if it were a distant relative of the Glassbox —
             # every venue's own facts would sort below brand-wide ones in an
             # article whose whole point is the venues.
-            depth = max((scope_depth(k, r.entity_key, chain) for k in wanted),
+            _mine = [r.entity_key] + list(getattr(r, "also_entities", None) or [])
+            depth = max((scope_depth(k, e, chain) for k in wanted for e in _mine),
                         default=scope_depth(None, r.entity_key, chain))
             scored.append((-overlap, -depth,
                            0 if r.strength == "strong" else 1, r))

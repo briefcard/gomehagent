@@ -483,7 +483,8 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
         bundle["claims"] = [
             {"claim": c.claim, "evidence": c.evidence or "", "claim_id": c.id,
              "situations": sorted(c.situations or []),
-             "scope": c.entity_key or "brand-wide",
+             "scope": ", ".join([c.entity_key] + list(getattr(c, "also_entities", None) or []))
+                      if c.entity_key else "brand-wide",
              # THE CLAIM RECORD (claim_record, BUILD-MAP §17): the reviewer's
              # standalone sentence, and every restrictive qualifier — market,
              # conditions, as of when. A generator that drops a qualifier

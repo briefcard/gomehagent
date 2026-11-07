@@ -48,7 +48,7 @@ COLUMNS = [
     ("Kinds", "kinds", 16, False),
     ("Inconsistency group", "group", 16, False),
     ("Subject (self / other / market)", "subject", 12, True),
-    ("Entity (key, or brand-wide)", "entity", 16, True),
+    ("Entity (key, several comma-separated, or brand-wide)", "entity", 20, True),
     ("Market", "market", 18, True),
     ("Jurisdiction", "jurisdiction", 16, True),
     ("Conditions (for whom / which method)", "conditions", 22, True),
@@ -73,6 +73,8 @@ README = [
     "One sheet per entity (product / service). Brand-wide, Not assigned and Not about us hold the rest.",
     "Edit only the light-yellow columns. claim_id ties a row to the claim; never change it.",
     "Move a claim to another entity: change its Entity cell (any sheet is fine — the cell decides).",
+    "True of several entities: list them in the Entity cell, comma-separated (first = main). One",
+    "  claim, attached to each — no copies.",
     "True for one entity in one way and another in another: copy the row, keep claim_id, set a",
     "  different Entity and Statement on each copy.",
     "Decision: approve | reject | history (true on its date, not now) | replace on site | remove from site.",
@@ -122,7 +124,9 @@ def rows(tenant: str, review: str = "proposed") -> list[dict]:
                 "as_of": sc.get("as_of") or sc.get("read_at") or "",
                 "kinds": ", ".join(claim_record.kinds_of_row(c)),
                 "group": (g.id[:8] if g else ""),
-                "subject": c.subject or "", "entity": c.entity_key or (
+                # Every entity the claim is attached to, primary first —
+                # ONE row however many; edit the list to attach or detach.
+                "subject": c.subject or "", "entity": ", ".join(claim_record.entities_of(c)) or (
                     "brand-wide" if sc.get("brand_wide") else ""),
                 "market": sc.get("market", ""), "jurisdiction": sc.get("jurisdiction", ""),
                 "conditions": sc.get("conditions", ""),
@@ -252,6 +256,9 @@ def read(data: bytes) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"claims": [], "entities": [], "errors": [f"not a readable .xlsx: {exc}"]}
     by_head = {h.strip().lower(): f for h, f, _w, _e in COLUMNS}
+    # Headers of workbooks exported by earlier versions still read.
+    by_head.update({"entity (key, or brand-wide)": "entity",
+                    "still needed before approval": "missing"})
     out, ents, errors = [], [], []
     for ws in wb.worksheets:
         it = ws.iter_rows(values_only=True)
@@ -316,10 +323,13 @@ def plan(tenant: str, data: bytes) -> dict:
             refused.append({"where": r["_where"], "claim_id": cid,
                             "why": "no such claim on this account (deleted, or another account's file)"})
             continue
-        if r.get("entity") and r["entity"] != "brand-wide" and r["entity"] not in known:
+        _keys = claim_record.entity_keys_of(r.get("entity", ""))
+        _bad = [k for k in _keys if k != "brand-wide" and k not in known]
+        if _bad:
             refused.append({"where": r["_where"], "claim_id": cid,
-                            "why": f"entity {r['entity']!r} is not on the Entities sheet"})
+                            "why": f"entity {', '.join(map(repr, _bad))} is not on the Entities sheet"})
             continue
+        r["entity"] = ", ".join(_keys)
         dec = (r.get("decision") or "").strip().lower()
         if dec not in DECISIONS:
             refused.append({"where": r["_where"], "claim_id": cid,
@@ -419,7 +429,8 @@ def _split(tenant: str, claim_id: str, r: dict, by: str) -> str:
             return ""
         args = dict(claim=r.get("statement") or c.claim, evidence=c.evidence or "",
                     tags=list(c.situations or []), proof_type=c.proof_type or "spec",
-                    source=c.source or "", entity_key=r.get("entity") if r.get("entity") != "brand-wide" else "",
+                    source=c.source or "", entity_key=(claim_record.entity_keys_of(r.get("entity", "")) or [""])[0]
+                    if r.get("entity") != "brand-wide" else "",
                     proves="", context=c.context or "", attributed_to=c.attributed_to or "")
     kb.add_claim(tenant, status="pending", origin="human", assess=False, **args)
     with db.SessionLocal() as s:

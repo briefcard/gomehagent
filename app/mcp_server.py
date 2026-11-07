@@ -1000,6 +1000,7 @@ def get_claims(tenant: str, review: str = "all", query: str = "",
         "host": _host(c.source or ""), "attributed_to": c.attributed_to or "",
         "context": c.context or "", "proves": c.proves or "",
         "situations": list(c.situations or []), "entity_key": c.entity_key or "",
+        "also_entities": list(c.also_entities or []),
         "review": r, "status": c.status or "", "origin": c.origin or "",
         "strength": c.strength or "", "verified_at": _iso(c.verified_at),
         "expires_at": _iso(c.expires_at),
@@ -1062,8 +1063,9 @@ def propose_claim_record(tenant: str, claim_id: str, subject: str = "",
     * `subject`: self (the account says it of itself) | other (about a named
       partner or third party — put the name in `subject_name`) | market (an
       industry or market fact). Only `self` can ever be approved as a claim.
-    * `entity_key`: which of the account's entities it is true of, or
-      "brand-wide". Leave empty when the page does not say.
+    * `entity_key`: which of the account's entities it is true of — one key,
+      several comma-separated (first = main; one claim attached to each, never
+      a copy), or "brand-wide". Leave empty when the page does not say.
     * `market`, `jurisdiction`, `conditions` (for whom / which method / which
       KYC level), `audience` (partners or end users), `counts` (what a number
       counts): restrictive qualifiers — the claim is false without them.
@@ -1146,8 +1148,10 @@ def get_entities(tenant: str) -> dict[str, Any]:
         return {"ok": False, "why": f"unknown account {tenant!r}"}
     voc = claim_record.vocabulary(tenant)
     with db.SessionLocal() as s:
-        rows = (s.query(db.KbClaim.entity_key, db.KbClaim.review)
-                .filter(db.KbClaim.tenant == tenant).all())
+        rows = []
+        for k, also, r in (s.query(db.KbClaim.entity_key, db.KbClaim.also_entities, db.KbClaim.review)
+                           .filter(db.KbClaim.tenant == tenant).all()):
+            rows += [(k, r)] + [(a, r) for a in (also or []) if a]
         review = {e.key: (e.review or "") for e in
                   s.query(db.KbEntity).filter(db.KbEntity.tenant == tenant)}
     counts: dict = {}

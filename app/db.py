@@ -1992,6 +1992,11 @@ class KbClaim(_Provenance, Base):
     # supporting or approving them" — and the approved claim is what a prompt
     # receives, so a sentence without its scope is a sentence a generator
     # will repeat out of scope.
+    #: OTHER entities this same claim is true of, besides `entity_key` (the
+    #: primary). Owner, 2026-11-07: "we should be able to note that some claims
+    #: are attached to a few entities" — one claim, several entities, never a
+    #: copy per entity. Selection for any of them finds it (kb.claims).
+    also_entities = Column(JSON, default=list)
     #: self | other | market | "" (not decided). Only `self` is a claim the
     #: account makes; the others are cited background at most.
     subject = Column(String, default="")

@@ -258,8 +258,13 @@ def entity_of(text: str, url: str, section: str, title: str, vocab: dict) -> tup
     # on /off-ramp that mentions "buy crypto" is the off-ramp's. Only one
     # URL match decides; two still leave it to a person.
     if len(by_url) == 1:
-        return by_url[0], hits
-    return (hits[0], hits) if len(hits) == 1 else ("", hits)
+        return by_url[0], [by_url[0]]
+    if len(by_url) > 1:
+        return "", by_url                  # two products' pages: a person decides
+    # Named products, on a neutral page: the claim is about EACH of them
+    # ("one integration covers on-ramp and off-ramp"), so it is attached to
+    # all — one claim, several entities (owner, 2026-11-07).
+    return (hits[0], hits) if hits else ("", [])
 
 
 def derive(tenant: str, row, vocab: dict | None = None, docs: dict | None = None) -> dict:
@@ -343,6 +348,7 @@ def _merge(row, d: dict, how: str) -> None:
         row.subject, row.subject_name, so["subject"] = d["subject"], d.get("subject_name", ""), "rule"
     if d.get("entity_key") and not row.entity_key and RANK.get(so.get("entity", ""), 0) <= 1:
         row.entity_key, so["entity"] = d["entity_key"], "vocabulary"
+        row.also_entities = [k for k in (d.get("entity_candidates") or []) if k != d["entity_key"]]
     row.kinds = "|".join(d.get("kinds") or [])
     row.scope, row.scope_origin = sc, so
     if not row.record_status:
@@ -353,9 +359,27 @@ def _merge(row, d: dict, how: str) -> None:
 # Setting the record — Claude proposes, a reviewer confirms
 # ---------------------------------------------------------------------------
 
+def entity_keys_of(value) -> list[str]:
+    """'a, b' | ['a', 'b'] | 'a' -> ['a', 'b'] — the first is the primary."""
+    if isinstance(value, (list, tuple)):
+        items = [str(v) for v in value]
+    else:
+        items = str(value or "").replace("\n", ",").split(",")
+    out = []
+    for k in (i.strip() for i in items):
+        if k and k not in out:
+            out.append(k)
+    return out
+
+
+def entities_of(row) -> list[str]:
+    """Every entity a claim is attached to, primary first."""
+    return [k for k in [row.entity_key or ""] + list(getattr(row, "also_entities", None) or []) if k]
+
+
 def set_record(tenant: str, claim_id: str, by: str, origin: str = "reviewer",
                subject: str | None = None, subject_name: str | None = None,
-               entity_key: str | None = None, scope: dict | None = None,
+               entity_key: "str | list | None" = None, scope: dict | None = None,
                statement: str | None = None, infeasible: bool = False,
                why: str = "") -> dict:
     """Write record fields at `origin` (claude | reviewer). Claude never
@@ -387,17 +411,22 @@ def set_record(tenant: str, claim_id: str, by: str, origin: str = "reviewer",
             if subject_name is not None:
                 row.subject_name = subject_name
         if entity_key is not None and may("entity"):
-            if entity_key and entity_key != "brand-wide":
-                if not s.query(db.KbEntity).filter(db.KbEntity.tenant == tenant,
-                                                   db.KbEntity.key == entity_key).first():
-                    return {"ok": False, "why": f"no entity {entity_key!r} on this account"}
-                row.entity_key = entity_key
+            keys = entity_keys_of(entity_key)
+            if keys and keys != ["brand-wide"]:
+                if "brand-wide" in keys:
+                    return {"ok": False, "why": "brand-wide cannot be combined with entities"}
+                known = {k for (k,) in s.query(db.KbEntity.key).filter(
+                    db.KbEntity.tenant == tenant, db.KbEntity.key.in_(keys))}
+                bad = [k for k in keys if k not in known]
+                if bad:
+                    return {"ok": False, "why": f"no entity {', '.join(map(repr, bad))} on this account"}
+                row.entity_key, row.also_entities = keys[0], keys[1:]
                 sc.pop("brand_wide", None)
-            elif entity_key == "brand-wide":
-                row.entity_key, sc["brand_wide"] = "", True
+            elif keys == ["brand-wide"]:
+                row.entity_key, row.also_entities, sc["brand_wide"] = "", [], True
                 so["brand_wide"] = origin
             else:
-                row.entity_key = ""
+                row.entity_key, row.also_entities = "", []
             so["entity"] = origin
         for k, v in (scope or {}).items():
             if may(k):
@@ -653,7 +682,7 @@ def qualifier_line(row, entity_names: dict | None = None) -> str:
     sc = row.scope or {}
     parts = []
     if row.entity_key:
-        parts.append((entity_names or {}).get(row.entity_key, row.entity_key))
+        parts.append(" + ".join((entity_names or {}).get(k, k) for k in entities_of(row)))
     elif sc.get("brand_wide"):
         parts.append("brand-wide")
     for k in ("market", "jurisdiction", "audience", "environment", "conditions", "counts"):

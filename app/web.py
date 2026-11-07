@@ -9428,7 +9428,7 @@ async def claim_record_set(request: Request, key: str = Depends(admin_key)):
     out = claim_record.set_record(
         tenant, cid, by=_qa_by(form, request), origin="reviewer",
         subject=(str(form.get("subject")) if "subject" in form else None),
-        entity_key=(str(form.get("entity")) if "entity" in form else None),
+        entity_key=([v for v in form.getlist("entity") if v] if "entity" in form else None),
         scope=scope or None,
         statement=(str(form.get("statement")) if "statement" in form else None))
     if not out.get("ok"):

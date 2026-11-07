@@ -6688,8 +6688,9 @@ def _record_block(tenant: str, p, evs: list, cat: list) -> str:
         f'<input name="reason" placeholder="why withdrawn" size="14">{_reviewer_field()}'
         f'<button class="sec" name="action" value="withdraw">Withdraw</button></form></li>'
         for e in evs)
+    _mine = set(cr.entities_of(p))
     ent_opts = "".join(
-        f'<option value="{_esc(k)}"{" selected" if k == (p.entity_key or "") else ""}>{_esc(n)}</option>'
+        f'<option value="{_esc(k)}"{" selected" if k in _mine else ""}>{_esc(n)}</option>'
         for k, n in cat)
     bw = " selected" if sc.get("brand_wide") else ""
     subj_opts = "".join(
@@ -6716,8 +6717,8 @@ def _record_block(tenant: str, p, evs: list, cat: list) -> str:
                 <input type="hidden" name="tenant" value="{_esc(tenant)}">
                 <input type="hidden" name="claim_id" value="{_esc(p.id)}">
                 <label>Who it is about</label><select name="subject">{subj_opts}</select>
-                <label>True of</label>
-                <select name="entity"><option value="">— not decided —</option>
+                <label>True of — pick one or several (Ctrl/⌘-click); one claim, attached to each</label>
+                <select name="entity" multiple size="5"><option value="">— not decided —</option>
                   <option value="brand-wide"{bw}>the whole brand</option>{ent_opts}</select>
                 <label>Market</label><input name="market" value="{_esc(sc.get("market", ""))}" placeholder="e.g. United States, EU">
                 <label>Jurisdiction (regulatory claims)</label><input name="jurisdiction" value="{_esc(sc.get("jurisdiction", ""))}">

@@ -128,8 +128,9 @@ def check_derive():
     v = cr.vocabulary(T)
     ck("DERIVE the page a claim sits on outranks a product merely named in it",
        cr.entity_of("Acme Stream users can also use the off-ramp.", SITE + "/stream", "", "", v)[0] == "stream")
-    ck("DERIVE two products named on a neutral page are left to a person",
-       cr.entity_of("Acme Stream and the off-ramp both settle fast.", SITE + "/blog/x", "", "", v)[0] == "")
+    e, allk = cr.entity_of("Acme Stream and the off-ramp both settle fast.", SITE + "/blog/x", "", "", v)
+    ck("DERIVE two products named on a neutral page: ONE claim attached to both",
+       e in ("offramp", "stream") and set(allk) == {"offramp", "stream"}, f"{e} {allk}")
     ck("DERIVE the market comes from a country page's address",
        (r["and"].scope or {}).get("market") == "Andorra", str(r["and"].scope))
     ck("DERIVE the regulator names the jurisdiction",
@@ -381,6 +382,63 @@ def check_console_controls():
        "/admin/claim_record" in html and "/admin/claim_evidence" in html and "Before this can be approved" in html)
 
 
+def check_several_entities():
+    """Owner, 2026-11-07: "we should be able to note that some claims are
+    attached to a few entities" — one claim, several entities, no copies."""
+    from openpyxl import load_workbook
+    from app import claim_record as cr, claim_sheet as cs, mcp_server
+    def n_claims():
+        with db.SessionLocal() as s:
+            return s.query(db.KbClaim).filter(db.KbClaim.tenant == T).count()
+    u = page("/blog/both", "<p>Acme's on and off ramps settle in minutes.</p>", date="2026-10-01")
+    cid = claim("Acme's on and off ramps settle in minutes.", u, "spec")
+    cr.refresh(T)
+    before = n_claims()
+    data = cs.export(T, "all")
+    wb = load_workbook(io.BytesIO(data))
+    for w in wb.worksheets:
+        if w.title in ("How to use", "Entities"):
+            continue
+        hdr = [c.value for c in w[1]]
+        col = {f: hdr.index(h) + 1 for h, f, _w, _e in cs.COLUMNS}
+        for r in range(2, w.max_row + 1):
+            if w.cell(r, 1).value == cid:
+                w.cell(r, col["entity"]).value = "offramp, stream"
+    buf = io.BytesIO(); wb.save(buf)
+    cs.apply(T, buf.getvalue(), "qa")
+    row = get(cid)
+    ck("SEVERAL one row listing two entities attaches the claim to both — no copy",
+       row.entity_key == "offramp" and row.also_entities == ["stream"] and n_claims() == before,
+       f"{row.entity_key} {row.also_entities} {before}->{n_claims()}")
+    data2 = cs.export(T, "all")
+    wb2 = load_workbook(io.BytesIO(data2))
+    hits = []
+    for w in wb2.worksheets:
+        for r in range(2, w.max_row + 1):
+            if w.cell(r, 1).value == cid:
+                hdr = [c.value for c in w[1]]
+                hits.append((w.title, w.cell(r, hdr.index(cs.COLUMNS[7][0]) + 1).value))
+    ck("SEVERAL the workbook shows it once, with every entity in its cell",
+       len(hits) == 1 and hits[0][1] == "offramp, stream", str(hits))
+    cr.set_record(T, cid, by="qa", statement="As of Oct 2026, Acme's on- and off-ramp settle in minutes.")
+    cr.add_evidence(T, cid, "qa", "statement", method="median settlement time, ops dashboard")
+    ok = kb.review_claim(cid, True, by="qa")
+    found = cid in {c.id for c in kb.claims(T, entity_key="stream")}
+    ck("SEVERAL selection for EITHER entity finds the one claim",
+       ok.startswith("Approved") and found and cid in {c.id for c in kb.claims(T, entity_key="offramp")}, ok[:150])
+    ck("SEVERAL ... and it is not offered as brand-wide", cid not in {c.id for c in kb.claims(T)})
+    ck("SEVERAL the prompt's qualifiers name both", "offramp + stream" in cr.qualifier_line(get(cid)))
+    ents = {e["key"]: e for e in mcp_server.get_entities(T)["entities"]}
+    ck("SEVERAL get_entities counts the claim under each entity",
+       sum(ents["stream"]["claims"].values()) >= 1 and sum(ents["offramp"]["claims"].values()) >= 1)
+    c2 = claim("Acme Stream and NFT checkout share one KYC.", u, "spec")
+    out = mcp_server.propose_claim_records(T, [{"claim_id": c2, "entity_key": "stream, nope"}])
+    ck("SEVERAL an unknown key in the list is refused", out["failed"] == 1, str(out))
+    out = mcp_server.propose_claim_records(T, [{"claim_id": c2, "entity_key": ["stream", "offramp"]}])
+    ck("SEVERAL Claude may propose several entities in one record",
+       out["written"] == 1 and get(c2).entity_key == "stream" and get(c2).also_entities == ["offramp"])
+
+
 def check_rescan():
     """Owner, 2026-11-07: "run a new scan completely and toss the old info" —
     without tossing what people decided."""
@@ -492,6 +550,7 @@ def main() -> int:
     check_workbook(ids)
     check_console_controls()
     check_no_duplicates_and_mcp()
+    check_several_entities()
     check_rescan()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0
