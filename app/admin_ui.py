@@ -6797,8 +6797,12 @@ def _claims_record_card(tenant: str, key: str = "") -> str:
 </div>
 <div class="card">
   <div class="head"><h2>Start over — a new scan</h2></div>
-  <p class="mut">Removes everything the last scan produced — {_scan_n(tenant)} — and
-  crawls every page again with the current readers. <b>Kept:</b> this account's names
+  <p class="mut"><b>Three ways the site is read — pick the one you mean.</b>
+  <b>Run harvest</b> reads only pages that are new or changed since the last read.
+  <b>Re-read stored pages</b> (Review › Checks) re-reads the pages already stored, with
+  the current readers — no crawl. <b>This button</b> starts over: it removes everything
+  the last scan produced — {_scan_n(tenant)} — and crawls every page again.</p>
+  <p class="mut"> <b>Kept:</b> this account's names
   and switches, its entities, approved answers, known answers, evidence, and any claim
   a person entered. Approvals of crawled claims are lost with them.</p>
   <form class="f" method="post" action="/admin/rescan">
@@ -9698,7 +9702,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
   <p class="mut">Found on {_esc(t.name)}'s own site. Invisible to every generator
   until approved. Anything using a banned phrase was dropped, not queued.</p>
   {proposals}
-  {'' if pending else f'<div class="row">{_act(key, "/admin/harvest", "Find proposals", tenant, {"apply": "1"})}{_act(key, "/admin/email_harvest", "Mine sent mail", tenant, {"ui": "1"})}<span class="mut">the feeders — their last-ran state is in Sources above</span></div>'}
+  {'' if pending else f'<div class="row">{_act(key, "/admin/harvest", "Run harvest", tenant, {"apply": "1"})}{_act(key, "/admin/email_harvest", "Mine sent mail", tenant, {"ui": "1"})}<span class="mut">the feeders — their last-ran state is in Sources above</span></div>'}
   {clear_all}
 </div>""",
         "pictures": assets_form,
@@ -9804,7 +9808,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
       <input type="hidden" name="ui" value="1">
       <button>Clear and re-harvest</button>
     </form>
-    <span class="mut">then run Find proposals / Mine sent mail on the
+    <span class="mut">then run Run harvest / Mine sent mail on the
     Claims section</span>
   </div>
   </div>

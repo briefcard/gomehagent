@@ -1196,10 +1196,14 @@ def check_claim_groups_work_in_progress():
                              review="proposed", status="pending", origin="crawl"))
         s.commit()
     c = TestClient(_web.app)
-    r = c.post("/admin/claim_groups_rebuild?key=s3cret", data={"tenant": "baci"}, follow_redirects=False)
+    # The console's Re-group runs on the worker (claim_groups_rebuild_queued,
+    # pressed in test_claim_record); this is the job it queues.
+    claim_groups.job("baci")
+    r = c.post("/admin/claim_groups_rebuild_queued?key=s3cret", data={"tenant": "baci", "sub": "wording"},
+               follow_redirects=False)
     g = next((x for x in claim_groups.listing("baci") if x["kind"] == "inconsistency"
               and any("26+" in m["wording"] for m in x["members"])), None)
-    ck("GROUPS 'Re-group now' finds the same sentence stated with two numbers",
+    ck("GROUPS 'Re-group' finds the same sentence stated with two numbers",
        r.status_code in (200, 303) and g is not None and len(g["members"]) == 2)
     if g:
         keep = next(m for m in g["members"] if "26+" in m["wording"])

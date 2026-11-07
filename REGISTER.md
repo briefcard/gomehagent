@@ -14,7 +14,7 @@ Every declared endpoint in this codebase, and what consumes it. Three things are
 
 ## Coverage
 
-- HTTP routes: **280** (280 reached)
+- HTTP routes: **279** (279 reached)
 - Approval kinds: **15** (12 with an executor arm)
 - Dispositions: **3**
 - Autonomy rungs: **3**
@@ -402,7 +402,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`classify`**(a, b) → `tuple[str, str, str]`  ·  **from nothing**
 - **`compute`**(tenant, use_embeddings?) → `list[dict]`  ·  from `client_report.py`, `test_metrics.py`
 - **`decide`**(tenant, group_id, decision, reason, by?, member_id?, replacement?) → `dict`  ·  route `GET /decide/{token}`  ·  from `test_article_review.py`, `test_pipeline.py`, `web.py`
-- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 - **`labels_needed`**(target?) → `int`  ·  from `admin_ui.py`
 - **`listing`**(tenant, status?, kind?) → `list[dict]`  ·  from `admin_ui.py`, `mcp_server.py`, `test_claim_record.py`, `test_pipeline.py`
 - **`method_is_auto`**(stats, method) → `bool`  ·  **from nothing**
@@ -420,7 +420,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`entity_of`**(text, url, section, title, vocab) → `tuple[str, list[str]]`  ·  **from nothing**
 - **`evidence_for`**(tenant, target_ids, include_withdrawn?) → `dict`  ·  from `admin_ui.py`, `claim_sheet.py`, `test_claim_record.py`
 - **`gate`**(tenant, row) → `str`  ·  from `kb.py`, `test_claim_record.py`
-- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 - **`jurisdiction_in`**(text) → `str`  ·  **from nothing**
 - **`kinds_of_row`**(row) → `list[str]`  ·  from `admin_ui.py`, `claim_sheet.py`
 - **`markets_in`**(text, url?) → `tuple[list[str], str]`  ·  **from nothing**
@@ -483,7 +483,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `commands.py`
 
-- **`job`**(tenant?, kind?, payload?, chat_id?, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant?, kind?, payload?, chat_id?, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 
 ### `commerce_events.py`
 
@@ -803,7 +803,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 - **`compute`**(tenant) → `list[dict]`  ·  from `client_report.py`, `test_metrics.py`
 - **`decide`**(tenant, finding_id, decision, reason, by?, value?, url?, entity?, market?) → `dict`  ·  route `GET /decide/{token}`  ·  from `test_article_review.py`, `test_pipeline.py`, `web.py`
-- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 - **`listing`**(tenant, status?) → `list[dict]`  ·  from `admin_ui.py`, `mcp_server.py`, `test_claim_record.py`, `test_pipeline.py`
 - **`rebuild`**(tenant) → `dict`  ·  from `harvest.py`, `pipeline/reprocess.py`, `web.py`
 
@@ -1470,7 +1470,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`check_known`**(tenant, record?) → `dict`  ·  from `findings.py`, `harvest.py`, `pipeline/reprocess.py`, `test_pipeline.py`, `web.py`
 - **`decide_audit`**(tenant, audit_id, complete, missed?, by?) → `bool`  ·  from `test_pipeline.py`, `web.py`
 - **`draw_sample`**(tenant, n?, seed?) → `list[dict]`  ·  from `test_pipeline.py`, `web.py`
-- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 - **`known_answers`**(tenant) → `list`  ·  from `admin_ui.py`, `test_pipeline.py`
 - **`open_audits`**(tenant) → `list[dict]`  ·  from `admin_ui.py`, `test_pipeline.py`
 - **`remove_known`**(tenant, ka_id) → `bool`  ·  from `test_pipeline.py`, `web.py`
@@ -1548,13 +1548,13 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 
 ### `pipeline/reprocess.py`
 
-- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 - **`reprocess`**(tenant, apply?) → `dict`  ·  from `test_pipeline.py`
 
 ### `pipeline/retention.py`
 
 - **`clean`**(tenant?, apply?) → `dict`  ·  from `test_archive.py`, `test_pipeline.py`, `worker.py`
-- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 
 ### `planner.py`
 
@@ -1658,7 +1658,7 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`fits`**(tenant, cast_) → `dict`  ·  from `test_the_email_is_the_brands.py`, `test_the_model_makes_the_email.py`
 - **`frame`**(html, width?) → `str`  ·  from `test_the_email_is_the_brands.py`
 - **`html_of`**(recreation_id) → `str`  ·  from `mcp_server.py`, `pipeline/parse.py`, `pipeline/reprocess.py`, `test_pipeline.py`, `web.py`
-- **`job`**(tenant, mode?, structure?, url?, entity_key?, seed?, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`
+- **`job`**(tenant, mode?, structure?, url?, entity_key?, seed?, progress?) → `dict`  ·  from `test_heavy_work_goes_to_the_worker.py`, `test_job_queue.py`, `test_pipeline.py`
 - **`judge`**(reference_png, ours_png, brief_, tenant?, material?, notes?, turned_?, reader?) → `dict`  ·  from `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`
 - **`kb_ban`**(tenant) → `list`  ·  **from nothing**
 - **`kit`**(tenant) → `dict`  ·  from `test_the_model_makes_the_email.py`, `test_the_model_writes_the_article.py`, `test_whats_new_reaches_every_writer.py`
@@ -2181,7 +2181,6 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`claim_evidence`**(request, key?) → `—`  ·  route `POST /admin/claim_evidence`  ·  **from nothing**
 - **`claim_from_note`**(request, key?) → `error`  ·  route `POST /admin/claim_from_note`  ·  **from nothing**
 - **`claim_group_decide`**(request, key?) → `—`  ·  route `POST /admin/claim_group_decide`  ·  **from nothing**
-- **`claim_groups_rebuild`**(request, key?) → `—`  ·  route `POST /admin/claim_groups_rebuild`  ·  **from nothing**
 - **`claim_groups_rebuild_queued`**(request, key?) → `—`  ·  route `POST /admin/claim_groups_rebuild_queued`  ·  **from nothing**
 - **`claim_record_set`**(request, key?) → `—`  ·  route `POST /admin/claim_record`  ·  **from nothing**
 - **`claim_review`**(key?, claim_id?, approve?, tenant?, ui?, next?, cpage?, back?, bsub?, bstate?, bpage?, bq?) → `error, result`  ·  route `GET /admin/claim_review`  ·  **from nothing**

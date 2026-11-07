@@ -8996,7 +8996,7 @@ async def purge_harvested_apply(request: Request, key: str = Depends(admin_key))
         gone = sum(v.get("total", 0) for v in (result.get("deleted") or {}).values())
         return _back_to_content(
             tenant, err=f"Cleared {gone} crawled and mailed rows "
-                        f"— then run Find proposals and Mine sent mail on Review's "
+                        f"— then run Run harvest and Mine sent mail on Review's "
                         f"Claims section to re-harvest; the ban list, vocabulary "
                         f"and catalogue were kept.")
     return result
@@ -9325,18 +9325,6 @@ async def claim_group_decide(request: Request, key: str = Depends(admin_key)):
     if out.get("tasks") is not None:
         msg = f"Recorded — {out['tasks']} place(s) to update, listed under Changes"
     return _back_to_content(tenant, sub="wording", msg=msg)
-
-
-@app.post("/admin/claim_groups_rebuild", response_class=HTMLResponse)
-async def claim_groups_rebuild(request: Request, key: str = Depends(admin_key)):
-    if key != config.APPROVAL_SECRET:
-        return _signin_first(request)
-    from . import claim_groups
-    form = await request.form()
-    tenant = str(form.get("tenant", ""))
-    out = claim_groups.rebuild(tenant)
-    return _back_to_content(tenant, sub="wording",
-                            msg=f"{out['groups']} groups ({out['new']} new, {out['dropped']} gone)")
 
 
 @app.post("/admin/claim_groups_rebuild_queued", response_class=HTMLResponse)
