@@ -221,7 +221,7 @@ Overview › account actions, behind a confirmation).
 ### 3.E Roles
 | Role | Decides | Surface |
 |---|---|---|
-| Reviewer | scope and truth of claims; groups; findings | Review |
+| Reviewer | scope and truth of claims; groups; findings | Review — the owner first; Transak's team later, by entity or item type |
 | Proof | evidence for approved claims | Library › proof |
 | Site editor | page changes | Changes |
 | Account owner | names, entities, switches, rescans | Overview › settings |
@@ -251,8 +251,14 @@ CLAUDE.md. Tenant scoping applies to both new tables.
 ---
 
 ## 5. Decisions only the owner can make
-1. **Who reviews Transak** — you alone, Transak's team, or both (tiers)? This
-   sets whether roles need separate logins now or later.
+1. **Who reviews Transak** — DECIDED (owner, 2026-11-07): *"Initially me then
+   the team."* So: build for one reviewer first — no assignment, no second
+   approval tier — but every decision already records WHO (`review_events.by`,
+   the console's reviewer field), so the team joins without a migration.
+   Designed in now, built when the team arrives: per-reviewer queues
+   (assignment by entity or item type), a second tier for high-risk kinds
+   (regulatory, superlative, comparative), and agreement between reviewers as
+   a quality figure on the Overview.
 2. **Risk order** — is regulatory > coverage > superlative > comparative the
    right priority for Transak's compliance?
 3. **What auto-passes** — even at a measured 99%, should any Transak decision
