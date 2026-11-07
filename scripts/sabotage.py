@@ -11167,6 +11167,14 @@ SABOTAGES = [
     },
     # --- the claim record (BUILD-MAP §17) ---------------------------------
     {
+        "name": "proof_blocks_while_only_noted",
+        "file": "app/claim_record.py",
+        "find": '        proof_missing(tenant, row) if v["evidence_required"] else [])\n',
+        "replace": '        proof_missing(tenant, row))  # SABOTAGE\n',
+        "suites": ["test_claim_record.py"],
+        "why": "a claim with a complete record waits for proof the owner chose to add after approval — the review stalls on a role that does not exist yet",
+    },
+    {
         "name": 'claims_approve_without_evidence',
         "file": 'app/kb.py',
         "find": '            refusal = claim_record.gate(row.tenant, row)\n',

@@ -58,7 +58,8 @@ COLUMNS = [
     ("Evidence link", "ev_link", 30, True),
     ("Evidence statement / how we quantify", "ev_method", 40, True),
     ("Evidence as of (YYYY-MM-DD)", "ev_as_of", 14, True),
-    ("Still needed before approval", "missing", 50, False),
+    ("Record still needed", "missing", 45, False),
+    ("Proof (noted; can be added after approval)", "proof", 45, False),
     ("Reviewer", "reviewer", 14, True),
     ("Note / reason", "note", 30, True),
 ]
@@ -73,7 +74,8 @@ README = [
     "True for one entity in one way and another in another: copy the row, keep claim_id, set a",
     "  different Entity and Statement on each copy.",
     "Decision: approve | reject | history (true on its date, not now) | replace on site | remove from site.",
-    "  approve is refused, with the reason, until the 'Still needed' column is satisfied.",
+    "  approve is refused, with the reason, while 'Record still needed' is not empty (when the",
+    "  account requires a complete record). Proof is noted; it can be added after approval.",
     "  replace / remove create one task per page the claim appears on (Review › Changes).",
     "Evidence: a link to the source of record, and/or the team's statement of how it is counted.",
     "Entities sheet: add a row to create an entity; URL patterns and words place claims on it.",
@@ -126,7 +128,9 @@ def rows(tenant: str, review: str = "proposed") -> list[dict]:
                 "ev_link": "\n".join(e["url"] for e in ev if e["kind"] == "link"),
                 "ev_method": "\n".join((e["method"] or e["text"]) for e in ev
                                        if e["kind"] == "statement" or e["method"]),
-                "ev_as_of": "", "missing": "\n".join(claim_record.missing(tenant, c, ev)),
+                "ev_as_of": "", "missing": "\n".join(claim_record.record_missing(c)),
+                "proof": ("on file" if not claim_record.proof_missing(tenant, c, ev) else
+                          "pending — " + " ".join(claim_record.proof_missing(tenant, c, ev))),
                 "reviewer": "", "note": "",
                 "_sheet": ("_other" if c.subject in ("other", "market") else
                            (c.entity_key or ("brand-wide" if sc.get("brand_wide") else ""))),

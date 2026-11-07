@@ -135,11 +135,13 @@ def vocabulary(tenant: str) -> dict:
                          "urls": [u for u in (m.get("urls") or []) if u],
                          "words": [w for w in (m.get("words") or []) if w]})
     return {"self_names": names, "entities": ents,
+            "record_required": bool(conf.get("record_required")),
             "evidence_required": bool(conf.get("evidence_required"))}
 
 
 def set_vocabulary(tenant: str, by: str, self_names: list[str] | None = None,
-                   evidence_required: bool | None = None) -> dict:
+                   evidence_required: bool | None = None,
+                   record_required: bool | None = None) -> dict:
     with db.SessionLocal() as s:
         b = s.get(db.KbBrand, tenant)
         if b is None:
@@ -149,6 +151,8 @@ def set_vocabulary(tenant: str, by: str, self_names: list[str] | None = None,
             conf["self_names"] = [n.strip() for n in self_names if n.strip()]
         if evidence_required is not None:
             conf["evidence_required"] = bool(evidence_required)
+        if record_required is not None:
+            conf["record_required"] = bool(record_required)
         conf["updated_by"] = by
         b.claim_scope = conf
         s.commit()
@@ -553,9 +557,31 @@ def _satisfies(need: str, evs: list[dict], today: dt.date) -> bool:
 
 def missing(tenant: str, row, evs: list[dict] | None = None,
             today: dt.date | None = None) -> list[str]:
-    """Plain-language list of what stops approval. [] = may be approved."""
+    """Everything still open on a claim: the record, then the proof."""
+    return record_missing(row) + proof_missing(tenant, row, evs, today)
+
+
+def proof_missing(tenant: str, row, evs: list[dict] | None = None,
+                  today: dt.date | None = None) -> list[str]:
+    """What proof the claim's kinds call for and do not yet have.
+
+    Owner, 2026-11-07: *"For now we should note proof but not require it. We
+    can always add proof after the approval process as a separate role."* So
+    this is NOTED everywhere (card, workbook, the prompt's `proof` field) and
+    blocks approval only on an account that turns `evidence_required` on."""
     today = today or dt.date.today()
     evs = evs if evs is not None else evidence_for(tenant, [row.id]).get(row.id, [])
+    out = []
+    for r in requirements(row):
+        if not _satisfies(r["needs"], evs, today):
+            out.append(f"Evidence ({r['kind']}): {r['ask']}.")
+    return list(dict.fromkeys(out))
+
+
+def record_missing(row) -> list[str]:
+    """What the claim's RECORD still lacks — who it is about, what it is true
+    of, the qualifiers its kinds need, a statement that stands alone. Without
+    these a claim cannot be understood, by a reviewer or by a prompt."""
     out = []
     if row.subject != "self":
         out.append("Say who this is about. Only a claim the account makes about itself can be "
@@ -583,8 +609,6 @@ def missing(tenant: str, row, evs: list[dict] | None = None,
                            "brand-wide.")
             elif q != "entity" and not sc.get(q):
                 out.append(f"Give the {q.replace('_', ' ')}.")
-        if not _satisfies(r["needs"], evs, today):
-            out.append(f"Evidence ({r['kind']}): {r['ask']}.")
     seen, uniq = set(), []
     for m in out:
         if m and m not in seen:
@@ -594,12 +618,21 @@ def missing(tenant: str, row, evs: list[dict] | None = None,
 
 
 def gate(tenant: str, row) -> str:
-    """'' when approval may go ahead; else the refusal. Applies only where the
-    account has turned evidence on (`claim_scope.evidence_required`)."""
-    if not vocabulary(tenant)["evidence_required"]:
-        return ""
-    m = missing(tenant, row)
+    """'' when approval may go ahead; else the refusal.
+
+    Two switches per account (`claim_scope`): `record_required` blocks a claim
+    whose record is incomplete; `evidence_required` also blocks one whose
+    proof is missing. Proof is otherwise noted, not required (owner,
+    2026-11-07) — added after approval, as its own role."""
+    v = vocabulary(tenant)
+    m = (record_missing(row) if v["record_required"] else []) + (
+        proof_missing(tenant, row) if v["evidence_required"] else [])
     return ("Not approved — this claim is missing:\n• " + "\n• ".join(m)) if m else ""
+
+
+def proof_state(tenant: str, row, evs: list[dict] | None = None) -> str:
+    """'on file' | 'pending' — carried to prompts and the workbook."""
+    return "pending" if proof_missing(tenant, row, evs) else "on file"
 
 
 # ---------------------------------------------------------------------------

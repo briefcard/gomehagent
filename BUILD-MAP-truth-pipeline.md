@@ -864,9 +864,13 @@ different products, different things counted, different years); 13% fragments;
 * `claim_context` kinds: + comparative, regulatory, coverage; event catches
   "now live / now supports / gone live"; superlative and relationship tightened
   (no "only once", "first time", "integration paths").
-* Gate in `kb.review_claim` — on accounts with `claim_scope.evidence_required`.
-  **Off by default** so existing accounts approve as before; turned on per
-  account in Review › Claims by entity.
+* Gate in `kb.review_claim`, two switches per account (`claim_scope`):
+  `record_required` blocks an incomplete RECORD; `evidence_required` also
+  blocks missing PROOF. Owner, 2026-11-07: *"note proof but not require it…
+  add proof after the approval process as a separate role"* — so proof is
+  noted everywhere (card, workbook column, the prompt's `proof: pending | on
+  file`) and Transak runs with the record required, proof noted. Both off by
+  default; set in Review › Claims by entity.
 * `kb.keep_as_history` — approved, status `history`, never selectable.
 * Prompts: bundle claims carry `statement` + `true_only`; grounding renders
   "TRUE ONLY: … — never state it without these".

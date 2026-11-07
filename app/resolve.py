@@ -275,6 +275,14 @@ def _qualifiers(c) -> str:
         return ""
 
 
+def _proof(tenant: str, c) -> str:
+    try:
+        from . import claim_record
+        return claim_record.proof_state(tenant, c)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _entity_dict(r) -> dict:
     """A catalogue row as the bundle carries it — the same shape
     `kb.match_entities` returns, so a named entity and a ranked one read
@@ -482,6 +490,9 @@ def resolve(tenant: str, system: str = "", utterance: str = "",
              # changes what the claim says, so they ride with the claim.
              "statement": getattr(c, "statement", "") or "",
              "true_only": _qualifiers(c),
+             # Proof is noted, not required (owner, 2026-11-07): an approved
+             # claim may still be awaiting its proof, and the writer is told.
+             "proof": _proof(tenant, c),
              "proves": getattr(c, "proves", "") or "",
              # WHAT KIND of proof this is, and what that kind PERMITS.
              # `kb.PROOF_USAGE` has always held the rule that a testimonial is

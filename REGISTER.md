@@ -424,12 +424,15 @@ Two limits, both in Coverage: a name resolved at runtime reads as no connection,
 - **`jurisdiction_in`**(text) → `str`  ·  **from nothing**
 - **`kinds_of_row`**(row) → `list[str]`  ·  from `admin_ui.py`, `claim_sheet.py`
 - **`markets_in`**(text, url?) → `tuple[list[str], str]`  ·  **from nothing**
-- **`missing`**(tenant, row, evs?, today?) → `list[str]`  ·  from `admin_ui.py`, `claim_sheet.py`, `test_claim_record.py`
+- **`missing`**(tenant, row, evs?, today?) → `list[str]`  ·  from `test_claim_record.py`
+- **`proof_missing`**(tenant, row, evs?, today?) → `list[str]`  ·  from `admin_ui.py`, `claim_sheet.py`, `test_claim_record.py`
+- **`proof_state`**(tenant, row, evs?) → `str`  ·  from `resolve.py`, `test_claim_record.py`
 - **`qualifier_line`**(row, entity_names?) → `str`  ·  from `resolve.py`, `test_claim_record.py`
+- **`record_missing`**(row) → `list[str]`  ·  from `admin_ui.py`, `claim_sheet.py`
 - **`refresh`**(tenant, limit?) → `dict`  ·  from `conversation.py`, `gmail_client.py`, `harvest.py`, `kb.py`, `keywords.py`, `ledger.py`, `moments.py`, `pipeline/reprocess.py`, `systems.py`, `test_claim_record.py`, `test_conversation.py`, `test_plan_mix.py`, `test_resolve.py`, `test_responder.py`, `web.py`
 - **`requirements`**(row) → `list[dict]`  ·  **from nothing**
 - **`set_record`**(tenant, claim_id, by, origin?, subject?, subject_name?, entity_key?, scope?, statement?, infeasible?, why?) → `dict`  ·  from `claim_sheet.py`, `mcp_server.py`, `test_claim_record.py`, `web.py`
-- **`set_vocabulary`**(tenant, by, self_names?, evidence_required?) → `dict`  ·  from `test_claim_record.py`, `web.py`
+- **`set_vocabulary`**(tenant, by, self_names?, evidence_required?, record_required?) → `dict`  ·  from `test_claim_record.py`, `web.py`
 - **`subject_of`**(text, vocab, own_page?) → `tuple[str, str]`  ·  **from nothing**
 - **`vocabulary`**(tenant) → `dict`  ·  from `admin_ui.py`, `claim_sheet.py`, `test_claim_record.py`, `test_claim_trace.py`
 - **`withdraw_evidence`**(tenant, evidence_id, by, reason) → `dict`  ·  from `test_claim_record.py`, `web.py`

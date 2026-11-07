@@ -83,7 +83,7 @@ def check_kinds():
 
 def check_derive():
     from app import claim_record as cr
-    cr.set_vocabulary(T, "qa-anna", self_names=["Acme"], evidence_required=True)
+    cr.set_vocabulary(T, "qa-anna", self_names=["Acme"], evidence_required=True, record_required=True)
     kb.add_entity(T, "product", "offramp", "Off-ramp",
                   attributes={"match": {"urls": ["/sell", "/off-ramp"], "words": ["off-ramp"]}})
     kb.add_entity(T, "product", "stream", "Stream",
@@ -208,10 +208,27 @@ def check_gate_and_evidence(ids):
     ck("PROMPT the qualifiers ride with the claim",
        "on the site" in cr.qualifier_line(get(ids["off"])) and "offramp" in cr.qualifier_line(get(ids["off"])),
        cr.qualifier_line(get(ids["off"])))
-    cr.set_vocabulary(T, "qa", evidence_required=False)
-    ck("GATE an account that has not turned evidence on approves as before",
+    # Owner, 2026-11-07: proof is NOTED, not required — added after approval.
+    cr.set_vocabulary(T, "qa", evidence_required=False, record_required=True)
+    u = page("/nft-checkout", "<p>Allow users to buy NFTs from 26 + countries.</p>", title="NFT")
+    nid = claim("Allow users to buy NFTs from 26 + countries.", u, "data")
+    cr.refresh(T)
+    msg = kb.review_claim(nid, True, by="qa-anna")
+    ck("PROOF-LATER an incomplete RECORD still stops approval when the record is required",
+       msg.startswith("Not approved") and "Evidence" not in msg, msg[:200])
+    cr.set_record(T, nid, by="qa-anna", entity_key="brand-wide",
+                  statement="Acme's NFT checkout lets users buy NFTs from 26+ countries.")
+    msg = kb.review_claim(nid, True, by="qa-anna")
+    ck("PROOF-LATER a complete record with no proof is approved — proof noted, not required",
+       msg.startswith("Approved"), msg[:200])
+    ck("PROOF-LATER ... and its proof reads as pending, for the writer and the reviewer",
+       cr.proof_state(T, get(nid)) == "pending" and cr.proof_missing(T, get(nid)))
+    cr.add_evidence(T, nid, "proof-role", "statement", method="countries enabled for NFT checkout")
+    ck("PROOF-LATER proof added after approval turns it 'on file'", cr.proof_state(T, get(nid)) == "on file")
+    cr.set_vocabulary(T, "qa", evidence_required=False, record_required=False)
+    ck("GATE an account with neither switch on approves as before",
        cr.gate(T, get(ids["3p"])) == "")
-    cr.set_vocabulary(T, "qa", evidence_required=True)
+    cr.set_vocabulary(T, "qa", evidence_required=True, record_required=True)
 
 
 def check_workbook(ids):
@@ -311,10 +328,12 @@ def check_console_controls():
         "action": "withdraw"}, follow_redirects=False)
     ck("CONSOLE 'Withdraw' marks it withdrawn", not cr.evidence_for(T, [cid]).get(cid))
     r = c.post("/admin/claim_vocab?key=s3cret", data={
-        "tenant": T, "self_names": "Acme, Acme Inc", "evidence_required": "1", "by": "qa-ben"},
+        "tenant": T, "self_names": "Acme, Acme Inc", "evidence_required": "1",
+        "record_required": "1", "by": "qa-ben"},
         follow_redirects=False)
     ck("CONSOLE 'Save' names the account and keeps evidence required",
-       cr.vocabulary(T)["self_names"] == ["Acme", "Acme Inc"] and cr.vocabulary(T)["evidence_required"])
+       cr.vocabulary(T)["self_names"] == ["Acme", "Acme Inc"] and cr.vocabulary(T)["evidence_required"]
+       and cr.vocabulary(T)["record_required"])
     r = c.get(f"/admin/claims_workbook?key=s3cret&tenant={T}&review=proposed")
     ck("CONSOLE 'Download workbook' returns an .xlsx",
        r.status_code == 200 and r.content[:2] == b"PK" and "spreadsheetml" in r.headers.get("content-type", ""))

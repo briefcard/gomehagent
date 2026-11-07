@@ -6658,8 +6658,10 @@ def _record_block(tenant: str, p, evs: list, cat: list) -> str:
     as of when, what it rests on — and what is still missing (claim_record)."""
     try:
         from . import claim_record as cr
-        miss = cr.missing(tenant, p, evs)
-        required = cr.vocabulary(tenant)["evidence_required"]
+        rec_miss = cr.record_missing(p)
+        proof_miss = cr.proof_missing(tenant, p, evs)
+        _v = cr.vocabulary(tenant)
+        rec_req, proof_req = _v["record_required"], _v["evidence_required"]
     except Exception:                                            # noqa: BLE001
         return ""
     sc = {k: v for k, v in (p.scope or {}).items() if not str(k).startswith("_")}
@@ -6694,11 +6696,18 @@ def _record_block(tenant: str, p, evs: list, cat: list) -> str:
         f'<option value="{v}"{" selected" if v == (p.subject or "") else ""}>{_esc(lbl)}</option>'
         for v, lbl in (("", "— not decided —"), ("self", "the account itself"),
                        ("other", "a partner / third party"), ("market", "the market / industry")))
-    gate = (('<div class="note"><b>Before this can be approved:</b><ul>'
-             + "".join(f"<li>{_esc(m)}</li>" for m in miss) + "</ul></div>") if miss and required
-            else ('<div class="when">Record complete — this can be approved.</div>' if required
-                  else (('<div class="when">Still open (evidence is not yet required on this '
-                         'account): ' + _esc("; ".join(miss)) + '</div>') if miss else "")))
+    def _ul(items):
+        return "<ul>" + "".join(f"<li>{_esc(m)}</li>" for m in items) + "</ul>"
+    gate = ""
+    if rec_miss:
+        gate += (('<div class="note"><b>Before this can be approved:</b>' if rec_req
+                  else '<div class="when"><b>Record still open:</b>') + _ul(rec_miss) + "</div>")
+    if proof_miss:
+        gate += (('<div class="note"><b>Proof needed before approval:</b>' if proof_req
+                  else '<div class="when"><b>Proof — noted, not required now</b> (can be added '
+                       'after approval):') + _ul(proof_miss) + "</div>")
+    if not (rec_miss or proof_miss):
+        gate = '<div class="when">Record complete and proof on file.</div>'
     return f"""
             <details class="sec" open><summary><b>Claim record</b> — about {_esc(_SUBJECT_LABEL.get(p.subject or "", p.subject))}{chip("subject")} {kinds}</summary>
               {gate}
@@ -6757,7 +6766,8 @@ def _claims_record_card(tenant: str, key: str = "") -> str:
     return f"""
 <div class="card">
   <div class="head"><h2>Claims by entity</h2>
-    <span class="chip {'on' if voc['evidence_required'] else 'nb'}">{'evidence required to approve' if voc['evidence_required'] else 'evidence not yet required'}</span></div>
+    <span class="chip {'on' if voc['record_required'] else 'nb'}">{'record required to approve' if voc['record_required'] else 'record not required'}</span>
+    <span class="chip {'on' if voc['evidence_required'] else 'nb'}">{'proof required to approve' if voc['evidence_required'] else 'proof noted, not required'}</span></div>
   <p class="mut">Every claim carries who it is about, what it is true of, as of when and what it
   rests on. Approve here card by card, or in the workbook: one sheet per entity, edit the
   yellow columns, upload it back. <b>Check</b> shows what would change; <b>Apply</b> does it —
@@ -6793,7 +6803,8 @@ def _claims_record_card(tenant: str, key: str = "") -> str:
   <form class="f" method="post" action="/admin/claim_vocab">
     <input type="hidden" name="tenant" value="{t}">
     <label>Names (comma-separated)</label><input name="self_names" value="{_esc(', '.join(voc['self_names']))}">
-    <label class="tag"><input type="checkbox" name="evidence_required" value="1"{' checked' if voc['evidence_required'] else ''}> Require a complete record and evidence before any claim is approved</label>
+    <label class="tag"><input type="checkbox" name="record_required" value="1"{' checked' if voc['record_required'] else ''}> Require a complete record (who it is about, what it is true of, a statement that stands alone) before a claim is approved</label>
+    <label class="tag"><input type="checkbox" name="evidence_required" value="1"{' checked' if voc['evidence_required'] else ''}> Also require proof before approval (otherwise proof is noted and added later)</label>
     {_reviewer_field()}<div class="row"><button class="sec">Save</button></div>
   </form>
   <table><tr><th>Entity</th><th>URL patterns</th><th>Words</th></tr>{match_rows or '<tr><td colspan=3 class="mut">No entities yet — add them on the workbook\'s Entities sheet.</td></tr>'}</table>

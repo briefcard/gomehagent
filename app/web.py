@@ -9458,7 +9458,8 @@ async def claim_vocab(request: Request, key: str = Depends(admin_key)):
     tenant = str(form.get("tenant", ""))
     names = [n for n in str(form.get("self_names", "")).replace("\n", ",").split(",")]
     out = claim_record.set_vocabulary(tenant, _qa_by(form, request), self_names=names,
-                                      evidence_required=bool(form.get("evidence_required")))
+                                      evidence_required=bool(form.get("evidence_required")),
+                                      record_required=bool(form.get("record_required")))
     if not out.get("ok"):
         return _back_to_content(tenant, sub="byentity", err=out.get("why", ""))
     return _back_to_content(tenant, sub="byentity", msg="Saved")
