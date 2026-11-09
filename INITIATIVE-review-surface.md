@@ -250,6 +250,59 @@ CLAUDE.md. Tenant scoping applies to both new tables.
 
 ---
 
+## 3.G Industry knowledge — facts that are not Transak's claims (owner, 2026-11-09)
+
+Owner, 2026-11-09, on "JPMorgan expanded into German retail banking while
+piloting stablecoin rails via Onyx", "According to Web3Auth's survey in 2023,
+24% of users …", "Nigeria … Investment and Securities Act, April 2025":
+*"There are some facts here that are important to note and confirm, but they
+are not specifically claims made about Transak's offering but rather about
+crypto related news, progress and industry background knowledge. Sometimes
+this is used to reinforce a need / opportunity / context for a specific
+entity. Other times it's used in top-of-funnel content to be thought leaders
+on industry trends."*
+
+**Measured (Transak, 2026-11-09).** Of the 926 claims with no decided
+subject, 658 sit on posts that also make Transak claims (context for a
+product) and 268 on posts that make none (thought leadership). A keyword
+split of the 926 does NOT separate industry facts from Transak's own
+unnamed statements ("Rely on built-in KYC, AML and regulatory coverage" lands
+with laws; "approval rates as high as 95%" with market figures) — the same
+finding as entity attachment (§1.4): it takes reading, so the split is
+Claude's proposal, confirmed by a person.
+
+**Research.**
+* A brand that publishes a third-party statistic still answers for it: the
+  ASA requires documentary evidence for objective claims before publication,
+  and a survey headline must reflect the survey accurately (CAP, *Quick guide
+  to advertising consumer surveys*). FCA promotions must be fair, clear and
+  not misleading, statistics included (COBS 4.2.1R).
+* Content governance practice (practitioner sources, not standards): date
+  every statistic, prefer the primary source, give the stat library one
+  owner, and decide replace / contextualise / retire when it ages — the risk
+  is an old number believed current.
+
+**The design (a type of record, not a new pipeline).**
+* `subject` gains a reading: **self** (Transak's claim) · **partner/customer
+  words** · **another company** · **industry fact** · **not a claim**.
+* An industry fact's record carries: who said it (`source`: Web3Auth survey,
+  Nigeria's Investment and Securities Act), the primary link, the year it
+  speaks for (`as_of`), its topic (stablecoins, regulation › Nigeria,
+  remittances …), the products it gives context to (`supports`: entity keys —
+  the "reinforce a need for an entity" use), and its use (context for a
+  product · thought leadership).
+* It skips the CLAIM review (owner, 2026-11-07) but not confirmation: a light
+  item **"confirm the source"** (does the primary source say this, and when?)
+  for the Proof role, batchable.
+* Library gets a second shelf, **Industry knowledge**, by topic and by the
+  product it supports. Prompts receive industry facts as a separate part
+  that must be ATTRIBUTED in the copy ("According to Web3Auth's 2023
+  survey…") and is never phrased as Transak's claim; facts past a freshness
+  window (default 24 months, per account) are not offered.
+* The figure comparison (findings) counts only figures from Transak's own
+  claims — the sanity check found "248 licences" (South Africa's regulator)
+  and "USD1" (another company's token) inside Transak's P1 questions.
+
 ## 4b. As built
 * **Phase 1 — BUILT (2026-11-09).** `stage_reports` + `app/stages.py` (the
   harvest keeps crawl + read reports on apply, with its cost; `claim_record.
