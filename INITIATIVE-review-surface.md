@@ -351,6 +351,16 @@ Asked by the owner before the Claude pass runs. Findings:
   Stage reports start with the NEXT harvest: runs before this build show
   "no run recorded yet".
 
+* **Claude pass on Transak — RUN (2026-11-09).** All 1,871 proposed claims
+  labelled with `evals/claim_attribution/prompt_B_detailed.md` (variant B;
+  A and B agreed on 97 of the 100 sample items) and written as PROPOSALS via
+  MCP `propose_claim_records` (origin `claude`, reason + confidence in `_why`).
+  Result: the account's own 1,181 · industry facts 383 · another company 235 ·
+  partner/customer words 44 · not a claim 29 · undecided 0. 1,180 statements
+  drafted; 1,015 claims on a product (283 on several). Nothing approved; held
+  for the team's review. Accuracy is unmeasured until the client's blind
+  sample sheet returns (`score.py`).
+
 ## 5. Decisions only the owner can make
 1. **Who reviews Transak** — DECIDED (owner, 2026-11-07): *"Initially me then
    the team."* So: build for one reviewer first — no assignment, no second
