@@ -78,6 +78,10 @@ its own [M4, "M1"].
 
 Either option honours the $40 rule. We recommend B.
 
+**DECIDED 2026-11-09: Option B, 7-day window** (owner). The cap stays on
+until the rule is confirmed live in Ads Manager; then the cap is removed
+and Scale's exclusions are fixed in one edit, so learning restarts once.
+
 ## Build order (Mondays only; each step read back from Meta)
 
 1. **Scale:** add RETARGETING + RETENTION exclusions.
