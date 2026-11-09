@@ -11192,6 +11192,14 @@ SABOTAGES = [
     },
     # --- the claim record (BUILD-MAP §17) ---------------------------------
     {
+        "name": "export_hides_claude_confidence",
+        "file": "app/claim_sheet.py",
+        "find": '        return float(m.group(1)) if m else None\n',
+        "replace": '        return None  # SABOTAGE\n',
+        "suites": ["test_claim_record.py"],
+        "why": "reviewers cannot sort by what Claude was least sure of, so the weakest proposals are reviewed last or not at all",
+    },
+    {
         "name": "a_claim_on_two_entities_reaches_only_one",
         "file": "app/kb.py",
         "find": '                    or set(getattr(r, "also_entities", None) or []) & (set(wanted) | set(chain))]\n',

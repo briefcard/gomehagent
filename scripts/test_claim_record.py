@@ -417,7 +417,8 @@ def check_several_entities():
         for r in range(2, w.max_row + 1):
             if w.cell(r, 1).value == cid:
                 hdr = [c.value for c in w[1]]
-                hits.append((w.title, w.cell(r, hdr.index(cs.COLUMNS[7][0]) + 1).value))
+                hits.append((w.title, w.cell(r, hdr.index(next(h for h, f, _w, _e in cs.COLUMNS
+                                                              if f == "entity")) + 1).value))
     ck("SEVERAL the workbook shows it once, with every entity in its cell",
        len(hits) == 1 and hits[0][1] == "offramp, stream", str(hits))
     cr.set_record(T, cid, by="qa", statement="As of Oct 2026, Acme's on- and off-ramp settle in minutes.")
@@ -459,6 +460,33 @@ def check_five_answers():
        q.subject == "partner" and kb.review_claim(quote, True, by="qa").startswith("Not approved"))
     ck("FIVE 'not a claim' is a recorded answer", cr.set_record(T, quote, by="qa", origin="claude",
                                                                 subject="none")["ok"] is True)
+
+
+def check_export_shows_how_it_was_decided():
+    """Owner, 2026-11-09: the export must show Claude's reason and
+    confidence, and an industry fact's source / topic / products."""
+    from openpyxl import load_workbook
+    from app import claim_sheet as cs, mcp_server
+    u = page("/blog/why", "<p>Stablecoins settled $33 trillion in 2025, says Visa.</p>", date="2026-02-01")
+    cid = claim("Stablecoins settled $33 trillion in 2025, says Visa.", u)
+    mcp_server.propose_claim_records(T, [{"claim_id": cid, "subject": "market", "subject_name": "Visa",
+                                          "source": "Visa", "topic": "stablecoin volume",
+                                          "supports": "offramp", "as_of": "2025",
+                                          "why": "a market statistic credited to Visa (Claude, confidence 0.62)"}])
+    wb = load_workbook(io.BytesIO(cs.export(T, "all")))
+    row = None
+    for w in wb.worksheets:
+        hdr = [c.value for c in w[1]]
+        for r in range(2, w.max_row + 1):
+            if w.cell(r, 1).value == cid:
+                row = {f: w.cell(r, hdr.index(h) + 1).value for h, f, _w, _e in cs.COLUMNS}
+    ck("EXPORT shows who decided, Claude's reason and its confidence as a number to sort on",
+       row and row["decided_by"] == "Claude" and row["why"] == "a market statistic credited to Visa"
+       and row["confidence"] == 0.62, str(row and {k: row[k] for k in ("decided_by", "why", "confidence")}))
+    ck("EXPORT shows an industry fact's source, topic and the products it gives context to",
+       row and row["source"] == "Visa" and row["topic"] == "stablecoin volume" and row["supports"] == "offramp")
+    ck("EXPORT the read-only columns do not change anything on upload",
+       cs.plan(T, cs.export(T, "all"))["steps"] == [])
 
 
 def check_rescan():
@@ -574,6 +602,7 @@ def main() -> int:
     check_no_duplicates_and_mcp()
     check_several_entities()
     check_five_answers()
+    check_export_shows_how_it_was_decided()
     check_rescan()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0

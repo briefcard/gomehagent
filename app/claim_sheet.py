@@ -33,6 +33,7 @@ what would be refused. `apply` does it. Same file, two presses.
 from __future__ import annotations
 
 import io
+import re
 
 from . import claim_record, db
 
@@ -48,6 +49,14 @@ COLUMNS = [
     ("Kinds", "kinds", 16, False),
     ("Inconsistency group", "group", 16, False),
     ("Subject (self / partner / other / market / none)", "subject", 14, True),
+    # How the record was reached — read-only, so a reviewer can start with
+    # what the machine was least sure of (sort by confidence).
+    ("Decided by", "decided_by", 12, False),
+    ("Claude's reason", "why", 40, False),
+    ("Claude's confidence", "confidence", 11, False),
+    ("Said by / source (industry facts, quotes)", "source", 24, False),
+    ("Topic (industry facts)", "topic", 20, False),
+    ("Gives context to (products)", "supports", 20, False),
     ("Entity (key, several comma-separated, or brand-wide)", "entity", 20, True),
     ("Market", "market", 18, True),
     ("Jurisdiction", "jurisdiction", 16, True),
@@ -77,6 +86,8 @@ README = [
     "  claim, attached to each — no copies.",
     "True for one entity in one way and another in another: copy the row, keep claim_id, set a",
     "  different Entity and Statement on each copy.",
+    "Start with what the machine was least sure of: sort by 'Claude's confidence' (lowest first).",
+    "  'Decided by' says whether code, Claude or a reviewer set the subject; 'Claude's reason' says why.",
     "Decision: approve | reject | history (true on its date, not now) | replace on site | remove from site.",
     "  approve is refused, with the reason, while 'Record still needed' is not empty (when the",
     "  account requires a complete record). Proof is noted; it can be added after approval.",
@@ -130,6 +141,13 @@ def rows(tenant: str, review: str = "proposed") -> list[dict]:
                     "brand-wide" if sc.get("brand_wide") else ""),
                 "market": sc.get("market", ""), "jurisdiction": sc.get("jurisdiction", ""),
                 "conditions": sc.get("conditions", ""),
+                "decided_by": _DECIDED.get((c.scope_origin or {}).get("subject", ""), "") or (
+                    "code" if c.subject else ""),
+                "why": _why_text(sc.get("_why", "")),
+                "confidence": _confidence(sc.get("_why", "")),
+                "source": sc.get("source") or (c.subject_name if c.subject in ("partner", "other", "market")
+                                               else "") or "",
+                "topic": sc.get("topic", ""), "supports": sc.get("supports", ""),
                 "statement": c.statement or "", "decision": "", "replacement": "",
                 "ev_link": "\n".join(e["url"] for e in ev if e["kind"] == "link"),
                 "ev_method": "\n".join((e["method"] or e["text"]) for e in ev
@@ -142,6 +160,23 @@ def rows(tenant: str, review: str = "proposed") -> list[dict]:
                            (c.entity_key or ("brand-wide" if sc.get("brand_wide") else ""))),
             })
     return out
+
+
+_DECIDED = {"rule": "code", "vocabulary": "code", "page": "code", "url": "code",
+            "claude": "Claude", "reviewer": "reviewer"}
+_CONF = re.compile(r"\(Claude, confidence ([0-9.]+)\)\s*$")
+
+
+def _confidence(why: str):
+    m = _CONF.search(why or "")
+    try:
+        return float(m.group(1)) if m else None
+    except ValueError:
+        return None
+
+
+def _why_text(why: str) -> str:
+    return _CONF.sub("", why or "").strip()
 
 
 def export(tenant: str, review: str = "proposed") -> bytes:
@@ -180,6 +215,8 @@ def export(tenant: str, review: str = "proposed") -> bytes:
                 c.fill = yellow
             sh.column_dimensions[c.column_letter].width = w
         sh.freeze_panes = "C2"
+        if mine:
+            sh.auto_filter.ref = f"A1:{sh.cell(row=1, column=len(COLUMNS)).column_letter}{len(mine) + 1}"
         for i, r in enumerate(mine, 2):
             for j, (_h, f, _w, ed) in enumerate(COLUMNS, 1):
                 c = sh.cell(row=i, column=j, value=r.get(f, ""))
