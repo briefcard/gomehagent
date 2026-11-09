@@ -339,6 +339,41 @@ Asked by the owner before the Claude pass runs. Findings:
 3. Overrides are tracked: a reviewer who never changes a proposal is a
    signal, not a success.
 
+## 3.I Products compared — is an automatic comparison table reliable? (researched + measured 2026-11-09)
+
+Owner, 2026-11-09: a table of general facts per entity (coverage, key
+features, main page …), dynamic per client, *"Whether we implement or not
+depends on the reliability of such a system."*
+
+**Measured (Transak, live statements, product pages only).** 87 product ×
+figure values. 41 (47%) appear on 3+ products' pages — company-wide
+boilerplate ("600+ apps", "10 million+ users", "136+ cryptos"). 22 (25%) come
+only from developer docs (sample API values). Of the 24 that survive both
+filters, a hand check (Claude's judgment, to be confirmed) finds **14
+correct (58%; 95% lower bound ~39%)**. The 10 wrong: company-wide figures
+the filter missed (5 — "Today more than 600 applications trust Transak"),
+the OTHER side of a comparison (2 — "cut settlement from 2–5 days", which is
+SWIFT's), UI or table text (2 — "ignored if your fee exceeds 1%"), and the
+right sentence on the wrong product's page (1).
+
+**Research.** LLM attribute-value extraction reaches ~91% F1 on product
+OFFERS (GPT-4, WDC-PAVE, Brinkmann & Bizer 2024) — structured shop pages,
+not marketing prose; main-content extractors converge at F1 ≈ 0.93 on
+articles but diverge on structured page types (WCXB 2026; Webis 2023). PIM
+practice (Akeneo) defines per-family attribute sets and measures
+COMPLETENESS of required attributes; values are entered or approved, not
+inferred.
+
+**Conclusion.** An automatically filled table is not reliable enough for
+compliance (≈58% here). A reliable one is built the PIM way: per account,
+the attribute set per product family (derived from what the site states —
+the dynamic part), each cell holding PROPOSED values with the sentence and
+page behind each, and a person approving one value per cell (the approved
+answer, `kb_fact_values` with `scope_entity`, already exists for this).
+Then the table shows approved values, completeness per product, and every
+page that states something else as a finding. Transak: 13 products × ~8
+attributes ≈ 100 cell decisions.
+
 ## 4b. As built
 * **Phase 1 — BUILT (2026-11-09).** `stage_reports` + `app/stages.py` (the
   harvest keeps crawl + read reports on apply, with its cost; `claim_record.
