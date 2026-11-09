@@ -192,8 +192,9 @@ path (console, workbook, MCP proposals marked as proposals). It yields:
 - **What reviewers found**: corrections, rejections and their reasons, by
   entity and by kind, on the Overview.
 - **Precision per method** (Wilson 95% lower bound, as `claim_groups`
-  already does): a method's proposals may pre-fill; it may auto-pass only
-  above 99%.
+  already does), computed on BLIND labels only (§3.H): a method's proposals
+  may pre-fill; it may auto-pass only above 99%. Confirmations made with the
+  proposal in view are kept as agreement, not as precision.
 - The audit trail compliance asks for.
 
 ### 3.D Surfaces — four, replacing the claim-related sub-tabs
@@ -302,6 +303,41 @@ Claude's proposal, confirmed by a person.
 * The figure comparison (findings) counts only figures from Transak's own
   claims — the sanity check found "248 licences" (South Africa's regulator)
   and "USD1" (another company's token) inside Transak's P1 questions.
+
+## 3.H Is the proposal-then-confirm approach right? (researched 2026-11-09)
+
+Asked by the owner before the Claude pass runs. Findings:
+
+* **LLM labelling is viable, measured against people.** Zero-shot ChatGPT
+  beat filtered crowd workers by ~25 points on four annotation tasks, judged
+  against trained annotators; prompts matter and low temperature is more
+  consistent (Gilardi et al., PNAS 2023). For claim detection, the best
+  prompt detail is domain-dependent and must be tested (Majer & Šnajder 2024).
+* **But a reviewer who sees the AI's label is not an independent check.**
+  In a 410-person pre-registered study, showing LLM suggestions did not speed
+  annotators up, raised their confidence, shifted the label distribution
+  toward the LLM, and — when those labels were used to score the LLM —
+  inflated its measured performance (arXiv 2507.15821). In a 2,784-person
+  experiment, reviewers favourable to automation under-corrected AI labels
+  (arXiv 2509.08514). Clinical work finds the same: correct human judgments
+  overturned by wrong AI advice (arXiv 2603.11821).
+* **Attribution has a standard shape**: source · cue · content (PARC 3.0),
+  which is what an industry fact's record needs ("Web3Auth's survey" ·
+  "according to" · "24% of users …").
+
+**What changes.**
+1. Accuracy is measured ONLY on blind labels — answers given without the AI's
+   proposal in view: the client's claim sample sheet (built blind on purpose),
+   and a blind slice of the live queue (every Nth item shown without the
+   proposal). Reviewer confirmations are recorded (§3.C) but report
+   *agreement under influence*, never precision. §3.C's auto-pass rule is
+   computed on blind labels only.
+2. The Claude pass is first run on the client's 100 sample items (the client
+   never sees its answers), scored against the client's answers per category
+   when the sheet returns, with two prompt variants compared. Only then does
+   it run on the rest.
+3. Overrides are tracked: a reviewer who never changes a proposal is a
+   signal, not a success.
 
 ## 4b. As built
 * **Phase 1 — BUILT (2026-11-09).** `stage_reports` + `app/stages.py` (the
