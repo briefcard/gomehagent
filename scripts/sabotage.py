@@ -11165,6 +11165,31 @@ SABOTAGES = [
                "no exemplar, no owner notes, no product and no objection — the "
                "false reassurance the first live Baci read handed back on 2026-11-03",
     },
+    # --- the Overview (INITIATIVE-review-surface P1) ------------------------
+    {
+        "name": 'a_dry_run_harvest_is_reported_as_a_run',
+        "file": 'app/harvest.py',
+        "find": '    if apply:\n        stages.from_harvest(tenant, res, started, run_id)\n',
+        "replace": '    if True:  # SABOTAGE\n        stages.from_harvest(tenant, res, started, run_id)\n',
+        "suites": ["test_overview.py"],
+        "why": "a rehearsal shows on the Overview as a crawl that happened — its counts and cost are read as the account's",
+    },
+    {
+        "name": 'a_runs_cost_includes_other_accounts',
+        "file": 'app/stages.py',
+        "find": '        q = s.query(db.Usage).filter(db.Usage.tenant == tenant, db.Usage.at >= start,\n',
+        "replace": '        q = s.query(db.Usage).filter(db.Usage.at >= start,  # SABOTAGE\n',
+        "suites": ["test_overview.py"],
+        "why": "one client's crawl cost is reported with another client's model spend in it",
+    },
+    {
+        "name": 'market_facts_skip_review_unseen',
+        "file": 'app/overview.py',
+        "find": '              for r in live if r.subject == "market"][:6]\n',
+        "replace": '              for r in live if False][:6]  # SABOTAGE\n',
+        "suites": ["test_overview.py"],
+        "why": 'a Transak claim misfiled as a market fact skips review and nobody ever sees it',
+    },
     # --- the claim record (BUILD-MAP §17) ---------------------------------
     {
         "name": "a_claim_on_two_entities_reaches_only_one",

@@ -105,7 +105,9 @@ OPERATIONS = {"check_results", "change_requests", "change_tasks", "conversations
               # about a business that no longer has data to work on, so it
               # goes with the rest — classified in the change that adds it,
               # which is the rule the comments above were written for.
-              "job_queue"}
+              "job_queue",
+              # what each pipeline stage did per run — a record of work done
+              "stage_reports"}
 # `answer_engine_checks` is OPERATIONS: it records what WE observed about the
 # client's site on a date — which crawlers it let in and who it sent — not
 # anything the brand knows about itself. Clearing it costs a re-run of the

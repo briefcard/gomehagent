@@ -739,7 +739,7 @@ def check_known_drops_are_counted(ck):
     """
     from app import harvest as hv, kb, provenance as prov
 
-    src = inspect.getsource(hv.harvest)
+    src = inspect.getsource(hv._harvest)
     ck("the already-on-file branch increments a counter",
        "already on file" in src,
        "a silent `continue` here is indistinguishable from a thin site")

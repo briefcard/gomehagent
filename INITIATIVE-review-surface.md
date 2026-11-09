@@ -250,6 +250,18 @@ CLAUDE.md. Tenant scoping applies to both new tables.
 
 ---
 
+## 4b. As built
+* **Phase 1 — BUILT (2026-11-09).** `stage_reports` + `app/stages.py` (the
+  harvest keeps crawl + read reports on apply, with its cost; `claim_record.
+  refresh` keeps a record report; `claim_groups.rebuild` a group report).
+  `app/overview.py` (read / determined / people / gaps / market spot check /
+  runs / cost — all computed, nothing stored); Review › **Overview** (first
+  sub-tab; it does not steal the landing); MCP `get_overview`. Suite
+  `scripts/test_overview.py`; guards `a_dry_run_harvest_is_reported_as_a_run`,
+  `a_runs_cost_includes_other_accounts`, `market_facts_skip_review_unseen`.
+  Stage reports start with the NEXT harvest: runs before this build show
+  "no run recorded yet".
+
 ## 5. Decisions only the owner can make
 1. **Who reviews Transak** — DECIDED (owner, 2026-11-07): *"Initially me then
    the team."* So: build for one reviewer first — no assignment, no second

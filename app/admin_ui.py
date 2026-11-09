@@ -6277,7 +6277,10 @@ def _context_card(key: str, tenant: str) -> str:
 </div>"""
 
 
-REVIEW_SUBS = (("ship", "May it ship?"), ("claims", "Claims"),
+REVIEW_SUBS = (("overview", "Overview"),
+               # What the system read, what it determined, what people
+               # decided, and what is missing (INITIATIVE-review-surface P1).
+               ("ship", "May it ship?"), ("claims", "Claims"),
                ("pictures", "Pictures"), ("context", "Background"),
                ("other", "Everything else"), ("plans", "Plans"),
                ("conflicts", "Conflicts"),
@@ -6643,6 +6646,94 @@ def _changes_card(tenant: str) -> str:
 
 _GROUP_TITLE = {"inconsistency": "Stated inconsistently", "variants": "Same claim, different wording",
                 "family": "One pattern, different values"}
+
+
+def _overview_card(tenant: str) -> str:
+    """Review › Overview — what the system read and determined, what people
+    decided, and what is missing (app/overview.py)."""
+    from . import overview as ov
+    try:
+        o = ov.overview(tenant)
+    except Exception as exc:                                     # noqa: BLE001
+        return f'<div class="card"><p class="note">Overview could not be computed: {_esc(str(exc)[:200])}</p></div>'
+    r, d, p = o["read"], o["determined"], o["people"]
+    last = r["last"]
+
+    def tr(cells):
+        return "<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+
+    def n(x):
+        return f"{int(x or 0):,}"
+
+    def drops(rep):
+        return "; ".join(f"{_esc(k)} {n(v)}" for k, v in sorted(
+            (rep.get("dropped") or {}).items(), key=lambda kv: -kv[1])) or "—"
+
+    stage_rows = ""
+    for st in ("crawl", "read", "record", "group"):
+        rep = last.get(st)
+        if not rep:
+            stage_rows += tr([_esc(st), '<span class="mut">no run recorded yet</span>', "", "", ""])
+            continue
+        stage_rows += tr([_esc(rep["label"]), f'{n(rep["in"])} → <b>{n(rep["out"])}</b>',
+                          drops(rep), (f'${rep["cost_usd"]:.2f}' if rep["cost_usd"] else "—"),
+                          _esc((rep["finished_at"] or "")[:16].replace("T", " "))])
+    subj = "".join(tr([_esc(k), n(v)]) for k, v in d["subject"].items())
+    by = lambda dd: ", ".join(f"{_esc(_ORIGIN_LABEL.get(k, k) or 'unknown')} {n(v)}" for k, v in dd.items()) or "—"
+    acc = "".join(tr([_esc(k), n(a["labels"]),
+                      ("—" if a["precision"] is None else f'{a["precision"] * 100:.0f}%'),
+                      ("—" if a["lower_bound"] is None else f'{a["lower_bound"] * 100:.0f}%'),
+                      _esc(a.get("note", ""))]) for k, a in d["accuracy"].items())
+    gaps = "".join(tr([f'<b>{_esc(g["label"])}</b>', n(g["count"]) if not g["missing_flag"] else "none set",
+                       _esc(g["owner"]), _esc(g["how"]),
+                       f'<a class="btn sec" href="{_esc(url(tenant, "content", sub=g["sub"]))}">Open</a>'])
+                   for g in o["gaps"])
+    mk = "".join(f"""
+<li>“{_esc(m["claim"])}” <span class="mut">{_page_link(m["page"]) if m["page"] else ""}</span>
+  <form class="f" method="post" action="/admin/claim_record" style="display:inline">
+    <input type="hidden" name="tenant" value="{_esc(tenant)}"><input type="hidden" name="claim_id" value="{_esc(m["id"])}">
+    <input type="hidden" name="subject" value="self">{_reviewer_field()}
+    <button class="sec">This is the account's own claim</button></form></li>""" for m in o["market_skipped_sample"])
+    cost = o["cost"]
+    cost_line = (f'${(cost.get("est_cost_usd") or 0):.2f} in the last 30 days'
+                 + (" — " + ", ".join(f"{_esc(k)} ${(v or 0):.2f}" for k, v in sorted(
+                     (cost.get("by_purpose") or {}).items(), key=lambda kv: -(kv[1] or 0))[:4])
+                    if cost.get("by_purpose") else "")) if "error" not in cost else "—"
+    return f"""
+<div class="card">
+  <div class="head"><h2>What the system read</h2></div>
+  <p class="mut">{n(r["pages_known"])} pages known · {n(r["pages_stored"])} stored ·
+  {n(r["pages_with_claims"])} with claims · {n(r["pages_partly_read"])} only partly read ·
+  {n(r["pages_need_browser"])} need a browser · {n(r["claims_found"])} claims found ·
+  {n(r["figures_not_understood"])} figures not understood. Model cost: {cost_line}.</p>
+  <table><tr><th>Stage (last run)</th><th>In → out</th><th>Not passed on, and why</th><th>Cost</th><th>When</th></tr>{stage_rows}</table>
+</div>
+<div class="card">
+  <div class="head"><h2>Gaps — what is missing</h2></div>
+  <p class="mut">Each row says how much is missing, who fills it, and where.</p>
+  <table><tr><th>Gap</th><th>How many</th><th>Who</th><th>How it closes</th><th></th></tr>{gaps or tr(['<span class="mut">No gaps.</span>', "", "", "", ""])}</table>
+</div>
+<div class="card">
+  <div class="head"><h2>What the system determined</h2></div>
+  <table><tr><th>Whose claim</th><th>Claims</th></tr>{subj}</table>
+  <p class="mut">Who decided whose claim it is: {by(d["subject_by"])}. Who placed it on a product:
+  {by(d["entity_by"])}. {n(d["with_entity"])} on a product ({n(d["on_several_entities"])} on several) ·
+  {n(d["with_statement"])} with a standalone statement · {n(d["dated_history"])} kept as dated history ·
+  {n(d["sandbox_only"])} sandbox-only.</p>
+  <table><tr><th>Automated step</th><th>Decisions measured</th><th>Precision</th><th>95% lower bound</th><th></th></tr>{acc}</table>
+</div>
+<div class="card">
+  <div class="head"><h2>What people decided</h2></div>
+  <p class="mut">{n(p["approved"])} approved{(" (" + ", ".join(f"{_esc(k)} {n(v)}" for k, v in p["approved_by"].items()) + ")") if p["approved_by"] else ""} ·
+  {n(p["rejected"])} rejected · {n(p["records_confirmed"])} records confirmed by a reviewer ·
+  {n(p["claims_with_proof"])} claims with proof · {n(p["known_answers"])} known answers ·
+  {n(p["audits_done"])} audits done.</p>
+</div>
+<div class="card">
+  <div class="head"><h2>Skipped as market facts — spot check</h2></div>
+  <p class="mut">Market statistics do not need review (owner, 2026-11-07), so a Transak claim filed here by mistake would never be seen. A few, to check.</p>
+  {f"<ul>{mk}</ul>" if mk else '<p class="mut">None filed as market facts yet.</p>'}
+</div>"""
 
 
 _BROKEN = ' <span class="chip off">link broken</span>'
@@ -9743,6 +9834,7 @@ proposals for {_esc(t.name)}? Approved rows are not touched.')">
         "truth": (_truth_card(tenant) if sub == "truth" else ""),
         "changes": (_changes_card(tenant) if sub == "changes" else ""),
         "wording": (_wording_card(tenant) if sub == "wording" else ""),
+        "overview": (_overview_card(tenant) if sub == "overview" else ""),
         "byentity": (_claims_record_card(tenant) if sub == "byentity" else ""),
         "catalogue": f"""
 <div class="card">

@@ -318,9 +318,16 @@ def _read_at(tenant: str, url: str) -> str:
 
 
 def refresh(tenant: str, limit: int | None = None) -> dict:
-    """Derive every live claim's record; never overwrite claude/reviewer values."""
+    """Derive every live claim's record; never overwrite claude/reviewer values.
+    Keeps what it determined as a `record` stage report (app.stages)."""
+    from . import stages
+    started = stages.now()
     vocab, docs = vocabulary(tenant), {}
     n = changed = 0
+    tally = {"about the account (named or own page)": 0, "placed on an entity": 0,
+             "on several entities": 0, "market found": 0, "page date found": 0,
+             "dated news (history)": 0, "sandbox / staging only": 0}
+    left = {"subject left for a person": 0, "entity left for a person (two products' pages)": 0}
     with db.SessionLocal() as s:
         q = (s.query(db.KbClaim).filter(db.KbClaim.tenant == tenant,
                                        db.KbClaim.review != "rejected"))
@@ -332,7 +339,21 @@ def refresh(tenant: str, limit: int | None = None) -> dict:
             _merge(row, d, "derived")
             if (row.subject, row.kinds, dict(row.scope or {}), row.entity_key) != before:
                 changed += 1
+            sc = row.scope or {}
+            tally["about the account (named or own page)"] += row.subject == "self"
+            tally["placed on an entity"] += bool(row.entity_key)
+            tally["on several entities"] += bool(row.also_entities)
+            tally["market found"] += bool(sc.get("market"))
+            tally["page date found"] += bool(sc.get("as_of"))
+            tally["dated news (history)"] += bool(sc.get("history"))
+            tally["sandbox / staging only"] += bool(sc.get("environment"))
+            left["subject left for a person"] += not row.subject
+            left["entity left for a person (two products' pages)"] += (
+                not row.entity_key and len(d.get("entity_candidates") or []) > 1)
         s.commit()
+    stages.record(tenant, "record", started_at=started, n_in=n,
+                  n_out=tally["about the account (named or own page)"], dropped=left,
+                  details={"derived": tally, "changed": changed})
     return {"ok": True, "claims": n, "changed": changed}
 
 

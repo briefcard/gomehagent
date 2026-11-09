@@ -521,6 +521,17 @@ def rebuild(tenant: str, use_embeddings: bool = True) -> dict:
                 s.delete(row)
                 dropped += 1
         s.commit()
+    try:
+        from . import stages
+        kinds: dict = {}
+        for g in want.values():
+            kinds[g["kind"]] = kinds.get(g["kind"], 0) + 1
+        stages.record(tenant, "group",
+                      n_in=len({c for g in want.values() for c in g["members"]}),
+                      n_out=len(want), details={"by_kind": kinds, "new": made,
+                                                "gone": dropped})
+    except Exception:  # noqa: BLE001 — accounting never breaks the work
+        pass
     return {"groups": len(want), "new": made, "dropped": dropped}
 
 

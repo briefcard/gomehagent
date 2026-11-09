@@ -457,6 +457,20 @@ def _findings_after(tenant: str) -> dict:
 
 def harvest(tenant: str, limit: int = 25, apply: bool = False,
             use_model: bool | None = None, recrawl: bool = False) -> dict:
+    """Read a client's site and propose what it finds — and, when it writes,
+    keep what the crawl and the read did as stage reports (app.stages), so the
+    Overview can say what was read, found, dropped and why, and what it cost.
+    The work is `_harvest`; this only times it and keeps its account."""
+    from . import stages
+    started, run_id = stages.now(), stages.new_run()
+    res = _harvest(tenant, limit=limit, apply=apply, use_model=use_model, recrawl=recrawl)
+    if apply:
+        stages.from_harvest(tenant, res, started, run_id)
+    return res
+
+
+def _harvest(tenant: str, limit: int = 25, apply: bool = False,
+             use_model: bool | None = None, recrawl: bool = False) -> dict:
     """Read a client's site and propose what it finds. Writes nothing unless
     `apply` is set, and even then only as pending claims.
 

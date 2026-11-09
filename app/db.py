@@ -2675,6 +2675,33 @@ class PageVersion(Base):
     last_seen = Column(DateTime(timezone=True))    # when it was replaced
 
 
+class StageReport(Base):
+    """What one pipeline stage did in one run (INITIATIVE-review-surface §3.A).
+
+    Owner, 2026-11-07: *"We need to be able to clearly understand what AI is
+    crawling and determining."* The harvest always knew — pages discovered,
+    read, skipped and why, claims proposed and dropped and why — and kept it
+    only in a job's result. One row per stage per run: what went in, what came
+    out, what was dropped and why, what it cost. Written by `app.stages`.
+    """
+
+    __tablename__ = "stage_reports"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    tenant = Column(String, nullable=False, index=True)
+    stage = Column(String, nullable=False, index=True)   # crawl | read | record | group
+    run_id = Column(String, default="", index=True)
+    started_at = Column(DateTime(timezone=True))
+    finished_at = Column(DateTime(timezone=True), default=utcnow)
+    n_in = Column(Integer, default=0)
+    n_out = Column(Integer, default=0)
+    #: {reason: count} — what the stage chose not to pass on.
+    dropped = Column(JSON, default=dict)
+    cost_usd = Column(Float, default=0.0)
+    #: Stage-specific numbers a reader needs (partly read, needs a browser…).
+    details = Column(JSON, default=dict)
+
+
 class KbEvidence(Base):
     """What supports a claim (or a truth), entered by the team.
 

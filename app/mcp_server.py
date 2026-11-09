@@ -125,7 +125,7 @@ NAME = "gomehagent"
 #: fourth tool is a deliberate edit here, with its reason, not an accident.
 TOOLS = ("get_package", "check", "record", "get_plan", "get_results",
          "get_claims", "propose_claim_record", "propose_claim_records",
-         "get_entities", "propose_entity", "recompute_claim_records",
+         "get_entities", "propose_entity", "recompute_claim_records", "get_overview",
          "get_statements", "get_trust", "get_truth", "get_pages",
          "inbox_search", "inbox_thread", "inbox_attachment", "inbox_draft")
 #: skill key -> (the exemplars kind, the ledger format). A format in
@@ -1212,6 +1212,26 @@ def recompute_claim_records(tenant: str) -> dict[str, Any]:
     b = jobs.enqueue(tenant, "claim_groups", label="claim groups (mcp)")
     return {"ok": True, "claim_records": a, "claim_groups": b,
             "says": "queued on the worker; read the result with get_entities / get_claims"}
+
+
+@server.tool()
+def get_overview(tenant: str) -> dict[str, Any]:
+    """One account at a glance: what the system read, what it determined, what people decided, what is missing.
+
+    `read`: pages known / stored / with claims / partly read / needing a
+    browser, claims found, figures not understood, and the last report of
+    each pipeline stage (in → out, what was not passed on and why, cost).
+    `determined`: whose claim each is, who decided (code / Claude /
+    reviewer), how many are on a product, have a statement, are dated
+    history — and the measured precision of each automated step (only
+    measured steps carry a number). `people`: approvals, rejections,
+    confirmed records, proof, known answers, audits. `gaps`: what is
+    missing, how many, who fills it and where. Read-only.
+    """
+    from . import overview, tenants
+    if tenants.get(tenant) is None:
+        return {"ok": False, "why": f"unknown account {tenant!r}"}
+    return overview.overview(tenant)
 
 
 # ---------------------------------------------------------------------------
