@@ -47,7 +47,7 @@ COLUMNS = [
     ("Page date", "as_of", 12, True),
     ("Kinds", "kinds", 16, False),
     ("Inconsistency group", "group", 16, False),
-    ("Subject (self / other / market)", "subject", 12, True),
+    ("Subject (self / partner / other / market / none)", "subject", 14, True),
     ("Entity (key, several comma-separated, or brand-wide)", "entity", 20, True),
     ("Market", "market", 18, True),
     ("Jurisdiction", "jurisdiction", 16, True),
@@ -138,7 +138,7 @@ def rows(tenant: str, review: str = "proposed") -> list[dict]:
                 "proof": ("on file" if not claim_record.proof_missing(tenant, c, ev) else
                           "pending — " + " ".join(claim_record.proof_missing(tenant, c, ev))),
                 "reviewer": "", "note": "",
-                "_sheet": ("_other" if c.subject in ("other", "market") else
+                "_sheet": ("_other" if c.subject in ("other", "market", "partner", "none") else
                            (c.entity_key or ("brand-wide" if sc.get("brand_wide") else ""))),
             })
     return out
@@ -258,6 +258,7 @@ def read(data: bytes) -> dict:
     by_head = {h.strip().lower(): f for h, f, _w, _e in COLUMNS}
     # Headers of workbooks exported by earlier versions still read.
     by_head.update({"entity (key, or brand-wide)": "entity",
+                    "subject (self / other / market)": "subject",
                     "still needed before approval": "missing"})
     out, ents, errors = [], [], []
     for ws in wb.worksheets:

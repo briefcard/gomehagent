@@ -47,8 +47,18 @@ DERIVED = ("page", "url", "rule", "vocabulary")
 RANK = {"": 0, "page": 1, "url": 1, "rule": 1, "vocabulary": 1, "claude": 2, "reviewer": 3}
 
 QUALIFIERS = ("as_of", "read_at", "market", "jurisdiction", "audience", "environment",
-              "conditions", "counts", "brand_wide", "history")
-SUBJECTS = ("self", "other", "market")
+              "conditions", "counts", "brand_wide", "history",
+              # An industry fact's attribution (INITIATIVE-review-surface §3.G):
+              # who said it, its topic, the products it gives context to.
+              "source", "topic", "supports")
+#: Whose statement it is (owner, 2026-11-09 — five answers): the account's
+#: own claim · a partner's or customer's words · another company · an
+#: industry fact (`market`) · not a claim. Only `self` can be approved as
+#: the account's claim.
+SUBJECTS = ("self", "partner", "other", "market", "none")
+SUBJECT_LABEL = {"self": "the account's own claim", "partner": "a partner's or customer's words",
+                 "other": "another company", "market": "an industry fact",
+                 "none": "not a claim", "": "not decided"}
 
 #: What a claim of each kind must rest on before it is approved. `needs`:
 #:   link            — a link (that resolves) to the source of record
@@ -647,7 +657,7 @@ def record_missing(row) -> list[str]:
         out.append("Say who this is about. Only a claim the account makes about itself can be "
                    "approved as its claim" + (" — this one is marked as about "
                                               f"{row.subject_name or row.subject}."
-                                              if row.subject in ("other", "market") else "."))
+                                              if row.subject in ("other", "market", "partner") else "."))
     if row.record_status == "infeasible":
         out.append("It was marked as not able to stand alone — rewrite it as a full sentence, "
                    "or reject it.")

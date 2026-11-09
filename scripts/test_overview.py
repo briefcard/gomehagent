@@ -109,7 +109,7 @@ def main() -> int:
     o = overview.overview(T)
     gaps = {g["key"]: g for g in o["gaps"]}
     ck("OVERVIEW whose-claim counts include market facts, which skip review",
-       o["determined"]["subject"]["market fact (skips review)"] >= 1)
+       o["determined"]["subject"]["industry fact (skips review)"] >= 1)
     ck("OVERVIEW a gap for claims nobody has attributed, owned by Claude → Reviewer",
        gaps.get("subject", {}).get("count", 0) >= 1 and "Claude" in gaps["subject"]["owner"])
     ck("OVERVIEW a gap for the account's claims with no statement",

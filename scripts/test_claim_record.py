@@ -439,6 +439,28 @@ def check_several_entities():
        out["written"] == 1 and get(c2).entity_key == "stream" and get(c2).also_entities == ["offramp"])
 
 
+def check_five_answers():
+    """Owner, 2026-11-09: five answers to whose statement it is, and an
+    industry fact's attribution — proposed by Claude, never approvable."""
+    from app import claim_record as cr, mcp_server
+    u = page("/blog/five", "<p>According to Web3Auth's survey in 2023, 24% of users …</p>", date="2026-01-01")
+    fact = claim("According to Web3Auth's survey in 2023, 24% of users chose the learning curve.", u)
+    quote = claim("I used Acme with my wallet and it was very simple.", u, "testimonial")
+    out = mcp_server.propose_claim_records(T, [
+        {"claim_id": fact, "subject": "market", "subject_name": "Web3Auth survey", "source": "Web3Auth survey",
+         "topic": "Web3 onboarding hurdles", "supports": "offramp", "as_of": "2023", "why": "a cited survey"},
+        {"claim_id": quote, "subject": "partner", "why": "a customer's own words"}])
+    f, q = get(fact), get(quote)
+    ck("FIVE an industry fact keeps who said it, its topic, the year and the product it supports",
+       out["written"] == 2 and f.subject == "market" and f.scope.get("source") == "Web3Auth survey"
+       and f.scope.get("topic") == "Web3 onboarding hurdles" and f.scope.get("as_of") == "2023"
+       and f.scope.get("supports") == "offramp", str(f.scope))
+    ck("FIVE a customer's words are 'partner', and can never be approved as the account's claim",
+       q.subject == "partner" and kb.review_claim(quote, True, by="qa").startswith("Not approved"))
+    ck("FIVE 'not a claim' is a recorded answer", cr.set_record(T, quote, by="qa", origin="claude",
+                                                                subject="none")["ok"] is True)
+
+
 def check_rescan():
     """Owner, 2026-11-07: "run a new scan completely and toss the old info" —
     without tossing what people decided."""
@@ -551,6 +573,7 @@ def main() -> int:
     check_console_controls()
     check_no_duplicates_and_mcp()
     check_several_entities()
+    check_five_answers()
     check_rescan()
     print(f"\n{'FAILED: ' + ', '.join(_fail) if _fail else 'all checks passed'}")
     return 1 if _fail else 0

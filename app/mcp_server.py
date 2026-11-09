@@ -1060,9 +1060,11 @@ def propose_claim_record(tenant: str, claim_id: str, subject: str = "",
     `get_claims` (its page, section, context and the record code already
     derived), then propose only what the page itself supports:
 
-    * `subject`: self (the account says it of itself) | other (about a named
-      partner or third party — put the name in `subject_name`) | market (an
-      industry or market fact). Only `self` can ever be approved as a claim.
+    * `subject`: self (the account says it of itself) | partner (a partner's
+      or customer's own words — quotes, testimonials) | other (about another
+      named company — name it in `subject_name`) | market (an industry fact:
+      market, regulation, research, news) | none (not a claim: navigation,
+      instructions). Only `self` can ever be approved as a claim.
     * `entity_key`: which of the account's entities it is true of — one key,
       several comma-separated (first = main; one claim attached to each, never
       a copy), or "brand-wide". Leave empty when the page does not say.
@@ -1100,7 +1102,10 @@ def propose_claim_records(tenant: str, records: list[dict]) -> dict[str, Any]:
 
     Each item is a dict with `claim_id` and any of the fields
     `propose_claim_record` takes (subject, subject_name, entity_key, market,
-    jurisdiction, conditions, audience, counts, statement, infeasible, why).
+    jurisdiction, conditions, audience, counts, statement, infeasible, why) —
+    and, for an industry fact (subject "market"): `source` (who said it),
+    `topic`, `supports` (product keys it gives context to) and `as_of` (the
+    year the fact speaks for).
     The claim itself is updated — never copied: attaching a claim to an
     entity sets that claim's entity. At most 500 per call. Nothing is
     approved; a reviewer's value is never overwritten (`held_by_reviewer`).
@@ -1118,7 +1123,8 @@ def propose_claim_records(tenant: str, records: list[dict]) -> dict[str, Any]:
             out.append({"ok": False, "why": "each record needs claim_id"})
             failed += 1
             continue
-        scope = {k: r[k] for k in ("market", "jurisdiction", "conditions", "audience", "counts")
+        scope = {k: r[k] for k in ("market", "jurisdiction", "conditions", "audience", "counts",
+                                   "source", "topic", "supports", "as_of")
                  if r.get(k)}
         res = claim_record.set_record(
             tenant, str(r["claim_id"]), by="claude (mcp)", origin="claude",

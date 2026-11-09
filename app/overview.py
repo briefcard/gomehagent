@@ -88,8 +88,11 @@ def overview(tenant: str) -> dict:
         "figures_not_understood": figures_open, "last": stages.last_of_each(tenant),
     }
     determined = {
-        "subject": {"the account": subj.get("self", 0), "another company": subj.get("other", 0),
-                    "market fact (skips review)": subj.get("market", 0),
+        "subject": {"the account": subj.get("self", 0),
+                    "a partner's or customer's words": subj.get("partner", 0),
+                    "another company": subj.get("other", 0),
+                    "industry fact (skips review)": subj.get("market", 0),
+                    "not a claim": subj.get("none", 0),
                     "not decided": subj.get("", 0)},
         "subject_by": dict(origin_subject), "entity_by": dict(origin_entity),
         "with_entity": sum(1 for r in live if r.entity_key),

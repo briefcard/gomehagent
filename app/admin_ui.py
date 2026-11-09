@@ -6737,8 +6737,9 @@ def _overview_card(tenant: str) -> str:
 
 
 _BROKEN = ' <span class="chip off">link broken</span>'
-_SUBJECT_LABEL = {"self": "the account itself", "other": "a partner / third party",
-                  "market": "the market / industry", "": "not decided"}
+_SUBJECT_LABEL = {"self": "the account itself", "partner": "a partner's or customer's words",
+                  "other": "another company", "market": "an industry fact",
+                  "none": "not a claim", "": "not decided"}
 _ORIGIN_LABEL = {"page": "from the page", "url": "from the address", "rule": "by rule",
                  "vocabulary": "from the entity's pages", "claude": "proposed by Claude",
                  "reviewer": "confirmed"}
@@ -6787,7 +6788,9 @@ def _record_block(tenant: str, p, evs: list, cat: list) -> str:
     subj_opts = "".join(
         f'<option value="{v}"{" selected" if v == (p.subject or "") else ""}>{_esc(lbl)}</option>'
         for v, lbl in (("", "— not decided —"), ("self", "the account itself"),
-                       ("other", "a partner / third party"), ("market", "the market / industry")))
+                       ("partner", "a partner's or customer's words"),
+                       ("other", "another company"), ("market", "an industry fact"),
+                       ("none", "not a claim")))
     def _ul(items):
         return "<ul>" + "".join(f"<li>{_esc(m)}</li>" for m in items) + "</ul>"
     gate = ""
